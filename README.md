@@ -112,6 +112,13 @@ Specs reutilizados del original:
 | formato del slug | `organization_spec.rb` "when title is changed / updates the slug" |
 | `admin?` = role admin + state active | `github_organization_spec.rb` "#admin?" |
 
+## Licencia
+
+MIT. Es un derivado de `github-education-resources/classroom` (MIT, © 2015
+GitHub Inc.), cuyo aviso de copyright se mantiene en `LICENSE` como exige la
+licencia. El nombre y el logo de GitHub Classroom son marca registrada y no se
+usan.
+
 ## Pendiente
 
 - Assignments desde repo template, rosters, invitaciones (Inngest)
