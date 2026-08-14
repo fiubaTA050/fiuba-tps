@@ -7,3 +7,75 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+# FIUBA Classroom
+
+Port of GitHub Classroom — the archived Rails app `github-education-resources/classroom`
+(MIT) — to Next.js on Vercel, for cátedra TA050. GitHub Classroom shuts down on
+2026-08-28, so this replaces it.
+
+**The original is the design authority.** Before designing anything, read the
+corresponding Rails code: it settles questions faster than reasoning from
+first principles, and it is what the teachers already expect to use. Clone it
+if you do not have it. When this port deviates, the deviation is deliberate and
+documented — say so in a comment naming the original file.
+
+## Naming
+
+The original's table and column names are kept so the port reads against the
+reference code without mental translation. The confusing one:
+
+- `organizations` is the **classroom**, not the GitHub organization.
+- The GitHub org it belongs to is `organizations.github_id`.
+- URLs are `/classrooms/...`, matching `resources :organizations, path: "classrooms"`.
+
+## Deliberate divergences from the original
+
+- **GitHub App instead of an OAuth App.** The original persisted every
+  teacher's OAuth token in `users.token` and operated on the org with a random
+  one. That column does not exist here: privileged calls use an installation
+  token, minted on demand and never stored. The user's OAuth token lives only
+  in the session JWT.
+- **`organizations.installation_id` replaces `organization_webhook_id`.** The
+  tenant is the App installation, not an org webhook.
+- **Classrooms are named before creation.** The original generated
+  `<org>-classroom-1` and let the teacher rename it on a later setup screen.
+- **The org list comes from `GET /user/installations`**, so it only shows orgs
+  where the App is installed. Orgs without it are reached through "install on
+  another organization".
+
+## Rules
+
+- **No database query outside `lib/data/`.** Every function there takes the
+  session and filters by user. There is no RLS; this layer is the authorization
+  boundary.
+- **GitHub is the source of truth for org and repo metadata.** The database
+  stores ids and relationships. Names, avatars, URLs and visibility are read
+  from the API at render time. Never key anything on a repo or org name — those
+  get renamed, ids do not.
+- **Code comments in English. User-facing text in Spanish.**
+- When an entity can vanish from GitHub, return `null` and let the UI show it
+  as unreachable — the original's `NullGitHubRepository` pattern.
+
+## Tests
+
+`npm test` (vitest). Tests run against a real Postgres in-process (PGlite) with
+the generated migration applied, so unique indexes and transaction rollbacks are
+exercised for real rather than against a mocked query builder.
+
+When porting a feature, port its spec too: the original's `spec/models/` cases
+are reusable almost verbatim and encode behaviour that is easy to miss. Cite the
+original spec name in a comment.
+
+## Commands
+
+| | |
+|---|---|
+| `npm run dev` | dev server |
+| `npm test` | test suite |
+| `npm run build` | production build |
+| `npm run db:generate` | generate a migration after editing `db/schema.ts` |
+| `npm run db:migrate` | apply migrations |
+
+Credentials live in `.env.local`; `.env.example` lists what is needed and the
+README explains how to create the GitHub App.
