@@ -21,6 +21,21 @@ export function userClient(session: Session): Octokit {
 }
 
 /**
+ * Octokit logs every 4xx as a warning. A 404 is an expected answer for the
+ * callers that probe whether an installation or a membership still exists, and
+ * letting those through buries real errors in the noise — which is how a real
+ * auth failure went unnoticed in the dev log once already.
+ */
+const quietOn404 = {
+  debug: () => {},
+  info: () => {},
+  warn: (message: string) => {
+    if (!message.includes(' - 404 ')) console.warn(message)
+  },
+  error: console.error,
+}
+
+/**
  * Client authenticated as the GitHub App (JWT signed with the private key).
  * For App-level endpoints, not for touching an org's resources.
  */
@@ -31,6 +46,7 @@ export function appClient(): Octokit {
       appId: env.githubAppId,
       privateKey: env.githubAppPrivateKey,
     },
+    log: quietOn404,
   })
 }
 
@@ -47,6 +63,8 @@ export function installationClient(installationId: number): Octokit {
       privateKey: env.githubAppPrivateKey,
       installationId,
     },
+    // isOrganizationAdmin reads a 404 as "not a member", by design
+    log: quietOn404,
   })
 }
 
