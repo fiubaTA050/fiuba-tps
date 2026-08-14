@@ -1,8 +1,118 @@
 @import '@primer/css/dist/primer.css';
 
 /*
- * Estilos propios del original que no están en Primer.
- * Port de app/assets/stylesheets/layout.scss y components/protip.scss.
+ * Components the original used that @primer/css v22 no longer ships.
+ *
+ * The original pinned `primer@10.10.4`, where Subhead, blankslate and flash
+ * were part of primer-product. They were dropped on the way to v22 — the
+ * markup ported from the .erb views references them, so the rules below are
+ * copied verbatim from primer 10.10.4's build.css to keep the layout of the
+ * original. Literal values, not tokens: v10 predates the color-mode system,
+ * and the original had no dark mode either.
+ */
+
+.Subhead {
+  display: flex;
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px #e1e4e8 solid;
+  flex-flow: row wrap;
+}
+
+.Subhead--spacious {
+  margin-top: 40px;
+}
+
+.Subhead-heading {
+  font-size: 24px;
+  font-weight: normal;
+  flex: 1 1 auto;
+}
+
+.Subhead-description {
+  font-size: 14px;
+  color: #586069;
+  flex: 1 100%;
+}
+
+.Subhead-actions {
+  align-self: center;
+  justify-content: flex-end;
+}
+
+.blankslate {
+  position: relative;
+  padding: 32px;
+  text-align: center;
+  background-color: #fafbfc;
+  border: 1px solid #e1e4e8;
+  border-radius: 3px;
+  box-shadow: inset 0 0 10px rgb(27 31 35 / 5%);
+}
+
+.blankslate-spacious {
+  padding: 80px 40px;
+}
+
+.blankslate-large h3 {
+  margin: 16px 0;
+  font-size: 20px;
+}
+
+.blankslate-large p {
+  font-size: 16px;
+}
+
+.flash {
+  position: relative;
+  padding: 16px;
+  color: #032f62;
+  background-color: #dbedff;
+  border: 1px solid rgb(27 31 35 / 15%);
+  border-radius: 3px;
+}
+
+.flash p:last-child {
+  margin-bottom: 0;
+}
+
+.flash-warn {
+  color: #735c0f;
+  background-color: #fffbdd;
+}
+
+.flash-error {
+  color: #86181d;
+  background-color: #ffdce0;
+}
+
+.flash-success {
+  color: #165c26;
+  background-color: #dcffe4;
+}
+
+/* Utility dropped in v22; the org cards in new.html.erb rely on it */
+.box-shadow-medium {
+  box-shadow: 0 1px 5px rgb(27 31 35 / 15%) !important;
+}
+
+/* Also gone from v22 — it moved to @primer/react. Without it the org avatars
+   render as hard squares instead of the original's rounded tiles. */
+.avatar {
+  display: inline-block;
+  overflow: hidden;
+  line-height: 1;
+  vertical-align: middle;
+  border-radius: 3px;
+}
+
+.avatar-small {
+  border-radius: 2px;
+}
+
+/*
+ * The original's own styles, ported from
+ * app/assets/stylesheets/layout.scss and components/protip.scss.
  */
 
 .site-header {
@@ -25,7 +135,7 @@
   color: #fff;
 }
 
-/* Utilidad de primer/marketing v10, no incluida en @primer/css */
+/* primer/marketing v10 utility, not shipped by @primer/css */
 .hover-grow {
   transition: transform 0.2s ease;
 }
@@ -44,7 +154,7 @@
   vertical-align: middle;
 }
 
-/* La tarjeta de org seleccionada en el paso 3 */
+/* The org card selected in step 3 */
 .organization-select--selected {
   border-color: var(--borderColor-accent-emphasis, #0969da) !important;
   box-shadow: 0 0 0 2px var(--borderColor-accent-emphasis, #0969da);
