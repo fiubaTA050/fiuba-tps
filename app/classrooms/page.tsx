@@ -81,7 +81,7 @@ export default async function ClassroomsPage() {
               </div>
             </div>
 
-            {classroom.archivedAt && <span className="Label Label--secondary">Archivado</span>}
+            {classroom.archivedAt && <span className="Label Label--gray">Archivado</span>}
           </article>
         ))}
       </div>

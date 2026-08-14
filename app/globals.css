@@ -110,6 +110,131 @@
   border-radius: 2px;
 }
 
+/* Box and Label, also dropped from v22. Copied from primer 10.10.4. */
+
+.Box {
+  background-color: #fff;
+  border: 1px solid #d1d5da;
+  border-radius: 3px;
+}
+
+.Box-row {
+  padding: 16px;
+  margin-top: -1px;
+  list-style-type: none;
+  border-top: 1px solid #e1e4e8;
+}
+
+.Label {
+  display: inline-block;
+  padding: 3px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  border-radius: 2px;
+  box-shadow: inset 0 -1px 0 rgb(27 31 35 / 12%);
+}
+
+.Label--gray {
+  color: #586069;
+  background-color: #eaecef;
+}
+
+/*
+ * Dropdown, ported from the original's own
+ * app/assets/stylesheets/components/primer-dropdown.scss.
+ *
+ * v22 keeps .dropdown-caret but dropped .dropdown-menu and .dropdown-item, so
+ * the user menu rendered inline in the header instead of as a floating panel.
+ * SCSS variables resolved to their v10 values: $spacer-1 4px, $spacer-2 8px,
+ * $spacer-3 16px, $black-fade-15 rgba(27,31,35,.15), $bg-blue #0366d6.
+ */
+
+.dropdown {
+  position: relative;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  width: 160px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  margin-top: 8px;
+  list-style: none;
+  background-color: #fff;
+  background-clip: padding-box;
+  border: 1px solid rgb(27 31 35 / 15%);
+  border-radius: 3px;
+  box-shadow: 0 1px 5px rgb(27 31 35 / 15%);
+}
+
+.dropdown-menu::before,
+.dropdown-menu::after {
+  position: absolute;
+  display: inline-block;
+  content: '';
+}
+
+.dropdown-menu::before {
+  border: 8px solid transparent;
+  border-bottom-color: rgb(27 31 35 / 15%);
+}
+
+.dropdown-menu::after {
+  border: 8px solid transparent;
+  border-bottom-color: #fff;
+}
+
+.dropdown-item {
+  display: block;
+  padding: 4px 8px 4px 16px;
+  overflow: hidden;
+  color: #24292e;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdown-item:hover {
+  color: #fff;
+  text-decoration: none;
+  background-color: #0366d6;
+}
+
+.dropdown-item.btn-link {
+  width: 100%;
+  text-align: left;
+}
+
+.dropdown-divider {
+  height: 1px;
+  margin: 4px 1px;
+  background-color: #e1e4e8;
+}
+
+/* South-west caret: the menu hangs to the left of its trigger */
+.dropdown-menu-sw {
+  right: 0;
+  left: auto;
+}
+
+.dropdown-menu-sw::before {
+  top: -16px;
+}
+
+.dropdown-menu-sw::after {
+  top: -15px;
+}
+
+.dropdown-menu-sw::before,
+.dropdown-menu-sw::after {
+  right: 8px;
+  left: auto;
+}
+
 /*
  * The original's own styles, ported from
  * app/assets/stylesheets/layout.scss and components/protip.scss.
