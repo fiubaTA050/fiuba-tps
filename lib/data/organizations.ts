@@ -137,13 +137,12 @@ export async function findClassroom(
 
   if (!row) return null
 
-  // DA-2: the org data is read from GitHub, not the database. It resolves by
-  // installation_id instead of walking every installation of the teacher just
-  // to filter down to the one we already had.
-  const organization = await findOrganizationByInstallation(
-    row.installationId,
-    session.user.githubLogin,
-  )
+  // DA-2: the org data is read from GitHub, not the database. Resolving by
+  // installation_id avoids walking every installation of the teacher just to
+  // filter down to the one we already had.
+  const organization =
+    (await findOrganizationByInstallation(row.installationId, session.user.githubLogin)) ??
+    (await reresolveInstallation(session, row.id, row.githubId))
 
   return {
     id: row.id,
@@ -152,6 +151,42 @@ export async function findClassroom(
     archivedAt: row.archivedAt,
     organization,
   }
+}
+
+/**
+ * Port of OrganizationWebhook#retrieve_org_hook_id!
+ *
+ * GitHub issues a **new** installation id every time the App is reinstalled,
+ * so the stored one is a cache, not an authority — the same status the
+ * original gave `organization_webhook.github_id`, which it declared
+ * `allow_nil: true` and re-derived from the stable org id whenever it went
+ * missing.
+ *
+ * `github_id` is the stable key here too, so a classroom is never permanently
+ * unreachable: when the stored installation 404s, find the org among the ones
+ * the teacher currently has and write the new id back.
+ *
+ * Returns null when the org really is gone — the App was uninstalled and not
+ * put back, or the teacher lost access. That is the NullGitHubOrganization
+ * case and the UI shows the classroom as unreachable.
+ */
+async function reresolveInstallation(
+  session: Session,
+  organizationId: number,
+  githubId: number,
+): Promise<GitHubOrganization | null> {
+  const current = (await listUserOrganizations(session)).find(
+    (candidate) => candidate.githubId === githubId,
+  )
+
+  if (!current) return null
+
+  await db
+    .update(organizations)
+    .set({ installationId: current.installationId, updatedAt: new Date() })
+    .where(eq(organizations.id, organizationId))
+
+  return current
 }
 
 /**

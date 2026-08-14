@@ -42,7 +42,9 @@ vi.mock('@/lib/github/organizations', () => ({
   findOrganizationByInstallation: (...args: unknown[]) => findOrganizationByInstallation(...args),
 }))
 
-const { createClassroom, listClassrooms } = await import('@/lib/data/organizations')
+const { createClassroom, findClassroom, listClassrooms } = await import(
+  '@/lib/data/organizations',
+)
 
 let nextUid = 1
 
@@ -71,6 +73,9 @@ beforeEach(async () => {
   nextUid = 1
   listUserOrganizations.mockResolvedValue([ORG])
   setDefaultRepositoryPermissionToNone.mockResolvedValue(undefined)
+  // clearAllMocks only clears calls, not implementations, so every mock needs
+  // its default restored here or one test's stub leaks into the next
+  findOrganizationByInstallation.mockResolvedValue(ORG)
 })
 
 afterEach(() => {
@@ -324,5 +329,50 @@ describe('listClassrooms', () => {
     await db.update(organizations).set({ deletedAt: new Date() })
 
     expect(await listClassrooms(session)).toHaveLength(0)
+  })
+})
+
+describe('findClassroom — stale installation id', () => {
+  // Port of the intent of OrganizationWebhook#retrieve_org_hook_id!: the
+  // volatile GitHub-side id is re-derived from the stable one, and saved.
+  it('re-resolves and persists the installation id after a reinstall', async () => {
+    const session = await classroomTeacher()
+    const created = await createClassroom(session, {
+      githubId: ORG.githubId,
+      installationId: ORG.installationId,
+      title: 'Algoritmos',
+    })
+    if (!created.success) throw new Error(created.error)
+
+    // Reinstall: the old installation 404s, GitHub hands out a new id
+    const reinstalled = { ...ORG, installationId: 4242 }
+    findOrganizationByInstallation.mockResolvedValue(null)
+    listUserOrganizations.mockResolvedValue([reinstalled])
+
+    const classroom = await findClassroom(session, created.slug)
+
+    expect(classroom?.organization?.login).toBe(ORG.login)
+
+    const [row] = await db.select().from(organizations)
+    expect(row.installationId).toBe(4242)
+  })
+
+  it('reports the org as unreachable when it was not reinstalled', async () => {
+    const session = await classroomTeacher()
+    const created = await createClassroom(session, {
+      githubId: ORG.githubId,
+      installationId: ORG.installationId,
+      title: 'Algoritmos',
+    })
+    if (!created.success) throw new Error(created.error)
+
+    findOrganizationByInstallation.mockResolvedValue(null)
+    listUserOrganizations.mockResolvedValue([])
+
+    const classroom = await findClassroom(session, created.slug)
+
+    // The classroom itself still resolves; only its org is null (DA-2)
+    expect(classroom).not.toBeNull()
+    expect(classroom?.organization).toBeNull()
   })
 })
