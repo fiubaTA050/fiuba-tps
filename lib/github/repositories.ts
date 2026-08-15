@@ -1,4 +1,6 @@
-import { installationClient } from '@/lib/github/client'
+import type { Session } from 'next-auth'
+
+import { installationClient, userClient } from '@/lib/github/client'
 
 /**
  * Port of GitHubRepository, trimmed to what the starter code flow needs.
@@ -23,14 +25,18 @@ export type GitHubRepository = {
 export const REPOSITORY_FULL_NAME = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/
 
 function toRepository(data: {
-  id: number
+  // Octokit types the id of a freshly created repo as `number | bigint`.
+  // GitHub's ids are well inside Number.MAX_SAFE_INTEGER and the column is a
+  // bigint read in `number` mode, so narrowing here is safe and keeps the
+  // widening out of every caller.
+  id: number | bigint
   full_name: string
   html_url: string
   private: boolean
   is_template?: boolean | null
 }): GitHubRepository {
   return {
-    id: data.id,
+    id: Number(data.id),
     fullName: data.full_name,
     htmlUrl: data.html_url,
     private: data.private,
@@ -96,6 +102,187 @@ export async function findRepositoryById(
   } catch {
     return null
   }
+}
+
+/**
+ * Port of CreateGitHubRepoService#create_github_repository_from_template!
+ *
+ * The `owner` of the body is the destination org; the template goes in the
+ * path. Measured at ~2 s, and it answers before the repository has any commits
+ * — for ~3 s more `GET /commits` still 409s. Nothing waits for that, and the
+ * original does not either: with a template `use_importer?` is false, so it
+ * goes straight to `completed!`. See docs/creacion-de-repos.md.
+ */
+export async function createRepositoryFromTemplate(
+  installationId: number,
+  input: {
+    template: { owner: string; name: string }
+    owner: string
+    name: string
+    private: boolean
+    description: string
+  },
+): Promise<GitHubRepository> {
+  const { data } = await installationClient(installationId).request(
+    'POST /repos/{template_owner}/{template_repo}/generate',
+    {
+      template_owner: input.template.owner,
+      template_repo: input.template.name,
+      owner: input.owner,
+      name: input.name,
+      private: input.private,
+      description: input.description,
+    },
+  )
+
+  return toRepository(data)
+}
+
+/**
+ * Port of CreateGitHubRepoService#create_github_repository!, the branch taken
+ * when the assignment has no starter code: an empty repository in the org.
+ */
+export async function createRepository(
+  installationId: number,
+  input: { owner: string; name: string; private: boolean; description: string },
+): Promise<GitHubRepository> {
+  const { data } = await installationClient(installationId).rest.repos.createInOrg({
+    org: input.owner,
+    name: input.name,
+    private: input.private,
+    description: input.description,
+  })
+
+  return toRepository(data)
+}
+
+/**
+ * Port of CreateGitHubRepoService#delete_github_repository, the compensating
+ * step of its `rescue`: if anything after the creation fails, the half-built
+ * repository does not survive to confuse the student or the teacher.
+ *
+ * Swallows errors exactly as the original does (`rescue GitHub::Error; true`).
+ * The delete is best effort — failing it must not mask the error that caused
+ * the rollback in the first place.
+ */
+export async function deleteRepository(
+  installationId: number,
+  fullName: string,
+): Promise<void> {
+  const [owner, repo] = fullName.split('/')
+
+  try {
+    await installationClient(installationId).rest.repos.delete({ owner, repo })
+  } catch {
+    // Best effort, see above
+  }
+}
+
+/**
+ * Port of CreateGitHubRepoService#add_user_to_github_repository!, first half:
+ *
+ *   invitation = github_repository.invite(exercise.slug, repository_permissions)
+ *
+ * Returns the invitation id, or null when GitHub answers 204 — which means the
+ * user already had access and no invitation was created. That happens for a
+ * teacher testing their own assignment, since an org owner already reaches
+ * every repository.
+ */
+export async function addCollaborator(
+  installationId: number,
+  fullName: string,
+  username: string,
+  permission: 'push' | 'admin',
+): Promise<number | null> {
+  const [owner, repo] = fullName.split('/')
+
+  const response = await installationClient(installationId).rest.repos.addCollaborator({
+    owner,
+    repo,
+    username,
+    permission,
+  })
+
+  // 201 carries the invitation, 204 means they were already a collaborator
+  return response.status === 201 ? (response.data?.id ?? null) : null
+}
+
+/**
+ * Port of the second half:
+ *
+ *   exercise.collaborator.github_user.accept_repository_invitation(invitation.id)
+ *
+ * This is the one call that needs the **student's** token, which is why the
+ * whole flow runs in a request their browser makes (docs/creacion-de-repos.md).
+ * Without it the student gets an email from GitHub and has to click it.
+ *
+ * Idempotent by consequence: accepting an invitation that is already accepted
+ * or gone answers 404, and there is nothing to do about that but carry on.
+ */
+export async function acceptRepositoryInvitation(
+  session: Session,
+  invitationId: number,
+): Promise<void> {
+  try {
+    await userClient(session).rest.repos.acceptInvitationForAuthenticatedUser({
+      invitation_id: invitationId,
+    })
+  } catch (error) {
+    if (isNotFound(error)) return
+    throw error
+  }
+}
+
+/** Whether a repository name is already taken, for Exercise#generate_repo_name */
+export async function repositoryExists(
+  installationId: number,
+  fullName: string,
+): Promise<boolean> {
+  const [owner, repo] = fullName.split('/')
+
+  try {
+    await installationClient(installationId).rest.repos.get({ owner, repo })
+    return true
+  } catch (error) {
+    if (isNotFound(error)) return false
+    throw error
+  }
+}
+
+function isNotFound(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'status' in error && error.status === 404
+}
+
+/**
+ * GitHub's secondary rate limit, which is what a whole cohort clicking the
+ * invitation link at once runs into: 80 content-creating requests per minute,
+ * 500 per hour, answered with 403 or 429.
+ *
+ * Returns how many seconds to wait, or null when the error is something else.
+ * The original had no equivalent — it read `Octokit::TooManyRequests` as a
+ * plain failure and retried three times blindly, which under a stampede is
+ * exactly the wrong move.
+ *
+ * `retry-after` is the documented signal; when it is missing GitHub's own
+ * guidance is to wait at least a minute.
+ */
+export function secondaryRateLimitDelay(error: unknown): number | null {
+  if (typeof error !== 'object' || error === null) return null
+
+  const status = (error as { status?: number }).status
+  if (status !== 403 && status !== 429) return null
+
+  const headers = (error as { response?: { headers?: Record<string, string> } }).response?.headers
+
+  const retryAfter = Number(headers?.['retry-after'])
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.ceil(retryAfter)
+
+  // A 403 is also how GitHub answers a plain permission problem, which must not
+  // be mistaken for a wait. Only the documented message means "slow down".
+  const message = (error as { message?: string }).message ?? ''
+  if (!/secondary rate limit|abuse detection/i.test(message)) return null
+
+  return 60
 }
 
 /**

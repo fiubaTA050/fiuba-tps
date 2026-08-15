@@ -265,6 +265,54 @@ export const assignmentInvitations = pgTable(
 )
 
 /**
+ * One student's repository for one assignment. Port of `assignment_repos`.
+ *
+ * A row exists only once the GitHub repository does — `github_repo_id` is NOT
+ * NULL, same as the original. The state before that lives in
+ * `invite_statuses`, which is the split db/schema.ts documents below.
+ *
+ * Three of the original's columns are not here:
+ *
+ *  - `repo_access_id`, which pointed at the one-person GitHub team the original
+ *    used before organization permissions let it make students outside
+ *    collaborators. Its own model calls the pairing legacy.
+ *  - `submission_sha`, written only when a deadline freezes a submission, and
+ *    deadlines are not ported.
+ *  - `configuration_state`, which the original itself marks
+ *    `# TODO: remove this enum (dead code)`.
+ */
+export const assignmentRepos = pgTable(
+  'assignment_repos',
+  {
+    id: serial('id').primaryKey(),
+    /** Numeric id of the repo on GitHub. DA-2: the name is never stored */
+    githubRepoId: bigint('github_repo_id', { mode: 'number' }).notNull(),
+    assignmentId: integer('assignment_id')
+      .notNull()
+      .references(() => assignments.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('index_assignment_repos_on_assignment_id').on(table.assignmentId),
+    index('index_assignment_repos_on_user_id').on(table.userId),
+    uniqueIndex('index_assignment_repos_on_github_repo_id').on(table.githubRepoId),
+    // `validate :assignment_user_key_uniqueness` — "Should only have one
+    // assignment repository for each user-assignment combination". In the
+    // database rather than only in the model: two tabs racing the create-repo
+    // route would otherwise leave the student with two repositories and the
+    // classroom paying for one nobody opens.
+    uniqueIndex('index_assignment_repos_on_assignment_id_and_user_id').on(
+      table.assignmentId,
+      table.userId,
+    ),
+  ],
+)
+
+/**
  * Port of the SetupStatus concern's enum, in the original's order.
  *
  * This is the whole lifecycle of one student's invitation, and it is where the
@@ -355,3 +403,4 @@ export type AssignmentInvitation = typeof assignmentInvitations.$inferSelect
 export type Roster = typeof rosters.$inferSelect
 export type RosterEntry = typeof rosterEntries.$inferSelect
 export type InviteStatus = typeof inviteStatuses.$inferSelect
+export type AssignmentRepo = typeof assignmentRepos.$inferSelect

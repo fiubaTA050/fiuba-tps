@@ -51,12 +51,35 @@ export function appClient(): Octokit {
 }
 
 /**
+ * One client per installation, reused.
+ *
+ * Octokit mints the installation token lazily and holds it until it is about
+ * to expire — but only within one instance. Building a fresh one per call, as
+ * this used to, meant a `POST /app/installations/:id/access_tokens` round trip
+ * in front of *every* API call.
+ *
+ * That was measured, not guessed: the create-repo route makes four GitHub
+ * calls and took 5.9 s, of which the token mints were the difference against
+ * the ~3 s the calls themselves cost (docs/creacion-de-repos.md).
+ *
+ * Module scope rather than per request, on purpose — a warm serverless
+ * instance should reuse the token across requests, which is the whole point.
+ * The map is bounded by the number of orgs the App is installed on, and the
+ * token never leaves the process: it is not written anywhere, which is what
+ * DA-6 asks for.
+ */
+const clients = new Map<number, Octokit>()
+
+/**
  * Client with an installation token. This is the one that does everything
  * privileged. Octokit signs the JWT and requests the token on demand; it
  * expires in 1 h and is not persisted anywhere.
  */
 export function installationClient(installationId: number): Octokit {
-  return new Octokit({
+  const cached = clients.get(installationId)
+  if (cached) return cached
+
+  const client = new Octokit({
     authStrategy: createAppAuth,
     auth: {
       appId: env.githubAppId,
@@ -66,6 +89,9 @@ export function installationClient(installationId: number): Octokit {
     // isOrganizationAdmin reads a 404 as "not a member", by design
     log: quietOn404,
   })
+
+  clients.set(installationId, client)
+  return client
 }
 
 /** Where we send the teacher to install the App on another org */

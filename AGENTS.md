@@ -70,6 +70,11 @@ reference code without mental translation. The confusing one:
 - **Code comments in English. User-facing text in Spanish.**
 - When an entity can vanish from GitHub, return `null` and let the UI show it
   as unreachable — the original's `NullGitHubRepository` pattern.
+- **The student's repository is created in a request their own browser makes**,
+  not in a queue. Before adding a worker, a cron or Inngest, read
+  `docs/creacion-de-repos.md`: it records the measurements, GitHub's secondary
+  rate limits, why a queue is not needed at this size, and the exact condition
+  that would make it needed.
 
 ## Tests
 
