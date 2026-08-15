@@ -109,6 +109,12 @@ reference code without mental translation. The confusing one:
   `docs/creacion-de-repos.md`: it records the measurements, GitHub's secondary
   rate limits, why a queue is not needed at this size, and the exact condition
   that would make it needed.
+- **Editing and deleting assignments are not built yet, and the design is
+  already settled**: read `docs/edicion-y-borrado-de-assignments.md` first. It
+  records why closing submissions belongs in the edit screen and not in a
+  toggle, that no migration is needed, what must *not* propagate to existing
+  repositories, and the open decision about whether deleting an assignment
+  should delete the students' repositories the way the original does.
 
 ## Tests
 
