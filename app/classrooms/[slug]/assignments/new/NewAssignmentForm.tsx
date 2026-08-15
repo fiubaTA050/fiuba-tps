@@ -210,7 +210,8 @@ export function NewAssignmentForm({
         </div>
       </div>
 
-      <div className="d-flex flex-justify-end mb-6">
+      {/* `mt-5` is the live page's own gap between the box and its buttons */}
+      <div className="d-flex mt-5 mb-6 flex-justify-end">
         <Link href={`/classrooms/${classroomSlug}`} className="btn mr-2" role="button">
           Cancelar
         </Link>

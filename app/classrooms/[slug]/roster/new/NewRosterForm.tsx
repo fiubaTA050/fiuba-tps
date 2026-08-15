@@ -66,7 +66,11 @@ export function NewRosterForm({
         onChange={setIdentifiers}
       />
 
-      <div className="form-actions">
+      {/* The original closed this form with `d-flex flex-items-center border-top
+          pt-5`; the hairline is dropped because the Box above already draws one,
+          and the gap is the `mt-5` the live pages use. `.form-actions` carries no
+          spacing of its own in v22 — it is a clearfix plus `float: right` */}
+      <div className="form-actions mt-5">
         <button type="submit" className="btn btn-primary" disabled={pending}>
           {pending ? 'Creando…' : 'Crear roster'}
         </button>
