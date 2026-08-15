@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
@@ -84,13 +84,27 @@ export async function createStudentRepository(
 
   // The lock. `create_repo` in the original starts from `accepted` or one of
   // the errored states — the latter is what makes the retry button work.
+  //
+  // The third case is the one the original does not have, and `fiubaTA050-labs`
+  // shows what its absence costs: 92 repositories for 49 students, one of them
+  // with seven, most of them with no student access. A request that dies
+  // mid-flight — a function timeout, a deploy, a crash — never reaches the
+  // rescue, so nothing moves the status off `creating_repo`. The lock is then
+  // held by a request that no longer exists: the student watches "Creando el
+  // repositorio" forever and no retry can take over, because the retry button
+  // only shows on the errored states.
+  //
+  // So the lock expires. Anything older than this was abandoned, since the
+  // whole thing is measured at ~3 s and the route's ceiling is 60.
+  const staleLock = sql`${inviteStatuses.status} = 'creating_repo' and ${inviteStatuses.updatedAt} < now() - interval '5 minutes'`
+
   const [locked] = await db
     .update(inviteStatuses)
     .set({ status: 'creating_repo', updatedAt: new Date() })
     .where(
       and(
         eq(inviteStatuses.id, context.inviteStatusId),
-        inArray(inviteStatuses.status, ['accepted', 'errored_creating_repo']),
+        or(inArray(inviteStatuses.status, ['accepted', 'errored_creating_repo']), staleLock),
       ),
     )
     .returning({ id: inviteStatuses.id })

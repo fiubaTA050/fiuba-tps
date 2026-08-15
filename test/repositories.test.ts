@@ -293,6 +293,44 @@ describe('createStudentRepository', () => {
     expect(github.created).toEqual([])
   })
 
+  /**
+   * The failure mode `fiubaTA050-labs` is full of: 92 repositories for 49
+   * students, most with no student access. A request that dies mid-flight
+   * never reaches its rescue, so the status is left on `creating_repo` and the
+   * lock is held by nobody. Without an expiry the student is stuck forever.
+   */
+  it('reclaims a lock left behind by a request that died', async () => {
+    const teacher = await student('docente')
+    const alumno = await student('ana')
+    const { key } = await classroomWithAssignment(teacher)
+    await acceptInvitation(alumno, key)
+
+    // Abandoned six minutes ago, past the five-minute expiry
+    await db.update(inviteStatuses).set({
+      status: 'creating_repo',
+      updatedAt: new Date(Date.now() - 6 * 60 * 1000),
+    })
+
+    expect((await createStudentRepository(alumno, key)).status).toBe('completed')
+    expect(github.created).toHaveLength(1)
+  })
+
+  it('leaves a lock that is still fresh alone', async () => {
+    const teacher = await student('docente')
+    const alumno = await student('ana')
+    const { key } = await classroomWithAssignment(teacher)
+    await acceptInvitation(alumno, key)
+
+    // A minute ago: somebody really is working on it
+    await db.update(inviteStatuses).set({
+      status: 'creating_repo',
+      updatedAt: new Date(Date.now() - 60 * 1000),
+    })
+
+    expect(await createStudentRepository(alumno, key)).toEqual({ status: 'working' })
+    expect(github.created).toEqual([])
+  })
+
   it('refuses to build for somebody who never accepted', async () => {
     const teacher = await student('docente')
     const alumno = await student('ana')

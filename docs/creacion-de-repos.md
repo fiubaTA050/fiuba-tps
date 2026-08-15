@@ -110,6 +110,36 @@ Sidekiq.
 **Nota operativa:** publicar dos TPs a 100 alumnos dentro de la misma hora se
 acerca a los 500/hora. No rompe —se auto-frena— pero conviene espaciarlos.
 
+## Lo que dejó el Classroom original en esta misma organización
+
+Vale la pena mirarlo antes de tocar nada, porque es la forma de falla contra la
+que está diseñado el lock. En `fiubaTA050-labs`, al 15/08/2026:
+
+- El assignment individual `2026a-tp2-raft` tiene **92 repositorios para 49
+  alumnos**. 43 son sobrantes, con la escalera de sufijos de
+  `Exercise#suffixed_repo_name`: `cgomez21` tiene 7, `Llaauuttyy` 6,
+  `FedericoSolari` 6.
+- En una muestra de 10, **8 no le dan acceso a su propio alumno**. Todos tienen
+  un solo commit, el del template: nadie trabajó nunca en ellos.
+
+No se puede reconstruir el mecanismo exacto —los logs no están y desde el código
+hay varios caminos posibles—, pero la forma es inconfundible: trabajo que quedó
+a medio hacer sin nadie que lo destrabara, y un alumno reintentando hasta que
+algo saliera.
+
+De ahí sale la expiración del lock. Si el request muere a mitad (timeout de la
+función, un deploy, un crash) nunca llega al `catch`, y sin expiración el status
+queda en `creating_repo` para siempre: el alumno mira una barra que no avanza y
+ningún reintento puede tomar el lock. La pantalla muestra el botón de reintentar
+pasado ese mismo tiempo, para que haya algo que apretar.
+
+Los 67 miembros de la organización tampoco los puso el flujo individual: salen
+de los **group assignments**, que crean un GitHub Team por grupo
+(`RepoAccess` → `add_membership` + `accept_membership`), y estar en un team
+implica ser miembro. Hay 21 teams con los nombres de los grupos. Para
+individuales, ni el original ni este port agregan a nadie a la organización: el
+alumno queda como outside collaborator del repo.
+
 ## Lo que falta confirmar
 
 **Aceptar la invitación al repo con el token del alumno.** Es el único paso que

@@ -39,6 +39,15 @@ const STAGES: Record<InviteStatusValue, { label: string; percent: number; failed
 
 const POLL_INTERVAL_MS = 2000
 
+/**
+ * How long a setup status can sit unchanged before the screen stops pretending
+ * something is happening. It matches the lock expiry in
+ * `createStudentRepository`: past it, a retry is allowed to take over, so the
+ * button has to be there to press. The whole job is ~3 s, so anything near this
+ * is abandoned work, not slow work.
+ */
+const STUCK_AFTER_MS = 5 * 60 * 1000
+
 type CreateResult =
   | { status: 'completed'; repoUrl: string }
   | { status: 'working' }
@@ -62,6 +71,9 @@ export function SetupProgress({
   const [error, setError] = useState<string | null>(null)
   const [retryAt, setRetryAt] = useState<number | null>(null)
   const [working, setWorking] = useState(false)
+  /** When the status last moved, to notice work that was abandoned mid-flight */
+  const [changedAt, setChangedAt] = useState(() => Date.now())
+  const [stuck, setStuck] = useState(false)
 
   // Strict Mode mounts effects twice in development. The lock in
   // `createStudentRepository` would turn the second one into a harmless
@@ -136,7 +148,13 @@ export function SetupProgress({
           repoUrl: string | null
         }
 
-        setStatus(progress.status)
+        setStatus((previous) => {
+          if (previous !== progress.status) {
+            setChangedAt(Date.now())
+            setStuck(false)
+          }
+          return progress.status
+        })
         if (progress.repoUrl) setRepoUrl(progress.repoUrl)
       } catch {
         // Next tick asks again
@@ -145,6 +163,16 @@ export function SetupProgress({
 
     return () => clearInterval(timer)
   }, [invitationKey, status, retryAt])
+
+  // Nothing has moved for long enough that the lock has expired server-side.
+  // Offer the button rather than leaving the student watching a bar that will
+  // never fill — which is the state `fiubaTA050-labs` is full of.
+  useEffect(() => {
+    if (status === 'completed' || retryAt !== null) return
+
+    const timer = setTimeout(() => setStuck(true), STUCK_AFTER_MS - (Date.now() - changedAt))
+    return () => clearTimeout(timer)
+  }, [status, retryAt, changedAt])
 
   const stage = STAGES[status]
   const waiting = retryAt !== null
@@ -167,10 +195,12 @@ export function SetupProgress({
         </div>
 
         <div className="Box-row">
-          <p className={`mb-0 ${stage.failed ? 'color-fg-danger' : 'color-fg-muted'}`}>
+          <p className={`mb-0 ${stage.failed || stuck ? 'color-fg-danger' : 'color-fg-muted'}`}>
             {waiting
               ? 'Hay muchos alumnos aceptando a la vez. Reintentamos en unos segundos.'
-              : stage.label}
+              : stuck
+                ? 'Esto está tardando más de lo normal. Probá de nuevo.'
+                : stage.label}
           </p>
           {error && <p className="note color-fg-danger mb-0 mt-1">{error}</p>}
         </div>
@@ -195,7 +225,7 @@ export function SetupProgress({
         </p>
       )}
 
-      {stage.failed && !waiting && (
+      {(stage.failed || stuck) && !waiting && (
         // `#retry-button`, which the original showed only once the job errored
         <button type="button" className="btn mt-3" onClick={() => void create()} disabled={working}>
           {working ? 'Reintentando…' : 'Reintentar'}
