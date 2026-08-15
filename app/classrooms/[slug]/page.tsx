@@ -45,8 +45,8 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
   const justCreated = (await props.searchParams).created === '1'
 
   const origin = await baseUrl()
-  const newAssignmentPath = `/classrooms/${classroom.slug}/assignments/new`
-  const newGroupAssignmentPath = `/classrooms/${classroom.slug}/group-assignments/new`
+  // organizations#new_assignment: one button, and the chooser asks which kind
+  const newAssignmentPath = `/classrooms/${classroom.slug}/new-assignment`
 
   const listed: Listed[] = [
     ...assignments.map((assignment) => ({
@@ -83,26 +83,16 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
       <div className="d-md-flex flex-items-center flex-justify-between mb-3">
         <h2 className="f2 text-normal">Assignments</h2>
         {listed.length > 0 && (
-          // The original disabled the buttons on an archived classroom instead
-          // of hiding them, so the page still reads the same either way.
-          <div className="d-flex" style={{ gap: '0.5rem' }}>
-            <Link
-              href={newAssignmentPath}
-              className={`btn ${classroom.archivedAt ? 'disabled' : ''}`}
-              role="button"
-              aria-disabled={Boolean(classroom.archivedAt)}
-            >
-              Nuevo individual
-            </Link>
-            <Link
-              href={newGroupAssignmentPath}
-              className={`btn btn-primary ${classroom.archivedAt ? 'disabled' : ''}`}
-              role="button"
-              aria-disabled={Boolean(classroom.archivedAt)}
-            >
-              Nuevo grupal
-            </Link>
-          </div>
+          // The original disabled the button on an archived classroom instead
+          // of hiding it, so the page still reads the same either way.
+          <Link
+            href={newAssignmentPath}
+            className={`btn btn-primary ${classroom.archivedAt ? 'disabled' : ''}`}
+            role="button"
+            aria-disabled={Boolean(classroom.archivedAt)}
+          >
+            Nuevo assignment
+          </Link>
         )}
       </div>
 
@@ -114,16 +104,9 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
               Este classroom está archivado, no se pueden crear assignments.
             </p>
           ) : (
-            // organizations#new_assignment, the chooser the original showed
-            // first: individual or group
-            <div className="d-flex flex-justify-center mt-3" style={{ gap: '0.5rem' }}>
-              <Link href={newAssignmentPath} className="btn btn-large" role="button">
-                Assignment individual
-              </Link>
-              <Link href={newGroupAssignmentPath} className="btn btn-primary btn-large" role="button">
-                Assignment grupal
-              </Link>
-            </div>
+            <Link href={newAssignmentPath} className="btn btn-primary btn-large mt-3" role="button">
+              Crear el primer assignment
+            </Link>
           )}
         </div>
       ) : (

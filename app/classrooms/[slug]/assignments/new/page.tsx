@@ -12,12 +12,8 @@ import { NewAssignmentForm } from './NewAssignmentForm'
 export const dynamic = 'force-dynamic'
 
 /**
- * Port of assignments#new.
- *
- * The original reached this screen through organizations#new_assignment, which
- * asked first whether the assignment was individual or group. That chooser has
- * nothing to choose between until group assignments are ported, so the "Nuevo
- * assignment" button leads straight here.
+ * Port of assignments#new, reached through the chooser of
+ * organizations#new_assignment — see ../../new-assignment.
  *
  * The frame is the live site's: breadcrumb down to "Nuevo assignment" and
  * nothing else — no title band and no tabs, because this screen is not one of
