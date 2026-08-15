@@ -52,6 +52,65 @@ export const users = pgTable(
   (table) => [uniqueIndex('index_users_on_uid').on(table.uid)],
 )
 
+/**
+ * The classroom roster: the list of student identifiers the cátedra works
+ * with (padrones), and what links each of them to a GitHub account.
+ *
+ * Defined before `organizations` because that table points at this one, the
+ * same direction the original has it (`organizations.roster_id`). Keeping the
+ * two tables — instead of hanging the entries off the classroom directly —
+ * leaves a roster shareable between classrooms, which is what
+ * `RostersController#remove_organization` guards when it only destroys the
+ * roster once no organization references it any more.
+ *
+ * Deliberate divergence: `roster_entries.google_user_id` and `lms_user_id` are
+ * not here. They only exist to reconcile a Google Classroom or LTI import
+ * against a later sync, and neither integration is ported.
+ */
+export const rosters = pgTable('rosters', {
+  id: serial('id').primaryKey(),
+  /** What the identifiers are called, shown as the column header: "Padrón" */
+  identifierName: varchar('identifier_name', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const rosterEntries = pgTable(
+  'roster_entries',
+  {
+    id: serial('id').primaryKey(),
+    /** The padrón, or whatever the teacher pasted. `validates :identifier, presence: true` */
+    identifier: varchar('identifier', { length: 255 }).notNull(),
+    rosterId: integer('roster_id')
+      .notNull()
+      .references(() => rosters.id, { onDelete: 'cascade' }),
+    /**
+     * The GitHub account behind the identifier, null until it is linked.
+     *
+     * Nothing writes it yet: in the original the link is made by the student
+     * on the `join_roster` screen while accepting an assignment, and that flow
+     * is not ported. The column is here because it is what the roster is for,
+     * and the UI already reads it.
+     */
+    userId: integer('user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('index_roster_entries_on_roster_id').on(table.rosterId),
+    index('index_roster_entries_on_user_id').on(table.userId),
+    // Divergence: the original had no such index. It deduplicates in Ruby
+    // (`add_suffix_to_duplicates`) and checks again before an edit, which two
+    // teachers pasting at once can walk straight through. Same reasoning as
+    // the assignment indexes: the checks stay for the message, the constraint
+    // is the backstop.
+    uniqueIndex('index_roster_entries_on_roster_id_and_identifier').on(
+      table.rosterId,
+      table.identifier,
+    ),
+  ],
+)
+
 export const organizations = pgTable(
   'organizations',
   {
@@ -67,10 +126,13 @@ export const organizations = pgTable(
     /** Soft delete. The original's `default_scope` filters on deleted_at IS NULL */
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
+    /** The classroom's roster, null until the teacher creates one */
+    rosterId: integer('roster_id').references(() => rosters.id, { onDelete: 'set null' }),
   },
   (table) => [
     index('index_organizations_on_github_id').on(table.githubId),
     index('index_organizations_on_deleted_at').on(table.deletedAt),
+    index('index_organizations_on_roster_id').on(table.rosterId),
     // Partial, so a soft-deleted classroom stops reserving its title and slug.
     // Rails enforced these in the model, where default_scope already excluded
     // deleted rows; a plain unique index would outlive the delete and make the
@@ -192,3 +254,5 @@ export type User = typeof users.$inferSelect
 export type Organization = typeof organizations.$inferSelect
 export type Assignment = typeof assignments.$inferSelect
 export type AssignmentInvitation = typeof assignmentInvitations.$inferSelect
+export type Roster = typeof rosters.$inferSelect
+export type RosterEntry = typeof rosterEntries.$inferSelect
