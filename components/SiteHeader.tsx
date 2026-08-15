@@ -26,7 +26,11 @@ export async function SiteHeader() {
                   <summary aria-haspopup="true" className="d-flex flex-items-center">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={session.user.image ?? ''}
+                      // Never `?? ''`: an empty src makes the browser re-request
+                      // the page itself as the image. The token does not always
+                      // carry a picture, so fall back to the avatar derived from
+                      // the numeric id — stable across renames, unlike the login.
+                      src={session.user.image ?? `https://avatars.githubusercontent.com/u/${session.user.uid}`}
                       className="avatar"
                       alt={`@${session.user.githubLogin}`}
                       height={20}

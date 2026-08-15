@@ -99,5 +99,86 @@ export const organizationsUsers = pgTable(
   (table) => [primaryKey({ columns: [table.userId, table.organizationId] })],
 )
 
+/**
+ * Individual assignments. Port of `assignments`.
+ *
+ * Deliberate divergences from the original:
+ *
+ *  - `starter_code_repo_id` and `template_repos_enabled` are not here yet.
+ *    The columns would be dead weight until the starter code flow is ported,
+ *    and adding a nullable column later is a one-line migration.
+ *  - Deadlines are not here either: the original's `deadlines` table only
+ *    earns its keep together with the Sidekiq job that freezes submissions
+ *    when it passes, and there is no job runner on Vercel.
+ *  - The uniqueness of `title` and `slug` within a classroom lives in the
+ *    database. The original validated them in the model only, over a
+ *    `default_scope` that already hid soft-deleted rows; partial indexes
+ *    reproduce that exactly and survive two teachers submitting at once.
+ */
+export const assignments = pgTable(
+  'assignments',
+  {
+    id: serial('id').primaryKey(),
+    /** `visibility=` in the original writes this: public_repo = visibility != "private" */
+    publicRepo: boolean('public_repo').notNull().default(true),
+    title: varchar('title', { length: 255 }).notNull(),
+    organizationId: integer('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    creatorId: integer('creator_id')
+      .notNull()
+      .references(() => users.id),
+    /** Prefixes every student repo: `<slug>-<login>`, see Exercise#default_repo_name */
+    slug: varchar('slug', { length: 255 }).notNull(),
+    studentsAreRepoAdmins: boolean('students_are_repo_admins').notNull().default(false),
+    invitationsEnabled: boolean('invitations_enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Soft delete. The original's `default_scope` filters on deleted_at IS NULL */
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('index_assignments_on_organization_id').on(table.organizationId),
+    index('index_assignments_on_deleted_at').on(table.deletedAt),
+    // validates :slug, uniqueness: { scope: :organization_id }
+    uniqueIndex('index_assignments_on_organization_id_and_slug')
+      .on(table.organizationId, table.slug)
+      .where(sql`${table.deletedAt} is null`),
+    // validates :title, uniqueness: { scope: :organization_id }
+    uniqueIndex('index_assignments_on_organization_id_and_title')
+      .on(table.organizationId, table.title)
+      .where(sql`${table.deletedAt} is null`),
+  ],
+)
+
+/**
+ * The invitation link a teacher shares. Port of `assignment_invitations`.
+ *
+ * `short_key` is left out: it only exists to serve the `/a/:short_key` route,
+ * which is not ported. `key` is the identifier of the invitation URL, and it
+ * is what `AssignmentInvitation#to_param` returns.
+ */
+export const assignmentInvitations = pgTable(
+  'assignment_invitations',
+  {
+    id: serial('id').primaryKey(),
+    /** SecureRandom.hex(16) in the original's `assign_key` */
+    key: varchar('key', { length: 255 }).notNull(),
+    assignmentId: integer('assignment_id')
+      .notNull()
+      .references(() => assignments.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('index_assignment_invitations_on_assignment_id').on(table.assignmentId),
+    index('index_assignment_invitations_on_deleted_at').on(table.deletedAt),
+    uniqueIndex('index_assignment_invitations_on_key').on(table.key),
+  ],
+)
+
 export type User = typeof users.$inferSelect
 export type Organization = typeof organizations.$inferSelect
+export type Assignment = typeof assignments.$inferSelect
+export type AssignmentInvitation = typeof assignmentInvitations.$inferSelect

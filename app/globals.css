@@ -125,6 +125,22 @@
   border-top: 1px solid #e1e4e8;
 }
 
+/* v22 keeps .Box-header but strips it down to the border and the radii — the
+   grey band and the padding are gone, and .Box-title never made it across. */
+.Box-header {
+  padding: 16px;
+  margin: -1px -1px 0;
+  background-color: #f6f8fa;
+  border: 1px solid #d1d5da;
+  border-top-left-radius: 3px;
+  border-top-right-radius: 3px;
+}
+
+.Box-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .Label {
   display: inline-block;
   padding: 3px 4px;
