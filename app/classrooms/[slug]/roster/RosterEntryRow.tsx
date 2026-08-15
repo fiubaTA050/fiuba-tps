@@ -9,12 +9,16 @@ import { deleteEntryAction, renameEntryAction } from './actions'
 import { EMPTY_STATE } from './state'
 
 /**
- * Port of orgs/rosters/_roster_entry.html.erb plus the edit and delete modals
- * that hung off it (`_edit_roster_entry_modal`, `_delete_roster_entry_modal`).
+ * One student of the roster, in the live page's layout:
  *
- * The rename happens inline instead of in a modal — same reason as
- * AddStudentsForm — and the delete confirmation is a `confirm()`, which is
- * what Rails' `data-confirm` did before the original moved to remodal.
+ *   <div class="d-flex col-12 flex-justify-between flex-wrap">
+ *     <div class="d-flex">           avatar + identifier + @login
+ *     <div class="d-flex flex-justify-end">   unlink · pencil · trash
+ *
+ * `Unlink GitHub account` is not among the actions: nothing links an entry
+ * yet, see lib/data/rosters.ts. The rename happens inline instead of in a
+ * modal, and the delete confirmation is a `confirm()` — which is what Rails'
+ * `data-confirm` did before the original moved to remodal.
  */
 export function RosterEntryRow({
   entry,
@@ -39,81 +43,103 @@ export function RosterEntryRow({
   // the message with it, instead of leaving it under a row it no longer describes
   const error = (editing ? renameState.error : null) ?? deleteState.error
 
+  if (editing) {
+    return (
+      <div className="py-2">
+        <form action={renameAction} className="d-flex flex-items-center">
+          <input type="hidden" name="classroom_slug" value={classroomSlug} />
+          <input type="hidden" name="entry_id" value={entry.id} />
+          <input
+            type="text"
+            name="identifier"
+            defaultValue={entry.identifier}
+            maxLength={255}
+            required
+            autoFocus
+            aria-label="Identificador"
+            className="form-control input-sm input-monospace mr-2"
+          />
+          <button type="submit" className="btn btn-sm btn-primary mr-2" disabled={renaming}>
+            <CheckIcon /> <span className="ml-1">Guardar</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setEditingIdentifier(null)}
+          >
+            Cancelar
+          </button>
+        </form>
+
+        {error && <p className="note color-fg-danger mb-0 mt-1">{error}</p>}
+      </div>
+    )
+  }
+
   return (
-    <li className="Box-row">
-      <div className="d-flex flex-items-center flex-justify-between">
-        {editing ? (
-          <form action={renameAction} className="d-flex flex-items-center flex-auto mr-3">
+    <div className="py-2">
+      <div className="d-flex col-12 flex-justify-between flex-wrap flex-items-center">
+        <div className="d-flex flex-items-center">
+          {entry.githubLogin ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`https://github.com/${entry.githubLogin}.png?size=92`}
+              className="avatar avatar-user mr-3"
+              height={46}
+              width={46}
+              alt=""
+            />
+          ) : (
+            // The slot the avatar will take once the entry is linked, so the
+            // identifiers of a fresh roster do not sit against the edge
+            <span className="d-flex flex-items-center flex-justify-center color-fg-muted mr-3">
+              <MarkGithubIcon size={24} />
+            </span>
+          )}
+
+          <div className="flex-column">
+            <h3 className="h4">{entry.identifier}</h3>
+            <p className="color-fg-muted mb-0">
+              {entry.githubLogin ? (
+                <a href={`https://github.com/${entry.githubLogin}`}>@{entry.githubLogin}</a>
+              ) : (
+                'Sin vincular'
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="d-flex flex-items-center">
+          <button
+            type="button"
+            className="btn-octicon"
+            aria-label={`Editar ${entry.identifier}`}
+            onClick={() => setEditingIdentifier(entry.identifier)}
+          >
+            <PencilIcon />
+          </button>
+
+          <form action={deleteAction}>
             <input type="hidden" name="classroom_slug" value={classroomSlug} />
             <input type="hidden" name="entry_id" value={entry.id} />
-            <input
-              type="text"
-              name="identifier"
-              defaultValue={entry.identifier}
-              maxLength={255}
-              required
-              autoFocus
-              aria-label="Identificador"
-              className="form-control input-sm input-monospace mr-2"
-            />
-            <button type="submit" className="btn btn-sm btn-primary mr-2" disabled={renaming}>
-              <CheckIcon /> <span className="ml-1">Guardar</span>
-            </button>
-            <button type="button" className="btn btn-sm" onClick={() => setEditingIdentifier(null)}>
-              Cancelar
+            <button
+              type="submit"
+              className="btn-octicon btn-octicon-danger"
+              aria-label={`Borrar ${entry.identifier}`}
+              disabled={deleting}
+              onClick={(event) => {
+                if (!window.confirm(`¿Borrar a ${entry.identifier} del roster?`)) {
+                  event.preventDefault()
+                }
+              }}
+            >
+              <TrashIcon />
             </button>
           </form>
-        ) : (
-          <>
-            <span className="text-mono">{entry.identifier}</span>
-
-            <div className="d-flex flex-items-center">
-              {entry.githubLogin ? (
-                <a
-                  href={`https://github.com/${entry.githubLogin}`}
-                  className="d-flex flex-items-center mr-3"
-                >
-                  <MarkGithubIcon className="mr-1" />
-                  {entry.githubLogin}
-                </a>
-              ) : (
-                // The original showed a "Link" button here; there is nobody to
-                // link to until the invitation flow exists, see lib/data/rosters.ts
-                <span className="Label Label--gray mr-3">Sin vincular</span>
-              )}
-
-              <button
-                type="button"
-                className="btn-octicon"
-                aria-label={`Editar ${entry.identifier}`}
-                onClick={() => setEditingIdentifier(entry.identifier)}
-              >
-                <PencilIcon />
-              </button>
-
-              <form action={deleteAction}>
-                <input type="hidden" name="classroom_slug" value={classroomSlug} />
-                <input type="hidden" name="entry_id" value={entry.id} />
-                <button
-                  type="submit"
-                  className="btn-octicon btn-octicon-danger"
-                  aria-label={`Borrar ${entry.identifier}`}
-                  disabled={deleting}
-                  onClick={(event) => {
-                    if (!window.confirm(`¿Borrar a ${entry.identifier} del roster?`)) {
-                      event.preventDefault()
-                    }
-                  }}
-                >
-                  <TrashIcon />
-                </button>
-              </form>
-            </div>
-          </>
-        )}
+        </div>
       </div>
 
       {error && <p className="note color-fg-danger mb-0 mt-1">{error}</p>}
-    </li>
+    </div>
   )
 }

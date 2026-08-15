@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useRef } from 'react'
+import { Fragment, useId, useRef } from 'react'
 
 /**
  * The "one identifier per line" textarea with its file picker, shared by the
@@ -20,11 +20,14 @@ export function IdentifiersField({
   identifierName,
   value,
   onChange,
+  framed = true,
 }: {
   label: string
   identifierName: string
   value: string
   onChange: (value: string) => void
+  /** false inside the add-students dialog, which already is a Box */
+  framed?: boolean
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const textareaId = useId()
@@ -40,9 +43,12 @@ export function IdentifiersField({
     if (fileInput.current) fileInput.current.value = ''
   }
 
+  const Frame = framed ? 'div' : Fragment
+  const frameProps = framed ? { className: 'Box' } : {}
+
   return (
-    <div className="Box">
-      <div className="Box-body">
+    <Frame {...frameProps}>
+      <div className={framed ? 'Box-body' : ''}>
         <label htmlFor={textareaId} className="d-block color-fg-muted mb-1">
           {label}
         </label>
@@ -62,7 +68,7 @@ export function IdentifiersField({
         </p>
       </div>
 
-      <div className="Box-footer">
+      <div className={framed ? 'Box-footer' : 'mt-2'}>
         <label className="btn btn-sm" htmlFor={fileId}>
           Subir un CSV o un archivo de texto
         </label>
@@ -75,6 +81,6 @@ export function IdentifiersField({
           onChange={(event) => onFileChange(event.target.files?.[0])}
         />
       </div>
-    </div>
+    </Frame>
   )
 }

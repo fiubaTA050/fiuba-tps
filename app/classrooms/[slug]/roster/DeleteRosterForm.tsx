@@ -21,7 +21,7 @@ export function DeleteRosterForm({ classroomSlug }: { classroomSlug: string }) {
 
       <button
         type="submit"
-        className="btn btn-danger"
+        className="btn btn-sm btn-danger"
         disabled={pending}
         onClick={(event) => {
           if (!window.confirm('¿Eliminar el roster y todos sus alumnos?')) event.preventDefault()

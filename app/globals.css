@@ -332,6 +332,64 @@
   background-color: var(--bgColor-neutral-muted, var(--color-neutral-muted));
 }
 
+/* The tabs inside the roster Box ("All students" / "Unlinked GitHub
+   accounts"), same source as the block above */
+
+.tabnav {
+  margin-top: 0;
+  margin-bottom: var(--stack-gap-normal);
+  border-bottom: var(--borderWidth-thin) solid var(--borderColor-default);
+}
+
+.tabnav-tabs {
+  display: flex;
+  margin-bottom: calc(var(--borderWidth-thin) * -1);
+  overflow: auto;
+}
+
+.tabnav-tab {
+  display: inline-block;
+  flex-shrink: 0;
+  padding: var(--base-size-8) var(--control-medium-paddingInline-spacious);
+  font-size: var(--text-body-size-medium);
+  line-height: 23px;
+  color: var(--fgColor-muted);
+  text-decoration: none;
+  background-color: initial;
+  border: var(--borderWidth-thin) solid rgb(0 0 0 / 0%);
+  border-bottom: 0;
+  transition: color 0.2s cubic-bezier(0.3, 0, 0.5, 1);
+}
+
+.tabnav-tab.selected {
+  color: var(--fgColor-default);
+  background-color: var(--bgColor-default);
+  border-color: var(--borderColor-default);
+  border-radius: 6px 6px 0 0;
+}
+
+/* Round avatars for the linked GitHub accounts */
+.avatar-user {
+  border-radius: 50% !important;
+}
+
+/*
+ * The "Update students" modal of the live roster page. It builds it out of
+ * Primer's Overlay, which v22 does not ship; a native <dialog> holding a
+ * `Box Box--overlay` — which v22 does ship — lands in the same place without
+ * the dialog-helper element and its JS.
+ */
+
+.modal {
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.modal::backdrop {
+  background: rgb(27 31 35 / 50%);
+}
+
 /*
  * Dropdown, ported from the original's own
  * app/assets/stylesheets/components/primer-dropdown.scss.
