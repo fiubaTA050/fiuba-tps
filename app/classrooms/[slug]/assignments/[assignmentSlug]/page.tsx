@@ -5,19 +5,23 @@ import { auth } from '@/auth'
 import { ClassroomShell } from '@/components/ClassroomShell'
 import { InvitationLink } from '@/components/InvitationLink'
 import { findAssignment } from '@/lib/data/assignments'
+import { listAssignmentAcceptances } from '@/lib/data/invitations'
 import { findClassroom } from '@/lib/data/organizations'
 import { findRepositoryById } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
 import { baseUrl } from '@/lib/url'
 
+import { AcceptanceList } from './AcceptanceList'
+
 export const dynamic = 'force-dynamic'
 
 /**
- * Trimmed-down port of assignments#show.
+ * Port of assignments#show: the invitation link, the assignment's settings,
+ * and below them who accepted and who is missing.
  *
- * What the original showed below the invitation was the roster, or the list of
- * `assignment_repos` when the classroom has none. Both wait for the invitation
- * to be redeemable, so this page stops at the invitation link and a blankslate.
+ * The original keyed that list off `assignment_repos`; here it comes from
+ * `invite_statuses`, which is where an acceptance lands before any repository
+ * exists. See lib/data/invitations.ts.
  */
 export default async function AssignmentPage(
   props: PageProps<'/classrooms/[slug]/assignments/[assignmentSlug]'>,
@@ -27,12 +31,13 @@ export default async function AssignmentPage(
 
   const { slug, assignmentSlug } = await props.params
 
-  const [classroom, assignment] = await Promise.all([
+  const [classroom, assignment, acceptances] = await Promise.all([
     findClassroom(session, slug),
     findAssignment(session, slug, assignmentSlug),
+    listAssignmentAcceptances(session, slug, assignmentSlug),
   ])
 
-  if (!classroom || !assignment) notFound()
+  if (!classroom || !assignment || !acceptances) notFound()
 
   // flash[:success]: only right after creating, not on every later visit
   const justCreated = (await props.searchParams).created === '1'
@@ -131,13 +136,7 @@ export default async function AssignmentPage(
           </div>
         </div>
 
-        <div className="blankslate blankslate-spacious">
-          <h3 className="mb-2">Todavía nadie aceptó &quot;{assignment.title}&quot;</h3>
-          <p className="color-fg-muted mb-0">
-            Aceptar la invitación y crear el repo de cada alumno es el próximo paso del port; por
-            ahora el link no lleva a ninguna página.
-          </p>
-        </div>
+        <AcceptanceList acceptances={acceptances} assignmentTitle={assignment.title} />
     </ClassroomShell>
   )
 }

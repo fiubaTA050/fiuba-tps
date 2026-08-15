@@ -8,13 +8,20 @@ function isUnauthorized(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'status' in error && error.status === 401
 }
 
-/** A GitHub org where the App is installed and the user has access */
-export type GitHubOrganization = {
+/**
+ * A GitHub org where the App is installed, without asking about anybody's
+ * role in it. This is all the student's screens ever need.
+ */
+export type GitHubOrganizationAccount = {
   githubId: number
   login: string
   name: string | null
   avatarUrl: string
   installationId: number
+}
+
+/** The same org, resolved against one user. */
+export type GitHubOrganization = GitHubOrganizationAccount & {
   /** Port of GitHubOrganization#admin? */
   admin: boolean
 }
@@ -96,6 +103,25 @@ export const findOrganizationByInstallation = cache(async function findOrganizat
   installationId: number,
   userLogin: string,
 ): Promise<GitHubOrganization | null> {
+  const account = await findInstallationAccount(installationId)
+  if (!account) return null
+
+  return { ...account, admin: await isOrganizationAdmin(installationId, account.login, userLogin) }
+})
+
+/**
+ * The same lookup with the role question left out, for the screens that only
+ * name the organization.
+ *
+ * It matters on the student's invitation pages: `isOrganizationAdmin` is a
+ * second round trip, and for a student it is one that 404s — they are not a
+ * member of the org yet, and will not be until a repository exists. Asking
+ * would spend a call per page view to compute a flag nothing reads, and bury
+ * the log in 404s that mean nothing.
+ */
+export const findInstallationAccount = cache(async function findInstallationAccount(
+  installationId: number,
+): Promise<GitHubOrganizationAccount | null> {
   try {
     const { data: installation } = await appClient().rest.apps.getInstallation({
       installation_id: installationId,
@@ -110,7 +136,6 @@ export const findOrganizationByInstallation = cache(async function findOrganizat
       name: account.name ?? null,
       avatarUrl: account.avatar_url,
       installationId,
-      admin: await isOrganizationAdmin(installationId, account.login, userLogin),
     }
   } catch {
     return null

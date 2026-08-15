@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import { organizations, organizationsUsers } from '@/db/schema'
+import { isUniqueViolation } from '@/lib/data/postgres'
 import { organizationSlug } from '@/lib/data/slug'
 import { db } from '@/lib/db'
 import {
@@ -349,19 +350,6 @@ async function findClash(
 
   if (rows.length === 0) return null
   return rows.some((row) => row.title === title) ? 'title' : 'slug'
-}
-
-/**
- * Postgres unique violation. Drizzle wraps driver errors, and the drivers
- * disagree on the field name — postgres.js uses `constraint_name`, pglite and
- * node-postgres use `constraint` — so walk the cause chain and accept either.
- */
-function isUniqueViolation(error: unknown): boolean {
-  for (let current = error; current; current = (current as { cause?: unknown }).cause) {
-    if (typeof current !== 'object') return false
-    if ((current as { code?: string }).code === '23505') return true
-  }
-  return false
 }
 
 function errorMessage(error: unknown): string {

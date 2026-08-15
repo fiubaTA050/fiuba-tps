@@ -11,6 +11,7 @@ import {
   organizations,
   organizationsUsers,
 } from '@/db/schema'
+import { isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
 import {
   findRepositoryByFullName,
@@ -460,17 +461,4 @@ async function findClassroomRow(
     )
 
   return row ?? null
-}
-
-/**
- * Postgres unique violation. Drizzle wraps driver errors, and the drivers
- * disagree on the field name — postgres.js uses `constraint_name`, pglite and
- * node-postgres use `constraint` — so walk the cause chain and accept either.
- */
-function isUniqueViolation(error: unknown): boolean {
-  for (let current = error; current; current = (current as { cause?: unknown }).cause) {
-    if (typeof current !== 'object') return false
-    if ((current as { code?: string }).code === '23505') return true
-  }
-  return false
 }

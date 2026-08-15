@@ -15,12 +15,10 @@ import { db } from '@/lib/db'
  *
  * What is not ported: the Google Classroom and LTI imports (`import_from_lms`,
  * `sync_google_classroom`), which are the reason most of the original's
- * controller is as long as it is, and `link`/`unlink`. Linking an entry to a
- * GitHub account is the student's own doing on the `join_roster` screen while
- * accepting an assignment, and that flow does not exist yet; the teacher-side
- * link only ever offered users who had already accepted one, so there would be
- * nobody to offer. `roster_entries.user_id` is written by nothing for now and
- * read everywhere, which is what makes adding that flow a small change.
+ * controller is as long as it is, and the teacher-side `link`/`unlink`.
+ * Linking an entry to a GitHub account is the student's own doing on the
+ * `join_roster` screen while accepting an assignment, which lives in
+ * lib/data/invitations.ts — nothing here writes `roster_entries.user_id`.
  *
  * Like the original, none of this is blocked on an archived classroom: the
  * roster is just a list, nothing here touches GitHub.

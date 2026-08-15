@@ -4,6 +4,7 @@ import {
   boolean,
   index,
   integer,
+  pgEnum,
   pgTable,
   primaryKey,
   serial,
@@ -87,10 +88,9 @@ export const rosterEntries = pgTable(
     /**
      * The GitHub account behind the identifier, null until it is linked.
      *
-     * Nothing writes it yet: in the original the link is made by the student
-     * on the `join_roster` screen while accepting an assignment, and that flow
-     * is not ported. The column is here because it is what the roster is for,
-     * and the UI already reads it.
+     * Written by the student on the `join_roster` screen while accepting an
+     * assignment — `InvitationsControllerMethods#join_roster` — never by the
+     * teacher.
      */
     userId: integer('user_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -108,6 +108,20 @@ export const rosterEntries = pgTable(
       table.rosterId,
       table.identifier,
     ),
+    // Divergence: the original has no such index, and it needs one.
+    // `InvitationsControllerMethods#join_roster` reads
+    //
+    //   entry.update_attributes!(user: current_user) unless user_on_roster?
+    //
+    // where `user_on_roster?` asks whether *the student* already claimed an
+    // entry — never whether *the entry* is already claimed. So a student who
+    // picks a padrón that belongs to somebody else takes it over, and the
+    // rightful owner is silently unlinked. lib/data/invitations.ts refuses that
+    // case with a message; this is the backstop for two students picking the
+    // same padrón at once. Partial, because unlinked entries are the norm.
+    uniqueIndex('index_roster_entries_on_roster_id_and_user_id')
+      .on(table.rosterId, table.userId)
+      .where(sql`${table.userId} is not null`),
   ],
 )
 
@@ -250,9 +264,94 @@ export const assignmentInvitations = pgTable(
   ],
 )
 
+/**
+ * Port of the SetupStatus concern's enum, in the original's order.
+ *
+ * This is the whole lifecycle of one student's invitation, and it is where the
+ * state "accepted, but there is no repository yet" already lives in the
+ * original — not in `assignment_repos`, whose rows only ever exist alongside a
+ * real GitHub repo (`github_repo_id` is NOT NULL there). It is also the queue
+ * the original's own background job reads: `create_repo` enqueues exactly when
+ * the status is `accepted` or one of the `errored_*`.
+ *
+ * Every value is defined even though this port can only reach `unaccepted` and
+ * `accepted`: repository creation is not ported yet, and the job that will do
+ * it should find its states already here instead of needing a migration.
+ */
+export const INVITE_STATUSES = [
+  'unaccepted',
+  'accepted',
+  'waiting',
+  'creating_repo',
+  'importing_starter_code',
+  'completed',
+  'errored_creating_repo',
+  'errored_importing_starter_code',
+] as const
+
+export type InviteStatusValue = (typeof INVITE_STATUSES)[number]
+
+/** SetupStatus::SETUP_STATUSES — accepted, and on the way to a repository */
+export const SETUP_STATUSES: readonly InviteStatusValue[] = [
+  'accepted',
+  'waiting',
+  'creating_repo',
+  'importing_starter_code',
+]
+
+/** SetupStatus::ERRORED_STATUSES */
+export const ERRORED_STATUSES: readonly InviteStatusValue[] = [
+  'errored_creating_repo',
+  'errored_importing_starter_code',
+]
+
+export const inviteStatusEnum = pgEnum('invite_status', INVITE_STATUSES)
+
+/**
+ * One row per (invitation, student). Port of `invite_statuses`.
+ *
+ * Divergence: the original stored the enum as an integer, because that is what
+ * Rails' `enum` does. Here it is a Postgres enum with the original's labels —
+ * the same states in the same order, readable in a psql session, and the one
+ * place a typo would otherwise pass silently.
+ *
+ * The original creates the row lazily from `AssignmentInvitation#status`, so
+ * merely opening the link writes an `unaccepted` row. Here the row appears only
+ * when the student accepts: a Server Component renders on prefetch and on every
+ * revalidation, and a GET that writes would fill the table with rows for people
+ * who only clicked the link. `unaccepted` is therefore what the absence of a
+ * row means, which is what `findInvitation` returns.
+ */
+export const inviteStatuses = pgTable(
+  'invite_statuses',
+  {
+    id: serial('id').primaryKey(),
+    status: inviteStatusEnum('status').notNull().default('unaccepted'),
+    assignmentInvitationId: integer('assignment_invitation_id')
+      .notNull()
+      .references(() => assignmentInvitations.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('index_invite_statuses_on_user_id').on(table.userId),
+    // validates :user_id, uniqueness: { scope: :assignment_invitation_id }.
+    // In the database rather than only in the model: accepting twice is one
+    // impatient double-click away.
+    uniqueIndex('index_invite_statuses_on_invitation_id_and_user_id').on(
+      table.assignmentInvitationId,
+      table.userId,
+    ),
+  ],
+)
+
 export type User = typeof users.$inferSelect
 export type Organization = typeof organizations.$inferSelect
 export type Assignment = typeof assignments.$inferSelect
 export type AssignmentInvitation = typeof assignmentInvitations.$inferSelect
 export type Roster = typeof rosters.$inferSelect
 export type RosterEntry = typeof rosterEntries.$inferSelect
+export type InviteStatus = typeof inviteStatuses.$inferSelect

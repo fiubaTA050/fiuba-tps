@@ -183,6 +183,48 @@
   background-color: #eaecef;
 }
 
+/* The "Aceptó" label of the teacher's assignment page */
+.Label--outline {
+  margin-top: -1px;
+  margin-bottom: -1px;
+  font-weight: 400;
+  color: #586069;
+  background-color: transparent;
+  border: 1px solid rgb(27 31 35 / 15%);
+  box-shadow: none;
+}
+
+.Label--outline-green {
+  color: #28a745;
+  border: 1px solid #34d058;
+}
+
+/*
+ * The progress bar of the student's setup screen.
+ *
+ * Not a Primer component in either version: primer 10.10.4 shipped `.Progress`
+ * with a different markup, and the original ignored it in favour of its own
+ * `app/assets/stylesheets/components/progress-bar.scss`, which is what the
+ * `.progress-bar > .progress` of `assignment_invitations/setup.html.erb`
+ * refers to. Copied from there, with the two Sass calls resolved against
+ * primer 10.10.4's palette: `lighten($gray-200, 3%)` on #e1e4e8 is #eaecef,
+ * and `darken($green-400, 5%)` on #34d058 is #2cbe4e.
+ */
+
+.progress-bar {
+  display: block;
+  height: 5px;
+  overflow: hidden; /* Crop the progress bar within for rounded corners */
+  background-color: #eaecef;
+  border-radius: 3px;
+}
+
+.progress-bar .progress {
+  display: block;
+  height: 100%;
+  background-color: #2cbe4e;
+}
+
 /*
  * Classroom navigation: breadcrumb, UnderlineNav and Counter.
  *

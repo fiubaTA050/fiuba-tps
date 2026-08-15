@@ -18,11 +18,12 @@ export const dynamic = 'force-dynamic'
  * titled "Classroom Roster" with the two actions in its header, the students
  * under a tabnav, and the danger zone in its own bordered Box.
  *
- * Two things of the live page are missing, both for lack of anything to put in
- * them: the "Unlinked GitHub accounts" tab — students who accepted an
- * assignment without claiming an identifier, and nothing can accept one yet —
- * and the pagination, since a cátedra roster is a few hundred rows and
- * paginating costs the teacher their browser's find-in-page.
+ * Two things of the live page are missing. The pagination, because a cátedra
+ * roster is a few hundred rows and paginating costs the teacher their
+ * browser's find-in-page. And the "Unlinked GitHub accounts" tab: those
+ * students exist now — they skipped `join_roster` — but they are unlinked
+ * *per assignment*, so the assignment page is where the teacher sees them,
+ * next to who accepted. See AcceptanceList.
  */
 export default async function RosterPage(props: PageProps<'/classrooms/[slug]/roster'>) {
   const session = await auth()
