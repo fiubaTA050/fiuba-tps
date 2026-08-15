@@ -39,15 +39,13 @@ function toRepository(data: {
 }
 
 /**
- * The org's own template repositories, to offer without making the teacher
- * type anything. No equivalent in the original, which only had the
- * Search-API autocomplete of `AutocompleteController`.
+ * The org's own template repositories, shown as the starter code field's
+ * suggestions before anything is typed. No equivalent in the original, whose
+ * autocomplete had nothing to offer until you gave it a query; the search
+ * itself is ported in lib/github/search.ts.
  *
- * That autocomplete does not survive the port: it ran on the teacher's OAuth
- * token, and a GitHub App's user-to-server token only sees resources the App
- * is installed on, so porting it verbatim would silently return a fraction of
- * what the original found. Listing the classroom's own org covers the usual
- * case, and `findRepositoryByFullName` covers everything else.
+ * The list is worth its request: a classroom's starter code is usually a repo
+ * of its own org, and `fiubaTA050-labs` has 152 repos and exactly one template.
  */
 export async function listTemplateRepositories(
   installationId: number,

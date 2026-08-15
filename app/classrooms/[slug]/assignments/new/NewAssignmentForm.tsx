@@ -8,16 +8,16 @@ import { parameterize } from '@/lib/data/slug'
 import type { GitHubRepository } from '@/lib/github/repositories'
 
 import { createAssignmentAction, type CreateAssignmentState } from './actions'
+import { StarterCodeField } from './StarterCodeField'
 
 /**
  * Port of assignments/new.html.erb and its
  * assignments/_assignment_form_options.html.erb partial.
  *
- * Two blocks of the original's partial are absent, both by decision rather
- * than oversight: the starter code field (with its autocomplete and its
- * template-vs-importer radios) and the deadline. GitHub retired the Source
- * Imports API the importer depended on, and the deadline only does anything
- * paired with a job runner, which Vercel does not give us.
+ * Everything of the original's partial is here except the deadline, which only
+ * does anything paired with a job runner that Vercel does not give us, and the
+ * template-vs-importer radios, which have nothing left to choose between since
+ * GitHub retired the Source Imports API.
  */
 export function NewAssignmentForm({
   classroomSlug,
@@ -29,7 +29,6 @@ export function NewAssignmentForm({
   const [title, setTitle] = useState('')
   const [slug, setSlug] = useState('')
   const [slugEdited, setSlugEdited] = useState(false)
-  const [starterCode, setStarterCode] = useState('')
 
   const [state, formAction, pending] = useActionState<CreateAssignmentState, FormData>(
     createAssignmentAction,
@@ -154,12 +153,10 @@ export function NewAssignmentForm({
             <h3 className="Box-title">Opcional</h3>
           </div>
 
-          {/* Port of the "Add starter code" field. The original paired a
-              Search-API autocomplete with radios choosing between a template
-              and the source importer; GitHub retired the importer, so the
-              template is the only path and there is nothing to choose. The
-              autocomplete is replaced by the org's own templates plus free
-              text — see lib/github/repositories.ts for why. */}
+          {/* Port of the "Add starter code" field. What is gone from the
+              original are the template-vs-importer radios: GitHub retired the
+              Source Imports API, so cloning a template is the only path left
+              and there is nothing to choose between. */}
           <div className={`Box-row ${errorFor('starterCode') ? 'errored' : ''}`}>
             <h4 className="h5">Starter code</h4>
             <p className="note mt-0 mb-2">
@@ -174,37 +171,7 @@ export function NewAssignmentForm({
               . Dejalo vacío para arrancar de un repo sin contenido.
             </p>
 
-            {templates.length > 0 && (
-              <select
-                className="form-select input-block mb-2"
-                value={templates.some((repo) => repo.fullName === starterCode) ? starterCode : ''}
-                onChange={(event) => setStarterCode(event.target.value)}
-                aria-label="Templates de la organización"
-              >
-                <option value="">Sin starter code</option>
-                {templates.map((repo) => (
-                  <option key={repo.id} value={repo.fullName}>
-                    {repo.fullName}
-                    {repo.private ? ' (privado)' : ''}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            <input
-              id="assignment_starter_code"
-              name="repo_name"
-              type="text"
-              value={starterCode}
-              onChange={(event) => setStarterCode(event.target.value)}
-              autoComplete="off"
-              className="form-control input-block text-mono"
-              placeholder={
-                templates.length > 0
-                  ? 'o cualquier otro: owner/nombre'
-                  : 'owner/nombre, por ejemplo fiubaTA050-labs/raft-starter'
-              }
-            />
+            <StarterCodeField templates={templates} invalid={Boolean(errorFor('starterCode'))} />
 
             {errorFor('starterCode') && (
               <p className="note color-fg-danger">{errorFor('starterCode')}</p>
