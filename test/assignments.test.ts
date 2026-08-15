@@ -23,6 +23,25 @@ vi.mock('@/lib/db', () => ({
   },
 }))
 
+const findRepositoryByFullName = vi.fn()
+const isRepositoryEmpty = vi.fn()
+
+vi.mock('@/lib/github/repositories', async (importOriginal) => ({
+  // REPOSITORY_FULL_NAME is a plain regex; stubbing it would test the stub
+  ...(await importOriginal<typeof import('@/lib/github/repositories')>()),
+  findRepositoryByFullName: (...args: unknown[]) => findRepositoryByFullName(...args),
+  isRepositoryEmpty: (...args: unknown[]) => isRepositoryEmpty(...args),
+}))
+
+/** A template repository as `findRepositoryByFullName` returns it */
+const TEMPLATE = {
+  id: 987654,
+  fullName: 'fiubaTA050-labs/raft-starter',
+  htmlUrl: 'https://github.com/fiubaTA050-labs/raft-starter',
+  private: true,
+  isTemplate: true,
+}
+
 const { createAssignment, findAssignment, listAssignments } = await import(
   '@/lib/data/assignments'
 )
@@ -78,12 +97,17 @@ const VALID = {
   publicRepo: false,
   invitationsEnabled: true,
   studentsAreRepoAdmins: false,
+  starterCodeRepo: '',
 }
 
 beforeEach(async () => {
   ;({ db } = await createTestDatabase())
   nextUid = 1
   nextGithubId = 1000
+  // clearAllMocks only clears calls, not implementations, so the defaults have
+  // to be restored here or one test's stub leaks into the next
+  findRepositoryByFullName.mockResolvedValue(TEMPLATE)
+  isRepositoryEmpty.mockResolvedValue(false)
 })
 
 afterEach(() => {
@@ -364,6 +388,132 @@ describe('createAssignment — validations', () => {
       success: true,
       slug: 'tp1',
     })
+  })
+})
+
+/**
+ * Port of the `#starter_code_repository_not_empty` and
+ * `#starter_code_repository_is_template` describes of assignment_spec.rb, plus
+ * the StarterCode concern's format and resolution cases.
+ */
+describe('createAssignment — starter code', () => {
+  const withStarterCode = { ...VALID, starterCodeRepo: TEMPLATE.fullName }
+
+  it('stores only the repo id, never the name', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    const result = await createAssignment(session, classroom.slug, withStarterCode)
+    expect(result).toMatchObject({ success: true })
+
+    const [row] = await db.select().from(assignments)
+    expect(row.starterCodeRepoId).toBe(TEMPLATE.id)
+    // DA-2: the full name is resolved from GitHub at render time
+    expect(JSON.stringify(row)).not.toContain('raft-starter')
+  })
+
+  // Starter code is optional in the original too
+  it('leaves it null when the field is blank', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    await createAssignment(session, classroom.slug, { ...VALID, starterCodeRepo: '   ' })
+
+    const [row] = await db.select().from(assignments)
+    expect(row.starterCodeRepoId).toBeNull()
+    expect(findRepositoryByFullName).not.toHaveBeenCalled()
+  })
+
+  it('resolves the name against the classroom installation', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    await createAssignment(session, classroom.slug, withStarterCode)
+
+    const [installationId, fullName] = findRepositoryByFullName.mock.calls[0]
+    expect(fullName).toBe(TEMPLATE.fullName)
+    expect(typeof installationId).toBe('number')
+  })
+
+  // StarterCode::WRONG_FORMAT
+  it('rejects a name that is not owner/nombre', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    for (const name of ['raft-starter', 'a/b/c', 'https://github.com/org/repo', 'org/']) {
+      const result = await createAssignment(session, classroom.slug, {
+        ...VALID,
+        starterCodeRepo: name,
+      })
+      expect(result).toMatchObject({ success: false, field: 'starterCode' })
+    }
+
+    // The format check is local: it must not cost an API call
+    expect(findRepositoryByFullName).not.toHaveBeenCalled()
+  })
+
+  // StarterCode::INVALID_SELECTION. A 404 covers both "does not exist" and
+  // "exists but the App cannot see it", so the message has to offer both.
+  it('rejects a repo the App cannot reach, naming both readings', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    findRepositoryByFullName.mockResolvedValue(null)
+
+    const result = await createAssignment(session, classroom.slug, withStarterCode)
+
+    expect(result).toMatchObject({ success: false, field: 'starterCode' })
+    expect(result).toHaveProperty('error', expect.stringContaining('instalá'))
+    expect(await db.select().from(assignments)).toHaveLength(0)
+  })
+
+  // "#starter_code_repository_is_template"
+  it('rejects a repo that is not a template', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    findRepositoryByFullName.mockResolvedValue({ ...TEMPLATE, isTemplate: false })
+
+    const result = await createAssignment(session, classroom.slug, withStarterCode)
+
+    expect(result).toMatchObject({ success: false, field: 'starterCode' })
+    expect(result).toHaveProperty('error', expect.stringContaining('template repository'))
+  })
+
+  // "#starter_code_repository_not_empty"
+  it('rejects an empty repo', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    isRepositoryEmpty.mockResolvedValue(true)
+
+    const result = await createAssignment(session, classroom.slug, withStarterCode)
+
+    expect(result).toMatchObject({ success: false, field: 'starterCode' })
+    expect(result).toHaveProperty('error', expect.stringContaining('vacío'))
+  })
+
+  // The GitHub calls are the expensive part, so they come last
+  it('does not touch GitHub when the title already exists', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    await createAssignment(session, classroom.slug, withStarterCode)
+    findRepositoryByFullName.mockClear()
+
+    const result = await createAssignment(session, classroom.slug, withStarterCode)
+
+    expect(result).toMatchObject({ success: false, field: 'title' })
+    expect(findRepositoryByFullName).not.toHaveBeenCalled()
+  })
+
+  it('exposes the id through findAssignment and listAssignments', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    await createAssignment(session, classroom.slug, withStarterCode)
+
+    expect(await findAssignment(session, classroom.slug, VALID.slug)).toMatchObject({
+      starterCodeRepoId: TEMPLATE.id,
+    })
+    expect(await listAssignments(session, classroom.slug)).toMatchObject([
+      { starterCodeRepoId: TEMPLATE.id },
+    ])
   })
 })
 

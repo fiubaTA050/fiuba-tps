@@ -1,4 +1,4 @@
-import { LockIcon, PersonIcon, RepoIcon, ShieldLockIcon } from '@primer/octicons-react'
+import { FileCodeIcon, LockIcon, PersonIcon, RepoIcon, ShieldLockIcon } from '@primer/octicons-react'
 import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
@@ -6,6 +6,7 @@ import { ClassroomHeader } from '@/components/ClassroomHeader'
 import { InvitationLink } from '@/components/InvitationLink'
 import { findAssignment } from '@/lib/data/assignments'
 import { findClassroom } from '@/lib/data/organizations'
+import { findRepositoryById } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
 import { baseUrl } from '@/lib/url'
 
@@ -41,6 +42,17 @@ export default async function AssignmentPage(
 
   // AssignmentInvitation#enabled?
   const invitationsEnabled = assignment.invitationsEnabled && !classroom.archivedAt
+
+  // DA-2: only the id is stored, the name is read from GitHub at render time.
+  // Null when the template was deleted or the App lost access — the
+  // NullGitHubRepository case, shown as unreachable rather than hidden.
+  const starterCode =
+    assignment.starterCodeRepoId !== null && classroom.organization
+      ? await findRepositoryById(
+          classroom.organization.installationId,
+          assignment.starterCodeRepoId,
+        )
+      : null
 
   return (
     <>
@@ -78,6 +90,26 @@ export default async function AssignmentPage(
               </span>
             )}
           </p>
+        </div>
+
+        <div className="Box-row d-flex flex-items-center">
+          <FileCodeIcon className="mr-2 color-fg-muted" />
+          <span>
+            {assignment.starterCodeRepoId === null ? (
+              <>Sin starter code, cada alumno arranca de un repo vacío</>
+            ) : starterCode ? (
+              <>
+                Starter code:{' '}
+                <a href={starterCode.htmlUrl} className="text-mono">
+                  {starterCode.fullName}
+                </a>
+              </>
+            ) : (
+              <span className="color-fg-attention">
+                Starter code inaccesible: el repo se borró o la App perdió acceso
+              </span>
+            )}
+          </span>
         </div>
 
         <div className="Box-row d-flex flex-items-center">

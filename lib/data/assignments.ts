@@ -12,6 +12,11 @@ import {
   organizationsUsers,
 } from '@/db/schema'
 import { db } from '@/lib/db'
+import {
+  findRepositoryByFullName,
+  isRepositoryEmpty,
+  REPOSITORY_FULL_NAME,
+} from '@/lib/github/repositories'
 
 /**
  * Individual assignments data layer. DA-4: no query lives outside here, and
@@ -38,7 +43,7 @@ const SLUG_FORMAT = /^[-a-zA-Z0-9_]+$/
 const RESERVED_NAMES = ['new', 'edit']
 
 /** Which field the message belongs to, so the form can mark the input */
-export type AssignmentField = 'title' | 'slug' | 'base'
+export type AssignmentField = 'title' | 'slug' | 'starterCode' | 'base'
 
 export type CreateAssignmentResult =
   | { success: true; slug: string }
@@ -53,6 +58,8 @@ export type AssignmentListItem = {
   studentsAreRepoAdmins: boolean
   /** The key of the invitation URL. AssignmentInvitation#to_param */
   invitationKey: string
+  /** Assignment#starter_code? is `starterCodeRepoId !== null` */
+  starterCodeRepoId: number | null
 }
 
 export type NewAssignmentInput = {
@@ -61,6 +68,8 @@ export type NewAssignmentInput = {
   publicRepo: boolean
   invitationsEnabled: boolean
   studentsAreRepoAdmins: boolean
+  /** `owner/name` of the template repo, or empty for no starter code */
+  starterCodeRepo: string
 }
 
 /**
@@ -85,6 +94,7 @@ export async function listAssignments(
       invitationsEnabled: assignments.invitationsEnabled,
       studentsAreRepoAdmins: assignments.studentsAreRepoAdmins,
       invitationKey: assignmentInvitations.key,
+      starterCodeRepoId: assignments.starterCodeRepoId,
     })
     .from(assignments)
     // An inner join: `validates :assignment_invitation, presence: true` makes
@@ -128,6 +138,7 @@ export async function findAssignment(
       invitationsEnabled: assignments.invitationsEnabled,
       studentsAreRepoAdmins: assignments.studentsAreRepoAdmins,
       invitationKey: assignmentInvitations.key,
+      starterCodeRepoId: assignments.starterCodeRepoId,
     })
     .from(assignments)
     .innerJoin(
@@ -158,8 +169,7 @@ export async function findAssignment(
  *   4. deadline&.create_job
  *
  * Steps 1 to 3 carry over as they are; step 4 does not exist here (no
- * deadlines, see db/schema.ts). Starter code is not asked for yet either, so
- * `StarterCodeImportable`'s validations have nothing to check.
+ * deadlines, see db/schema.ts).
  */
 export async function createAssignment(
   session: Session,
@@ -213,6 +223,12 @@ export async function createAssignment(
     }
   }
 
+  // Last, because it is the only step that costs GitHub API calls: a
+  // submission that repeats a title is rejected without spending any. Rails
+  // ran every validation on every save and did not have that option.
+  const starterCode = await resolveStarterCode(classroom.installationId, input.starterCodeRepo)
+  if (starterCode.error) return starterCode.error
+
   try {
     // `build_assignment_invitation` + autosave: the original saves both records
     // in one transaction. It has to — an assignment without an invitation is
@@ -225,6 +241,7 @@ export async function createAssignment(
           creatorId: Number(session.user.id),
           title,
           slug,
+          starterCodeRepoId: starterCode.repositoryId,
           publicRepo: input.publicRepo,
           invitationsEnabled: input.invitationsEnabled,
           studentsAreRepoAdmins: input.studentsAreRepoAdmins,
@@ -252,6 +269,70 @@ export async function createAssignment(
   }
 
   return { success: true, slug }
+}
+
+/**
+ * Port of the StarterCode controller concern plus the two validations of
+ * StarterCodeImportable, which the original ran in different places.
+ *
+ * The original had a second path: the autocomplete posted a `repo_id` next to
+ * the typed name, and `validate_starter_code_repository_id` trusted it after a
+ * cheap existence check. There is no autocomplete here, so everything comes in
+ * as `owner/name` and is resolved to an id the same way
+ * `starter_code_repository_id` did.
+ */
+async function resolveStarterCode(
+  installationId: number,
+  input: string,
+): Promise<{ repositoryId: number | null; error?: CreateAssignmentResult }> {
+  const fullName = input.trim()
+
+  // Starter code is optional, exactly as in the original
+  if (fullName.length === 0) return { repositoryId: null }
+
+  const invalid = (error: string) => ({
+    repositoryId: null,
+    error: { success: false as const, error, field: 'starterCode' as const },
+  })
+
+  // StarterCode::WRONG_FORMAT
+  if (!REPOSITORY_FULL_NAME.test(fullName)) {
+    return invalid('Usá el formato owner/nombre, por ejemplo fiubaTA050-labs/raft-starter.')
+  }
+
+  const repository = await findRepositoryByFullName(installationId, fullName)
+
+  // StarterCode::INVALID_SELECTION. GitHub answers 404 both when the repo does
+  // not exist and when it exists but the App cannot see it, and it does that on
+  // purpose — so the message has to offer both readings. Measured: the
+  // installation token reaches any repo in an org where the App is installed,
+  // and any public repo anywhere; a private repo elsewhere is the blind spot.
+  if (!repository) {
+    return invalid(
+      `No encontramos "${fullName}". Si es privado y está en otra organización, instalá ahí ` +
+        'la App de FIUBA Classroom o hacé público el repositorio.',
+    )
+  }
+
+  // validate :starter_code_repository_is_template. The original only enforced
+  // this when template_repos_enabled; with the source importer gone it is the
+  // only way to copy starter code, so it always applies.
+  if (!repository.isTemplate) {
+    return invalid(
+      `"${repository.fullName}" no es un template repository. Activá "Template repository" ` +
+        'en Settings del repo para poder clonarlo a cada alumno.',
+    )
+  }
+
+  // validate :starter_code_repository_not_empty
+  if (await isRepositoryEmpty(installationId, repository.fullName)) {
+    return invalid(
+      `"${repository.fullName}" está vacío. Elegí un repo con contenido, o dejá el campo ` +
+        'en blanco para crear el assignment sin starter code.',
+    )
+  }
+
+  return { repositoryId: repository.id }
 }
 
 /** AssignmentInvitation#assign_key: `SecureRandom.hex(16)` */
@@ -344,9 +425,13 @@ async function findClash(
 async function findClassroomRow(
   session: Session,
   slug: string,
-): Promise<{ id: number; archivedAt: Date | null } | null> {
+): Promise<{ id: number; installationId: number; archivedAt: Date | null } | null> {
   const [row] = await db
-    .select({ id: organizations.id, archivedAt: organizations.archivedAt })
+    .select({
+      id: organizations.id,
+      installationId: organizations.installationId,
+      archivedAt: organizations.archivedAt,
+    })
     .from(organizations)
     .innerJoin(organizationsUsers, eq(organizationsUsers.organizationId, organizations.id))
     .where(

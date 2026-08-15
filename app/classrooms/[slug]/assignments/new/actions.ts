@@ -28,6 +28,8 @@ export async function createAssignmentAction(
     // `check_box` behaviour minus its hidden "0" companion.
     invitationsEnabled: formData.get('invitations_enabled') === 'on',
     studentsAreRepoAdmins: formData.get('students_are_repo_admins') === 'on',
+    // `repo_name` in the original's new_assignment_params
+    starterCodeRepo: String(formData.get('repo_name') ?? ''),
   })
 
   // render :new — the form comes back with the message

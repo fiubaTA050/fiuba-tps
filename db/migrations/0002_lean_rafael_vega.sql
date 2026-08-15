@@ -1,0 +1,1 @@
+ALTER TABLE "assignments" ADD COLUMN "starter_code_repo_id" bigint;

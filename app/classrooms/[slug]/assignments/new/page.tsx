@@ -5,6 +5,7 @@ import { notFound, redirect } from 'next/navigation'
 import { auth } from '@/auth'
 import { ClassroomHeader } from '@/components/ClassroomHeader'
 import { findClassroom } from '@/lib/data/organizations'
+import { listTemplateRepositories } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
 
 import { NewAssignmentForm } from './NewAssignmentForm'
@@ -28,6 +29,17 @@ export default async function NewAssignmentPage(
   const { slug } = await props.params
   const classroom = await findClassroom(session, slug)
   if (!classroom) notFound()
+
+  // The org's own templates, to offer without making the teacher type. An
+  // unreachable org means no list — the free-text field still works, and the
+  // server revalidates whatever arrives either way.
+  const templates =
+    classroom.organization && !classroom.archivedAt
+      ? await listTemplateRepositories(
+          classroom.organization.installationId,
+          classroom.organization.login,
+        )
+      : []
 
   return (
     <>
@@ -53,7 +65,7 @@ export default async function NewAssignmentPage(
           </Link>
         </div>
       ) : (
-        <NewAssignmentForm classroomSlug={classroom.slug} />
+        <NewAssignmentForm classroomSlug={classroom.slug} templates={templates} />
       )}
     </>
   )

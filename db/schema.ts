@@ -104,9 +104,10 @@ export const organizationsUsers = pgTable(
  *
  * Deliberate divergences from the original:
  *
- *  - `starter_code_repo_id` and `template_repos_enabled` are not here yet.
- *    The columns would be dead weight until the starter code flow is ported,
- *    and adding a nullable column later is a one-line migration.
+ *  - `template_repos_enabled` is not here. It chose between cloning a template
+ *    and the "source importer", and GitHub retired the Source Imports API the
+ *    importer called, so only the template path is left and there is nothing
+ *    to toggle. `use_template_repos?` is therefore just `starter_code?`.
  *  - Deadlines are not here either: the original's `deadlines` table only
  *    earns its keep together with the Sidekiq job that freezes submissions
  *    when it passes, and there is no job runner on Vercel.
@@ -130,6 +131,15 @@ export const assignments = pgTable(
       .references(() => users.id),
     /** Prefixes every student repo: `<slug>-<login>`, see Exercise#default_repo_name */
     slug: varchar('slug', { length: 255 }).notNull(),
+    /**
+     * Numeric id of the template repository each student repo is generated
+     * from. Null means the assignment starts from an empty repo.
+     *
+     * DA-2: only the id is stored, never the name — the original did the same,
+     * and it is what lets the teacher rename the template without breaking
+     * anything. bigint rather than the original's int4, like the other ids.
+     */
+    starterCodeRepoId: bigint('starter_code_repo_id', { mode: 'number' }),
     studentsAreRepoAdmins: boolean('students_are_repo_admins').notNull().default(false),
     invitationsEnabled: boolean('invitations_enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
