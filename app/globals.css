@@ -141,6 +141,32 @@
   font-weight: 600;
 }
 
+.Box-body {
+  padding: 16px;
+  border-bottom: 1px solid #e1e4e8;
+}
+
+.Box-body:last-of-type {
+  margin-bottom: -1px;
+  border-bottom-right-radius: 3px;
+  border-bottom-left-radius: 3px;
+}
+
+.Box-footer {
+  padding: 16px;
+  margin-top: -1px;
+  border-top: 1px solid #e1e4e8;
+}
+
+/* The dangerzone of the original's roster page */
+.Box--danger {
+  border-color: #d73a49;
+}
+
+.Box--danger .Box-body:last-of-type {
+  border-color: #d73a49;
+}
+
 .Label {
   display: inline-block;
   padding: 3px 4px;
@@ -155,6 +181,155 @@
 .Label--gray {
   color: #586069;
   background-color: #eaecef;
+}
+
+/*
+ * Classroom navigation: breadcrumb, UnderlineNav and Counter.
+ *
+ * These do not come from the archived Rails app — it navigated a classroom
+ * through a side menu (`organizations/_side_menu.html.erb`). classroom.github.com
+ * replaced that with a breadcrumb, a title band and a tab bar, and since that is
+ * the UI the cátedra uses today, the port follows it. The rules are copied
+ * verbatim off a saved copy of the live Assignments dashboard.
+ *
+ * They are not in @primer/css and they are not coming: 22.3.0 is the last
+ * release, and these components moved to the framework-specific packages —
+ * @primer/view-components, which is what the Rails site itself loads, and
+ * @primer/react. Verified identical against
+ * @primer/view-components@0.53.2's primer_view_components.css. Depending on
+ * that package instead would drop 130 KB of CSS that redefines Button, Banner
+ * and friends on top of v22, for three components.
+ *
+ * Unlike the primer 10 blocks above these keep the tokens: v22 defines every
+ * one of them. The single exception is --borderRadius-medium, which it does
+ * not, resolved to its 6px value.
+ */
+
+.breadcrumb-item {
+  display: inline-block;
+  margin-left: -0.35em;
+  list-style: none;
+}
+
+.breadcrumb-item::after {
+  display: inline-block;
+  height: 0.8em;
+  margin: 0 0.5em;
+  content: '';
+  border-right: 0.1em solid var(--borderColor-neutral-emphasis);
+  transform: rotate(15deg) translateY(0.0625em);
+}
+
+.breadcrumb-item:first-child {
+  margin-left: 0;
+}
+
+.breadcrumb-item-selected::after {
+  content: none;
+}
+
+.breadcrumb-item-selected a {
+  color: var(--fgColor-default);
+  text-decoration: none !important;
+  cursor: default !important;
+}
+
+.Link {
+  color: var(--fgColor-accent);
+  text-decoration: none;
+}
+
+.Link:hover {
+  text-decoration: underline;
+}
+
+.UnderlineNav {
+  display: flex;
+  min-height: var(--base-size-48);
+  overflow-x: auto;
+  overflow-y: hidden;
+  justify-content: space-between;
+  box-shadow: inset 0 -1px 0 var(--borderColor-muted);
+}
+
+.UnderlineNav-body {
+  display: flex;
+  min-height: var(--base-size-48);
+  list-style: none;
+  align-items: center;
+  gap: var(--control-medium-gap);
+}
+
+.UnderlineNav-item {
+  position: relative;
+  display: flex;
+  padding: 0 var(--control-medium-paddingInline-condensed);
+  font-size: var(--text-body-size-medium);
+  line-height: 30px;
+  color: var(--fgColor-default);
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+  background-color: initial;
+  border: 0;
+  border-radius: 6px;
+  align-items: center;
+}
+
+.UnderlineNav-item:hover,
+.UnderlineNav-item:focus {
+  color: var(--fgColor-default);
+  text-decoration: none;
+  border-bottom-color: var(--borderColor-neutral-muted);
+  outline-offset: -2px;
+  transition: border-bottom-color 0.12s ease-out;
+}
+
+.UnderlineNav-item[aria-current]:not([aria-current='false']) {
+  font-weight: var(--base-text-weight-semibold);
+  color: var(--fgColor-default);
+  border-bottom-color: var(--underlineNav-borderColor-active);
+}
+
+/* The 2px underline of the selected tab, drawn under the whole item */
+.UnderlineNav-item[aria-current]:not([aria-current='false'])::after {
+  position: absolute;
+  right: 50%;
+  bottom: calc(50% - 25px);
+  z-index: 1;
+  width: 100%;
+  height: 2px;
+  content: '';
+  background: var(--underlineNav-borderColor-active);
+  border-radius: 6px;
+  transform: translate(50%, -50%);
+}
+
+.UnderlineNav-octicon {
+  display: inline !important;
+  margin-right: var(--control-medium-gap);
+  color: var(--fgColor-muted);
+  fill: var(--fgColor-muted);
+}
+
+.Counter {
+  display: inline-block;
+  min-width: var(--base-size-20);
+  padding: 0 6px;
+  font-size: var(--text-body-size-small);
+  font-weight: var(--base-text-weight-medium);
+  line-height: calc(var(--base-size-20) - var(--borderWidth-thin) * 2);
+  color: var(--fgColor-default);
+  text-align: center;
+  background-color: var(--bgColor-neutral-muted, var(--color-neutral-muted));
+  border: var(--borderWidth-thin) solid var(--counter-borderColor);
+  border-radius: 2em;
+}
+
+.UnderlineNav .Counter {
+  margin-left: var(--control-medium-gap);
+  color: var(--fgColor-default);
+  background-color: var(--bgColor-neutral-muted, var(--color-neutral-muted));
 }
 
 /*

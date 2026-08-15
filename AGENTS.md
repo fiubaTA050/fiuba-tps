@@ -43,6 +43,20 @@ reference code without mental translation. The confusing one:
 - **The org list comes from `GET /user/installations`**, so it only shows orgs
   where the App is installed. Orgs without it are reached through "install on
   another organization".
+- **The classroom shell follows the live site, not the archived views.** The
+  Rails code in this repo predates a redesign: classroom.github.com now tops a
+  classroom with a breadcrumb, a title band and a tab bar with counters
+  (Assignments · Students · TAs and Admins · Settings), where the archived
+  views have a GeoPattern banner and a side menu. The cátedra uses the live one
+  every day, so `components/ClassroomShell` and `components/ClassroomNav` copy
+  its markup, and `app/globals.css` its `.UnderlineNav` / `.Counter` /
+  `.breadcrumb-item` rules. Only two tabs exist here — the other two have
+  nothing behind them yet. The shell is composed by each page instead of being
+  a layout, because the new-assignment screen wears only the breadcrumb, the
+  same as the live site, and a layout cannot opt one route out. **The screens
+  inside the shell are still ported from the Rails views**: the live site
+  changed the frame, not the flows, and its roster still says "Create roster",
+  "Update students", "Add roster entries".
 
 ## Rules
 

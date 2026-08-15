@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { listClassrooms } from '@/lib/data/organizations'
+import { PageContainer } from '@/components/PageContainer'
 import { isUsableSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
@@ -17,20 +18,22 @@ export default async function ClassroomsPage() {
 
   if (classrooms.length === 0) {
     return (
-      <div className="blankslate blankslate-large blankslate-spacious">
-        <h3 className="mb-2">Todavía no tenés classrooms</h3>
-        <p className="color-fg-muted mb-4">
-          Un classroom es una organización de GitHub donde viven los repos de la materia.
-        </p>
-        <Link href="/classrooms/new" className="btn btn-primary btn-large" role="button">
-          Crear tu primer classroom
-        </Link>
-      </div>
+      <PageContainer>
+        <div className="blankslate blankslate-large blankslate-spacious">
+          <h3 className="mb-2">Todavía no tenés classrooms</h3>
+          <p className="color-fg-muted mb-4">
+            Un classroom es una organización de GitHub donde viven los repos de la materia.
+          </p>
+          <Link href="/classrooms/new" className="btn btn-primary btn-large" role="button">
+            Crear tu primer classroom
+          </Link>
+        </div>
+      </PageContainer>
     )
   }
 
   return (
-    <>
+    <PageContainer>
       <div className="Subhead Subhead--spacious">
         <h2 className="Subhead-heading">Tus classrooms</h2>
         <div className="Subhead-actions">
@@ -85,6 +88,6 @@ export default async function ClassroomsPage() {
           </article>
         ))}
       </div>
-    </>
+    </PageContainer>
   )
 }

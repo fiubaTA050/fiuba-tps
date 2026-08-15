@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { auth } from '@/auth'
 import { appInstallationUrl } from '@/lib/github/client'
 import { listUserOrganizations } from '@/lib/github/organizations'
+import { PageContainer } from '@/components/PageContainer'
 import { isUsableSession } from '@/lib/session'
 
 import { NewClassroomForm } from './NewClassroomForm'
@@ -19,7 +20,7 @@ export default async function NewClassroomPage() {
   const installUrl = appInstallationUrl('/classrooms/new')
 
   return (
-    <>
+    <PageContainer>
       <div className="Subhead Subhead--spacious">
         <h1 className="Subhead-heading">Nuevo classroom</h1>
       </div>
@@ -47,6 +48,6 @@ export default async function NewClassroomPage() {
         <a href={installUrl}>Instalar en otra organización</a>. Sólo aparecen las organizaciones
         donde la App ya está instalada.
       </div>
-    </>
+    </PageContainer>
   )
 }

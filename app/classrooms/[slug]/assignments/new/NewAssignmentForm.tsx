@@ -58,7 +58,10 @@ export function NewAssignmentForm({
 
       {errorFor('base') && <div className="flash flash-error mb-4">{errorFor('base')}</div>}
 
-      <div className="col-md-9">
+      {/* The live page frames the fields in `Box > Box-body p-5` and leaves the
+          buttons outside it, at the bottom right */}
+      <div className="Box mb-3">
+        <div className="Box-body p-5">
         <div className={`form-group mt-0 ${errorFor('title') ? 'errored' : ''}`}>
           <div className="form-group-header">
             <label htmlFor="assignment_title">Título del assignment</label>
@@ -148,17 +151,14 @@ export function NewAssignmentForm({
           </div>
         </div>
 
-        <div className="Box my-4">
-          <div className="Box-header">
-            <h3 className="Box-title">Opcional</h3>
-          </div>
+          <h3 className="h5 mt-5 pt-4 border-top">Opcional</h3>
 
           {/* Port of the "Add starter code" field. What is gone from the
               original are the template-vs-importer radios: GitHub retired the
               Source Imports API, so cloning a template is the only path left
               and there is nothing to choose between. */}
-          <div className={`Box-row ${errorFor('starterCode') ? 'errored' : ''}`}>
-            <h4 className="h5">Starter code</h4>
+          <div className={`mt-3 ${errorFor('starterCode') ? 'errored' : ''}`}>
+            <h4 className="h6">Starter code</h4>
             <p className="note mt-0 mb-2">
               El repo del que se clona el de cada alumno. Tiene que ser un{' '}
               <a
@@ -182,8 +182,8 @@ export function NewAssignmentForm({
             </p>
           </div>
 
-          <div className="Box-row">
-            <h4 className="h5">Link de invitación</h4>
+          <div className="mt-4">
+            <h4 className="h6">Link de invitación</h4>
             <div className="form-checkbox">
               <label>
                 <input type="checkbox" name="invitations_enabled" defaultChecked />
@@ -195,8 +195,8 @@ export function NewAssignmentForm({
             </div>
           </div>
 
-          <div className="Box-row">
-            <h4 className="h5">Permisos del alumno</h4>
+          <div className="mt-4">
+            <h4 className="h6">Permisos del alumno</h4>
             <div className="form-checkbox">
               <label>
                 <input type="checkbox" name="students_are_repo_admins" />
@@ -208,20 +208,20 @@ export function NewAssignmentForm({
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="form-actions">
-          <button
-            type="submit"
-            id="assignment_submit"
-            className="btn btn-primary"
-            disabled={pending}
-          >
-            {pending ? 'Creando…' : 'Crear assignment'}
-          </button>
-          <Link href={`/classrooms/${classroomSlug}`} className="btn" role="button">
-            Cancelar
-          </Link>
-        </div>
+      <div className="d-flex flex-justify-end mb-6">
+        <Link href={`/classrooms/${classroomSlug}`} className="btn mr-2" role="button">
+          Cancelar
+        </Link>
+        <button
+          type="submit"
+          id="assignment_submit"
+          className="btn btn-primary"
+          disabled={pending}
+        >
+          {pending ? 'Creando…' : 'Crear assignment'}
+        </button>
       </div>
     </form>
   )

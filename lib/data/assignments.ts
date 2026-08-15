@@ -2,7 +2,7 @@ import 'server-only'
 
 import { randomBytes } from 'node:crypto'
 
-import { and, asc, eq, isNull, or } from 'drizzle-orm'
+import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
@@ -111,6 +111,23 @@ export async function listAssignments(
     .orderBy(asc(assignments.id))
 
   return rows
+}
+
+/**
+ * The counter of the Assignments tab. `@organization.assignments.count` in the
+ * original's terms, except the original never showed one — the tab bar with
+ * counters comes from the live site, see components/ClassroomNav.
+ */
+export async function countAssignments(session: Session, classroomSlug: string): Promise<number> {
+  const classroom = await findClassroomRow(session, classroomSlug)
+  if (!classroom) return 0
+
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(assignments)
+    .where(and(eq(assignments.organizationId, classroom.id), isNull(assignments.deletedAt)))
+
+  return row.count
 }
 
 /**

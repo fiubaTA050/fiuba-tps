@@ -18,9 +18,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     // borders and text colors silently disappear.
     <html lang="es" data-color-mode="light" data-light-theme="light" data-dark-theme="dark">
       <body>
-        <main className="color-bg-subtle" style={{ minHeight: '100vh' }}>
+        {/* No container here: the classroom shell paints full-width bands
+            (breadcrumb, title, tabs) and puts the container back around its own
+            content, so every other page brings its own PageContainer */}
+        <main style={{ minHeight: '100vh' }}>
           <SiteHeader />
-          <div className="container-lg p-responsive py-4">{children}</div>
+          {children}
         </main>
       </body>
     </html>

@@ -2,7 +2,7 @@ import { FileCodeIcon, LockIcon, PersonIcon, RepoIcon, ShieldLockIcon } from '@p
 import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
-import { ClassroomHeader } from '@/components/ClassroomHeader'
+import { ClassroomShell } from '@/components/ClassroomShell'
 import { InvitationLink } from '@/components/InvitationLink'
 import { findAssignment } from '@/lib/data/assignments'
 import { findClassroom } from '@/lib/data/organizations'
@@ -55,91 +55,89 @@ export default async function AssignmentPage(
       : null
 
   return (
-    <>
-      <ClassroomHeader classroom={classroom} />
+    <ClassroomShell session={session} classroom={classroom} tab="assignments">
+        {justCreated && (
+          <div className="flash flash-success mb-4">
+            Assignment creado. Compartí el link de invitación con los alumnos.
+          </div>
+        )}
 
-      {justCreated && (
-        <div className="flash flash-success mb-4">
-          Assignment creado. Compartí el link de invitación con los alumnos.
+        <div className="d-flex flex-items-center mb-2">
+          <PersonIcon size={22} className="mr-2 color-fg-muted" />
+          <h2 className="f2 text-normal flex-auto">{assignment.title}</h2>
         </div>
-      )}
 
-      <div className="d-flex flex-items-center mb-2">
-        <PersonIcon size={22} className="mr-2 color-fg-muted" />
-        <h2 className="f2 text-normal flex-auto">{assignment.title}</h2>
-      </div>
+        <p className="color-fg-muted">
+          Assignment individual · los repos se van a llamar{' '}
+          <code>{assignment.slug}-usuario</code>
+        </p>
 
-      <p className="color-fg-muted">
-        Assignment individual · los repos se van a llamar{' '}
-        <code>{assignment.slug}-usuario</code>
-      </p>
+        <div className="Box my-4">
+          <div className="Box-row">
+            <h3 className="h5 mb-2">Link de invitación</h3>
+            <InvitationLink url={invitationUrl} disabled={!invitationsEnabled} />
+            <p className="note mt-2 mb-0">
+              {invitationsEnabled ? (
+                <>Compartilo con los alumnos para que acepten el assignment.</>
+              ) : (
+                // The two reasons of AssignmentInvitation#reason_for_disabled_invitations
+                <span className="color-fg-attention">
+                  {classroom.archivedAt
+                    ? 'El link está deshabilitado porque el classroom está archivado.'
+                    : 'El link está deshabilitado: este assignment no acepta invitaciones.'}
+                </span>
+              )}
+            </p>
+          </div>
 
-      <div className="Box my-4">
-        <div className="Box-row">
-          <h3 className="h5 mb-2">Link de invitación</h3>
-          <InvitationLink url={invitationUrl} disabled={!invitationsEnabled} />
-          <p className="note mt-2 mb-0">
-            {invitationsEnabled ? (
-              <>Compartilo con los alumnos para que acepten el assignment.</>
+          <div className="Box-row d-flex flex-items-center">
+            <FileCodeIcon className="mr-2 color-fg-muted" />
+            <span>
+              {assignment.starterCodeRepoId === null ? (
+                <>Sin starter code, cada alumno arranca de un repo vacío</>
+              ) : starterCode ? (
+                <>
+                  Starter code:{' '}
+                  <a href={starterCode.htmlUrl} className="text-mono">
+                    {starterCode.fullName}
+                  </a>
+                </>
+              ) : (
+                <span className="color-fg-attention">
+                  Starter code inaccesible: el repo se borró o la App perdió acceso
+                </span>
+              )}
+            </span>
+          </div>
+
+          <div className="Box-row d-flex flex-items-center">
+            {assignment.publicRepo ? (
+              <RepoIcon className="mr-2 color-fg-muted" />
             ) : (
-              // The two reasons of AssignmentInvitation#reason_for_disabled_invitations
-              <span className="color-fg-attention">
-                {classroom.archivedAt
-                  ? 'El link está deshabilitado porque el classroom está archivado.'
-                  : 'El link está deshabilitado: este assignment no acepta invitaciones.'}
-              </span>
+              <LockIcon className="mr-2 color-fg-attention" />
             )}
+            <span>
+              Repositorios <strong>{assignment.publicRepo ? 'públicos' : 'privados'}</strong>
+            </span>
+          </div>
+
+          <div className="Box-row d-flex flex-items-center">
+            <ShieldLockIcon className="mr-2 color-fg-muted" />
+            <span>
+              Los alumnos{' '}
+              <strong>{assignment.studentsAreRepoAdmins ? 'son' : 'no son'}</strong> admin de su
+              repo
+            </span>
+          </div>
+        </div>
+
+        <div className="blankslate blankslate-spacious">
+          <h3 className="mb-2">Todavía nadie aceptó &quot;{assignment.title}&quot;</h3>
+          <p className="color-fg-muted mb-0">
+            Aceptar la invitación y crear el repo de cada alumno es el próximo paso del port; por
+            ahora el link no lleva a ninguna página.
           </p>
         </div>
-
-        <div className="Box-row d-flex flex-items-center">
-          <FileCodeIcon className="mr-2 color-fg-muted" />
-          <span>
-            {assignment.starterCodeRepoId === null ? (
-              <>Sin starter code, cada alumno arranca de un repo vacío</>
-            ) : starterCode ? (
-              <>
-                Starter code:{' '}
-                <a href={starterCode.htmlUrl} className="text-mono">
-                  {starterCode.fullName}
-                </a>
-              </>
-            ) : (
-              <span className="color-fg-attention">
-                Starter code inaccesible: el repo se borró o la App perdió acceso
-              </span>
-            )}
-          </span>
-        </div>
-
-        <div className="Box-row d-flex flex-items-center">
-          {assignment.publicRepo ? (
-            <RepoIcon className="mr-2 color-fg-muted" />
-          ) : (
-            <LockIcon className="mr-2 color-fg-attention" />
-          )}
-          <span>
-            Repositorios <strong>{assignment.publicRepo ? 'públicos' : 'privados'}</strong>
-          </span>
-        </div>
-
-        <div className="Box-row d-flex flex-items-center">
-          <ShieldLockIcon className="mr-2 color-fg-muted" />
-          <span>
-            Los alumnos{' '}
-            <strong>{assignment.studentsAreRepoAdmins ? 'son' : 'no son'}</strong> admin de su
-            repo
-          </span>
-        </div>
-      </div>
-
-      <div className="blankslate blankslate-spacious">
-        <h3 className="mb-2">Todavía nadie aceptó &quot;{assignment.title}&quot;</h3>
-        <p className="color-fg-muted mb-0">
-          Aceptar la invitación y crear el repo de cada alumno es el próximo paso del port; por
-          ahora el link no lleva a ninguna página.
-        </p>
-      </div>
-    </>
+    </ClassroomShell>
   )
 }

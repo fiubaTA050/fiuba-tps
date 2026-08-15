@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import type { Session } from 'next-auth'
+import { cache } from 'react'
 
 import { appClient, installationClient, userClient } from '@/lib/github/client'
 
@@ -84,8 +85,14 @@ export async function listUserOrganizations(session: Session): Promise<GitHubOrg
  * them. It goes through the App-level API (JWT), so it does not depend on the
  * teacher's token. Returns null if the installation no longer exists — the
  * original's NullGitHubOrganization pattern.
+ *
+ * Memoised per request: the classroom shell renders in the layout and every
+ * page under it renders again, and each call is two GitHub round trips. The
+ * arguments are primitives, which is what makes React's cache hit — it
+ * compares them by identity, and `auth()` returns a fresh session object every
+ * time, so keying on the session would never dedupe.
  */
-export async function findOrganizationByInstallation(
+export const findOrganizationByInstallation = cache(async function findOrganizationByInstallation(
   installationId: number,
   userLogin: string,
 ): Promise<GitHubOrganization | null> {
@@ -108,7 +115,7 @@ export async function findOrganizationByInstallation(
   } catch {
     return null
   }
-}
+})
 
 /**
  * Port of GitHubOrganization#admin?:

@@ -1,9 +1,8 @@
-import { PersonIcon } from '@primer/octicons-react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
-import { ClassroomHeader } from '@/components/ClassroomHeader'
+import { Breadcrumb } from '@/components/Breadcrumb'
 import { findClassroom } from '@/lib/data/organizations'
 import { listTemplateRepositories } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
@@ -19,6 +18,14 @@ export const dynamic = 'force-dynamic'
  * asked first whether the assignment was individual or group. That chooser has
  * nothing to choose between until group assignments are ported, so the "Nuevo
  * assignment" button leads straight here.
+ *
+ * The frame is the live site's: breadcrumb down to "Nuevo assignment" and
+ * nothing else — no title band and no tabs, because this screen is not one of
+ * them, it is a step away from the classroom. Its `container-xl p-responsive
+ * mt-6`, the `h1.f2.mb-5` and the form inside a `Box` are copied from a saved
+ * copy of that page. What is left out is the "Assignment creation steps"
+ * sidebar: the live form is a three-step wizard, and this one is a single
+ * form — everything it asks for fits on one screen.
  */
 export default async function NewAssignmentPage(
   props: PageProps<'/classrooms/[slug]/assignments/new'>,
@@ -43,30 +50,36 @@ export default async function NewAssignmentPage(
 
   return (
     <>
-      <ClassroomHeader classroom={classroom} />
+      <Breadcrumb
+        items={[
+          { label: 'Classrooms', href: '/classrooms' },
+          { label: classroom.title, href: `/classrooms/${classroom.slug}` },
+          { label: 'Nuevo assignment', href: `/classrooms/${classroom.slug}/assignments/new` },
+        ]}
+      />
 
-      <div className="Subhead">
-        <h2 className="Subhead-heading d-flex flex-items-center">
-          <PersonIcon size={22} className="mr-2" />
-          Nuevo assignment individual
-        </h2>
+      {/* The live page is `container-xl`, but its width is spent on the
+          "Assignment creation steps" sidebar; with no sidebar to fill the left
+          third, the same class would stretch the inputs across 1280px */}
+      <div className="container-md p-responsive mt-6">
+        <h1 className="f2 mb-5">Configurá el assignment.</h1>
+
+        {/* validate :organization_is_not_archived. The original let you open
+            the form and only failed on submit; refusing here says it sooner. */}
+        {classroom.archivedAt ? (
+          <div className="blankslate blankslate-spacious">
+            <h3 className="mb-2">Este classroom está archivado</h3>
+            <p className="color-fg-muted mb-4">
+              No se pueden crear assignments en un classroom archivado.
+            </p>
+            <Link href={`/classrooms/${classroom.slug}`} className="btn" role="button">
+              Volver al classroom
+            </Link>
+          </div>
+        ) : (
+          <NewAssignmentForm classroomSlug={classroom.slug} templates={templates} />
+        )}
       </div>
-
-      {/* validate :organization_is_not_archived. The original let you open the
-          form and only failed on submit; refusing here says it sooner. */}
-      {classroom.archivedAt ? (
-        <div className="blankslate blankslate-spacious">
-          <h3 className="mb-2">Este classroom está archivado</h3>
-          <p className="color-fg-muted mb-4">
-            No se pueden crear assignments en un classroom archivado.
-          </p>
-          <Link href={`/classrooms/${classroom.slug}`} className="btn" role="button">
-            Volver al classroom
-          </Link>
-        </div>
-      ) : (
-        <NewAssignmentForm classroomSlug={classroom.slug} templates={templates} />
-      )}
     </>
   )
 }
