@@ -140,20 +140,25 @@ implica ser miembro. Hay 21 teams con los nombres de los grupos. Para
 individuales, ni el original ni este port agregan a nadie a la organización: el
 alumno queda como outside collaborator del repo.
 
-## Lo que falta confirmar
+## Verificado contra GitHub real
 
-**Aceptar la invitación al repo con el token del alumno.** Es el único paso que
-nunca se ejecutó contra GitHub. La verificación end-to-end se hizo con la cuenta
-del docente, que como owner de la organización ya alcanza cualquier repo: GitHub
-responde 204 sin crear invitación, así que `acceptRepositoryInvitation` no se
-llama. Con una cuenta de alumno de verdad la respuesta es 201 con una
-invitación, y ahí se ejercita.
+El 15/08/2026, con `@eespina-hu` — una cuenta que **no** es miembro de la
+organización, que es la única forma de ejercitar el camino real: a un miembro
+GitHub lo agrega directo con 204 y nunca crea invitación.
 
-Es el paso que decide si el alumno recibe un mail o no, así que **conviene
-probarlo con una cuenta ajena antes del primer TP.** El resto del camino sí está
-verificado contra GitHub real: repo creado desde el template con su commit
-inicial, alumno como colaborador con permiso `push`, idempotente al recargar, y
-el docente viéndolo como "Aceptó".
+- repo generado desde el template, privado, con su commit inicial;
+- **0 invitaciones pendientes**: `acceptRepositoryInvitation` corrió y la aceptó
+  con el token del alumno, así que no le llega ningún mail que clickear;
+- permiso `push`, respetando `students_are_repo_admins: false`;
+- la cuenta quedó como **outside collaborator** de la organización y sigue sin
+  ser miembro, que es exactamente el estado esperado y la huella de que la
+  invitación existió y fue aceptada;
+- idempotente al recargar, y el docente lo ve como "Aceptó".
+
+Las pruebas anteriores con la cuenta del docente (owner) y con una cuenta
+miembro daban todos los ✓ igual, pero **no probaban nada sobre la invitación**:
+las dos caían en el 204. Si hay que volver a verificar esto, tiene que ser con
+una cuenta de afuera.
 
 ## Cuándo cambiar esto
 
