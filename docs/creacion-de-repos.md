@@ -134,11 +134,37 @@ ningún reintento puede tomar el lock. La pantalla muestra el botón de reintent
 pasado ese mismo tiempo, para que haya algo que apretar.
 
 Los 67 miembros de la organización tampoco los puso el flujo individual: salen
-de los **group assignments**, que crean un GitHub Team por grupo
-(`RepoAccess` → `add_membership` + `accept_membership`), y estar en un team
-implica ser miembro. Hay 21 teams con los nombres de los grupos. Para
-individuales, ni el original ni este port agregan a nadie a la organización: el
-alumno queda como outside collaborator del repo.
+de los **group assignments** del Classroom original, que crean un GitHub Team
+por grupo (`RepoAccess` → `add_membership` + `accept_membership`), y estar en un
+team implica ser miembro. Hay 21 teams con los nombres de los grupos. Este port
+no hace nada de eso: ni individuales ni grupales agregan a nadie a la
+organización, todos quedan como outside collaborators del repo (ver AGENTS.md).
+
+## Los grupales
+
+Misma ruta, misma forma, con dos diferencias.
+
+**Un repo por equipo, no por alumno.** El lock vive en `group_invite_statuses`,
+que está indexado por equipo: el primer integrante que llega lo toma y crea el
+repo; los demás ven `working` y poletean hasta que aparece. Para una cátedra de
+~100 alumnos en equipos de 3, son ~33 `generate` en vez de ~100.
+
+**El acceso lo pide cada integrante en su propio request.** El original agrega
+el team al repo una vez y todos heredan; sin team no hay tal handle, y invitar a
+alguien que no está haciendo el request le dejaría una invitación pendiente en
+el mail — justo lo que este diseño evita. Así que cada uno se agrega a sí mismo
+y acepta con su token, en `claimPendingTeamInvitation`, que corre cada vez que
+pasa por la pantalla de setup. Es idempotente: si ya tiene acceso, GitHub
+contesta 204 y no hay invitación que aceptar.
+
+La cuenta de requests que crean contenido queda: un `generate` por equipo más
+una invitación de colaborador por integrante. Para 100 alumnos en 33 equipos son
+~133, contra los ~200 de un TP individual. Los grupales aprietan menos.
+
+La única excepción es **mover un integrante de equipo desde la pantalla del
+docente**: ahí el request es del docente, no del alumno, así que la invitación
+al repo del equipo nuevo queda pendiente y le llega por mail. También la levanta
+sola la próxima vez que el alumno abre el link del TP.
 
 ## Verificado contra GitHub real
 
@@ -159,6 +185,36 @@ Las pruebas anteriores con la cuenta del docente (owner) y con una cuenta
 miembro daban todos los ✓ igual, pero **no probaban nada sobre la invitación**:
 las dos caían en el 204. Si hay que volver a verificar esto, tiene que ser con
 una cuenta de afuera.
+
+### Los grupales, el 15/08/2026
+
+Con **dos** cuentas de afuera, que es lo que pide el caso del segundo
+integrante: `@espinaemmanuel` —sacada de la org a propósito para esto— y
+`@eespina-hu`. El TP `verif-grupal-748877`, equipo "Distreet boys",
+`max_members: 3`, `max_teams: 5`.
+
+- **Un solo repo para el equipo**: `verif-grupal-748877-distreet-boys`, privado.
+  Una fila en `group_assignment_repos`, un `group_invite_status` en `completed`,
+  dos en `groups_users`.
+- El nombre sale del `parameterize` de este port, no del slug que GitHub le
+  habría puesto a un team.
+- **Los dos integrantes con `push` y 0 invitaciones pendientes.** El segundo no
+  creó nada: entró por `claimPendingTeamInvitation` en la pantalla de setup y
+  aceptó con su propio token. Este es el punto que ningún test mockeado podía
+  contestar, y es el que decidía si a todos los integrantes menos uno les
+  llegaba un mail para clickear. No les llega.
+- **Ningún team creado y ningún miembro nuevo**: la org quedó con los mismos 21
+  teams (todos con `created_at` viejo, del Classroom original) y los mismos 66
+  miembros. El repo tiene 0 teams con acceso.
+- La pantalla de roster ("Padrón") aparece también en el flujo grupal y el
+  "Saltear por ahora" funciona.
+
+Ojo con un detalle al repetir esto: uno de los 21 teams viejos se llama igual
+que el equipo que se use para probar, así que comparar por nombre da falsos
+positivos. Lo que dice que no se creó nada es el `created_at` de los teams.
+
+Para conseguir el token de cada alumno se usó el **device flow** de la App, que
+hay que habilitar en *Optional features* y conviene volver a apagar después.
 
 ## Cuándo cambiar esto
 

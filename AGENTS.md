@@ -57,6 +57,40 @@ reference code without mental translation. The confusing one:
   inside the shell are still ported from the Rails views**: the live site
   changed the frame, not the flows, and its roster still says "Create roster",
   "Update students", "Add roster entries".
+- **Group assignments do not use GitHub Teams.** The original gives every group
+  a GitHub team and grants the team push access to the repository, which forces
+  every student into the organization as a member. Here each member is an
+  outside collaborator of the team's repository, the same mechanism the
+  individual assignments already use. The original itself explains why its
+  design is not worth copying, in `app/models/assignment_repo.rb:45`: it used
+  one-person teams for individual assignments too, until "the new organization
+  permissions came out […] we were able to move these students over to being an
+  outside collaborator" — it migrated that path and left the group one behind.
+  Teams also drag along an organization invitation the student has to accept and
+  an `admin:org` scope on a student's token
+  (`config/initializers/scopes.rb:6`). Consequences, all deliberate:
+  - `repo_accesses` + `groups_repo_accesses` collapse into `groups_users`, and
+    `groups.github_team_id` does not exist.
+  - Access is granted **per member, by that member's own request**: the first
+    one to arrive builds the repository, and everyone else picks up their own
+    collaborator invitation on the setup screen, so nobody gets an email to
+    click. See `docs/creacion-de-repos.md`.
+  - Moving a student between teams has to reconcile collaborators by hand
+    (`moveMember` in `lib/data/groups.ts`), where the original just moved the
+    team membership.
+- **The teacher's team screen works.** In the original, `groupings#show`
+  advertises drag and drop, but `team-management.js:28` only updates the counter
+  in the DOM and never posts; `groups#add_membership` and `#remove_membership`
+  exist and nothing calls them, behind a Flipper feature nobody outside GitHub
+  had. Without GitHub teams there is no by-hand fix in the org, so this screen
+  is the only way to correct a student who joined the wrong team.
+- **A team name is unique per classroom**, where the original scopes it to the
+  grouping. Several classrooms share one GitHub organization, so this is the
+  scope a student can be told about.
+- **An assignment slug is unique across the whole GitHub organization**, not
+  just the classroom, and across both kinds of assignment. The slug is a
+  repository prefix and repository names belong to the org, which hosts one
+  classroom per term — see `lib/data/assignment-fields.ts`.
 
 ## Rules
 

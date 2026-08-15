@@ -56,15 +56,19 @@ type CreateResult =
   | { status: 'unaccepted' }
 
 export function SetupProgress({
-  invitationKey,
+  basePath,
   initialStatus,
   initialRepoUrl,
   repoName,
+  teamName,
 }: {
-  invitationKey: string
+  /** `/assignment-invitations/<key>` or `/group-assignment-invitations/<key>` */
+  basePath: string
   initialStatus: InviteStatusValue
   initialRepoUrl: string | null
   repoName: string
+  /** Set on a group assignment: the repository belongs to the team, not to them */
+  teamName?: string | null
 }) {
   const [status, setStatus] = useState(initialStatus)
   const [repoUrl, setRepoUrl] = useState(initialRepoUrl)
@@ -86,9 +90,7 @@ export function SetupProgress({
     setError(null)
 
     try {
-      const response = await fetch(`/assignment-invitations/${invitationKey}/create-repo`, {
-        method: 'POST',
-      })
+      const response = await fetch(`${basePath}/create-repo`, { method: 'POST' })
 
       if (!response.ok) return
 
@@ -112,7 +114,7 @@ export function SetupProgress({
     } finally {
       setWorking(false)
     }
-  }, [invitationKey])
+  }, [basePath])
 
   // The `connected()` callback of the original
   useEffect(() => {
@@ -140,7 +142,7 @@ export function SetupProgress({
 
     const timer = setInterval(async () => {
       try {
-        const response = await fetch(`/assignment-invitations/${invitationKey}/progress`)
+        const response = await fetch(`${basePath}/progress`)
         if (!response.ok) return
 
         const progress = (await response.json()) as {
@@ -162,7 +164,7 @@ export function SetupProgress({
     }, POLL_INTERVAL_MS)
 
     return () => clearInterval(timer)
-  }, [invitationKey, status, retryAt])
+  }, [basePath, status, retryAt])
 
   // Nothing has moved for long enough that the lock has expired server-side.
   // Offer the button rather than leaving the student watching a bar that will
@@ -178,6 +180,7 @@ export function SetupProgress({
   const waiting = retryAt !== null
 
   const done = status === 'completed' && repoUrl
+  const owner = teamName ? `El repositorio de ${teamName}` : 'Tu repositorio'
 
   return (
     <>
@@ -186,7 +189,7 @@ export function SetupProgress({
           repository exists, and a heading that still says "se está preparando"
           over a finished bar is worse than no heading. */}
       <h3 className="f3 text-normal mt-4 mb-3">
-        {done ? 'Tu repositorio está listo.' : 'Tu repositorio se está preparando. Esto puede demorar.'}
+        {done ? `${owner} está listo.` : `${owner} se está preparando. Esto puede demorar.`}
       </h3>
 
       <div className="Box">
@@ -216,7 +219,7 @@ export function SetupProgress({
       {done ? (
         // The body of `success.html.erb`, which is all this port needs of it
         <div className="flash flash-success mt-3">
-          Tu repositorio está listo: <a href={repoUrl}>{repoUrl}</a>
+          {owner} está listo: <a href={repoUrl}>{repoUrl}</a>
         </div>
       ) : (
         <p className="note mt-3">

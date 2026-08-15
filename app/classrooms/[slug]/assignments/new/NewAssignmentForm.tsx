@@ -4,11 +4,11 @@ import { LockIcon, RepoIcon } from '@primer/octicons-react'
 import Link from 'next/link'
 import { useActionState, useState } from 'react'
 
+import { StarterCodeField } from '@/components/StarterCodeField'
 import { parameterize } from '@/lib/data/slug'
 import type { GitHubRepository } from '@/lib/github/repositories'
 
 import { createAssignmentAction, type CreateAssignmentState } from './actions'
-import { StarterCodeField } from './StarterCodeField'
 
 /**
  * Port of assignments/new.html.erb and its

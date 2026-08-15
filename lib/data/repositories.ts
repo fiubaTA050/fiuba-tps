@@ -7,6 +7,12 @@ import {
   assignmentInvitations,
   assignmentRepos,
   assignments,
+  groupAssignmentInvitations,
+  groupAssignmentRepos,
+  groupAssignments,
+  groupInviteStatuses,
+  groups,
+  groupsUsers,
   inviteStatuses,
   organizations,
   users,
@@ -40,8 +46,12 @@ import {
  *    a worker can call it; it does not know what a session is.
  *  - `claimPendingInvitation` needs only the student's token, and is idempotent.
  *
- * Group assignments are not ported, so there is no `Exercise` hierarchy here —
- * this is `IndividualExercise` inlined.
+ * The two kinds of assignment live side by side rather than behind an
+ * `Exercise` hierarchy: what they actually share is the plan for the
+ * repository — `RepositoryPlan`, `createOnGitHub`, `availableRepoName` — and
+ * the pair of GitHub calls that grant a collaborator access. Everything else
+ * differs in which table holds the lock and which row records the repository,
+ * which is where the original's polymorphism ends up leaking anyway.
  */
 
 export type CreateRepositoryResult =
@@ -117,7 +127,13 @@ export async function createStudentRepository(
   let repository: GitHubRepository | null = null
 
   try {
-    repository = await createOnGitHub(context)
+    repository = await createOnGitHub({
+      installationId: context.installationId,
+      orgLogin: context.orgLogin,
+      baseName: `${context.assignmentSlug}-${context.githubLogin}`,
+      publicRepo: context.publicRepo,
+      starterCodeRepoId: context.starterCodeRepoId,
+    })
 
     await db.insert(assignmentRepos).values({
       assignmentId: context.assignmentId,
@@ -274,23 +290,41 @@ async function findExistingRepository(context: NonNullable<Context>) {
   return findRepositoryById(context.installationId, row.githubRepoId)
 }
 
-async function createOnGitHub(context: NonNullable<Context>): Promise<GitHubRepository> {
-  const name = await availableRepoName(context)
+/**
+ * Everything creating a repository needs, with nothing about who it is for.
+ *
+ * This is the port's `CreateGitHubRepoService::Exercise`: the original's
+ * service is written against `exercise.repo_name`, `assignment.private?` and
+ * `organization_login`, and its two subclasses differ only in where the last
+ * part of the name comes from — `github_user.login` for a student,
+ * `github_team.slug_no_cache` for a team.
+ */
+type RepositoryPlan = {
+  installationId: number
+  orgLogin: string
+  /** `<assignment-slug>-<login>` or `<assignment-slug>-<team-slug>`, before any suffix */
+  baseName: string
+  publicRepo: boolean
+  starterCodeRepoId: number | null
+}
+
+async function createOnGitHub(plan: RepositoryPlan): Promise<GitHubRepository> {
+  const name = await availableRepoName(plan)
 
   const options = {
-    owner: context.orgLogin,
+    owner: plan.orgLogin,
     name,
     // `visibility=` in the original: public_repo = visibility != "private"
-    private: !context.publicRepo,
+    private: !plan.publicRepo,
     description: `${name} creado por FIUBA Classroom`,
   }
 
   // `use_template_repos?`, which in this port is just `starter_code?`
-  if (context.starterCodeRepoId === null) {
-    return createRepository(context.installationId, options)
+  if (plan.starterCodeRepoId === null) {
+    return createRepository(plan.installationId, options)
   }
 
-  const template = await findRepositoryById(context.installationId, context.starterCodeRepoId)
+  const template = await findRepositoryById(plan.installationId, plan.starterCodeRepoId)
 
   if (!template) {
     // CreateGitHubRepoService::Errors template_repository_not_found
@@ -301,7 +335,7 @@ async function createOnGitHub(context: NonNullable<Context>): Promise<GitHubRepo
 
   const [templateOwner, templateName] = template.fullName.split('/')
 
-  return createRepositoryFromTemplate(context.installationId, {
+  return createRepositoryFromTemplate(plan.installationId, {
     ...options,
     template: { owner: templateOwner, name: templateName },
   })
@@ -315,19 +349,17 @@ async function createOnGitHub(context: NonNullable<Context>): Promise<GitHubRepo
  * wrong that another request will not fix, and an unbounded loop inside a
  * request is a way to spend the whole function budget on 404s.
  */
-async function availableRepoName(context: NonNullable<Context>): Promise<string> {
-  const base = `${context.assignmentSlug}-${context.githubLogin}`
-
+async function availableRepoName(plan: RepositoryPlan): Promise<string> {
   for (let suffixCount = 0; suffixCount < 10; suffixCount += 1) {
     const suffix = suffixCount === 0 ? '' : `-${suffixCount}`
-    const name = base.slice(0, 100 - suffix.length) + suffix
+    const name = plan.baseName.slice(0, 100 - suffix.length) + suffix
 
-    if (!(await repositoryExists(context.installationId, `${context.orgLogin}/${name}`))) {
+    if (!(await repositoryExists(plan.installationId, `${plan.orgLogin}/${name}`))) {
       return name
     }
   }
 
-  throw new Error(`Ya existen demasiados repositorios llamados "${base}".`)
+  throw new Error(`Ya existen demasiados repositorios llamados "${plan.baseName}".`)
 }
 
 /** Undo whatever got as far as GitHub, so a retry starts from nothing */
@@ -351,4 +383,251 @@ async function setStatus(
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message
   return 'No pudimos crear tu repositorio. Probá de nuevo en un momento.'
+}
+
+/**
+ * The same thing for a team. Port of the GroupExercise branch of
+ * CreateGitHubRepoService.
+ *
+ * Two things differ from the individual flow, and only two:
+ *
+ *  - the repository is named after the team, `<slug>-<team-slug>`, and the row
+ *    that records it hangs off the team, so the whole team shares one
+ *    repository and one `group_invite_statuses` row;
+ *  - access is granted **per member, by that member's own request**. The
+ *    original adds the GitHub team to the repository once and every member
+ *    inherits it; with outside collaborators there is no such handle, and
+ *    inviting somebody who is not making the request would leave them a
+ *    pending invitation in their email — the exact thing
+ *    docs/creacion-de-repos.md keeps this flow in the browser to avoid. So
+ *    whoever gets here grants themselves access, and the teammates who arrive
+ *    later grant themselves theirs through `claimPendingTeamInvitation`, which
+ *    their own setup screen calls.
+ */
+export async function createTeamRepository(
+  session: Session,
+  key: string,
+): Promise<CreateRepositoryResult> {
+  const context = await loadTeamContext(session, key)
+  if (!context) return { status: 'errored', error: 'No encontramos esa invitación.' }
+
+  const existing = await findExistingTeamRepository(context)
+
+  if (existing) {
+    // Already built by a teammate: this member still needs their own access
+    await grantAccess(session, context, existing.fullName)
+    return { status: 'completed', repoUrl: existing.htmlUrl }
+  }
+
+  if (!context.invitationsEnabled || context.archivedAt) {
+    return { status: 'errored', error: 'Las invitaciones para este assignment están cerradas.' }
+  }
+
+  // The same lock as the individual flow, including the expiry that a request
+  // dying mid-flight would otherwise leave held forever
+  const staleLock = sql`${groupInviteStatuses.status} = 'creating_repo' and ${groupInviteStatuses.updatedAt} < now() - interval '5 minutes'`
+
+  const [locked] = await db
+    .update(groupInviteStatuses)
+    .set({ status: 'creating_repo', updatedAt: new Date() })
+    .where(
+      and(
+        eq(groupInviteStatuses.id, context.statusId),
+        or(
+          inArray(groupInviteStatuses.status, ['accepted', 'errored_creating_repo']),
+          staleLock,
+        ),
+      ),
+    )
+    .returning({ id: groupInviteStatuses.id })
+
+  if (!locked) {
+    // A teammate is mid-flight — or nobody on this team ever accepted
+    return context.status === 'unaccepted' ? { status: 'unaccepted' } : { status: 'working' }
+  }
+
+  let repository: GitHubRepository | null = null
+
+  try {
+    repository = await createOnGitHub({
+      installationId: context.installationId,
+      orgLogin: context.orgLogin,
+      baseName: `${context.assignmentSlug}-${context.teamSlug}`,
+      publicRepo: context.publicRepo,
+      starterCodeRepoId: context.starterCodeRepoId,
+    })
+
+    await db.insert(groupAssignmentRepos).values({
+      groupAssignmentId: context.assignmentId,
+      groupId: context.teamId,
+      githubRepoId: repository.id,
+    })
+
+    await grantAccess(session, context, repository.fullName)
+
+    await setTeamStatus(context.statusId, 'completed')
+
+    return { status: 'completed', repoUrl: repository.htmlUrl }
+  } catch (error) {
+    const retryAfter = secondaryRateLimitDelay(error)
+    if (retryAfter !== null) {
+      await rollbackTeam(context, repository)
+      await setTeamStatus(context.statusId, 'accepted')
+      return { status: 'retry', retryAfter }
+    }
+
+    // Two teammates raced past the lock into the same insert. Whoever won built
+    // the team's repository, which is a success for both of them.
+    if (isUniqueViolation(error)) {
+      await rollbackTeam(context, repository)
+      const built = await findExistingTeamRepository(context)
+      if (built) {
+        await grantAccess(session, context, built.fullName)
+        await setTeamStatus(context.statusId, 'completed')
+        return { status: 'completed', repoUrl: built.htmlUrl }
+      }
+    }
+
+    await rollbackTeam(context, repository)
+    await setTeamStatus(context.statusId, 'errored_creating_repo')
+
+    return { status: 'errored', error: errorMessage(error) }
+  }
+}
+
+/**
+ * One member's own access to their team's repository, on its own.
+ *
+ * This is what every member except the one who created the repository goes
+ * through, and it is idempotent: `addCollaborator` answers 204 with no
+ * invitation for somebody who already has access.
+ */
+export async function claimPendingTeamInvitation(session: Session, key: string): Promise<void> {
+  const context = await loadTeamContext(session, key)
+  if (!context) return
+
+  const repository = await findExistingTeamRepository(context)
+  if (!repository) return
+
+  await grantAccess(session, context, repository.fullName)
+}
+
+/** The team's repository for this assignment, resolved against GitHub (DA-2) */
+export async function findTeamRepository(
+  session: Session,
+  key: string,
+): Promise<GitHubRepository | null> {
+  const context = await loadTeamContext(session, key)
+  return context ? findExistingTeamRepository(context) : null
+}
+
+type TeamContext = NonNullable<Awaited<ReturnType<typeof loadTeamContext>>>
+
+/** `add_user_to_github_repository!` for the member making the request */
+async function grantAccess(session: Session, context: TeamContext, fullName: string) {
+  const invitationId = await addCollaborator(
+    context.installationId,
+    fullName,
+    context.githubLogin,
+    context.studentsAreRepoAdmins ? 'admin' : 'push',
+  )
+
+  if (invitationId !== null) await acceptRepositoryInvitation(session, invitationId)
+}
+
+/** Everything the creation needs, for the caller's team */
+async function loadTeamContext(session: Session, key: string) {
+  const userId = Number(session.user.id)
+
+  const [row] = await db
+    .select({
+      assignmentId: groupAssignments.id,
+      assignmentSlug: groupAssignments.slug,
+      publicRepo: groupAssignments.publicRepo,
+      studentsAreRepoAdmins: groupAssignments.studentsAreRepoAdmins,
+      starterCodeRepoId: groupAssignments.starterCodeRepoId,
+      invitationsEnabled: groupAssignments.invitationsEnabled,
+      installationId: organizations.installationId,
+      archivedAt: organizations.archivedAt,
+      teamId: groups.id,
+      teamSlug: groups.slug,
+      statusId: groupInviteStatuses.id,
+      status: groupInviteStatuses.status,
+      githubLogin: users.githubLogin,
+    })
+    .from(groupAssignmentInvitations)
+    .innerJoin(
+      groupAssignments,
+      and(
+        eq(groupAssignments.id, groupAssignmentInvitations.groupAssignmentId),
+        isNull(groupAssignments.deletedAt),
+      ),
+    )
+    .innerJoin(
+      organizations,
+      and(eq(organizations.id, groupAssignments.organizationId), isNull(organizations.deletedAt)),
+    )
+    // Inner: without a team of this set the caller never accepted, and there is
+    // nothing here for them
+    .innerJoin(
+      groupsUsers,
+      and(
+        eq(groupsUsers.groupingId, groupAssignments.groupingId),
+        eq(groupsUsers.userId, userId),
+      ),
+    )
+    .innerJoin(groups, eq(groups.id, groupsUsers.groupId))
+    .innerJoin(
+      groupInviteStatuses,
+      and(
+        eq(groupInviteStatuses.groupAssignmentInvitationId, groupAssignmentInvitations.id),
+        eq(groupInviteStatuses.groupId, groupsUsers.groupId),
+      ),
+    )
+    .innerJoin(users, eq(users.id, userId))
+    .where(
+      and(eq(groupAssignmentInvitations.key, key), isNull(groupAssignmentInvitations.deletedAt)),
+    )
+
+  if (!row?.githubLogin) return null
+
+  const organization = await findInstallationAccount(row.installationId)
+  if (!organization) return null
+
+  return { ...row, githubLogin: row.githubLogin, userId, orgLogin: organization.login }
+}
+
+async function findExistingTeamRepository(context: TeamContext) {
+  const [row] = await db
+    .select({ githubRepoId: groupAssignmentRepos.githubRepoId })
+    .from(groupAssignmentRepos)
+    .where(
+      and(
+        eq(groupAssignmentRepos.groupAssignmentId, context.assignmentId),
+        eq(groupAssignmentRepos.groupId, context.teamId),
+      ),
+    )
+
+  if (!row) return null
+
+  return findRepositoryById(context.installationId, row.githubRepoId)
+}
+
+async function rollbackTeam(context: TeamContext, repository: GitHubRepository | null) {
+  if (!repository) return
+
+  await db
+    .delete(groupAssignmentRepos)
+    .where(eq(groupAssignmentRepos.githubRepoId, repository.id))
+  await deleteRepository(context.installationId, repository.fullName)
+}
+
+async function setTeamStatus(
+  statusId: number,
+  status: 'accepted' | 'completed' | 'errored_creating_repo',
+) {
+  await db
+    .update(groupInviteStatuses)
+    .set({ status, updatedAt: new Date() })
+    .where(eq(groupInviteStatuses.id, statusId))
 }

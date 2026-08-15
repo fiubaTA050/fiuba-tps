@@ -1,61 +1,56 @@
-import { MarkGithubIcon, PersonIcon } from '@primer/octicons-react'
+import { MarkGithubIcon, OrganizationIcon } from '@primer/octicons-react'
 import { notFound, redirect } from 'next/navigation'
 import type { Session } from 'next-auth'
 
 import { auth, signIn } from '@/auth'
 import { InvitationShell } from '@/components/InvitationShell'
+import { JoinRosterForm } from '@/components/JoinRosterForm'
 import { PageContainer } from '@/components/PageContainer'
-import { findInvitation, listUnlinkedRosterEntries } from '@/lib/data/invitations'
+import {
+  findGroupInvitation,
+  listInvitationTeams,
+  listUnlinkedEntriesForGroup,
+} from '@/lib/data/group-invitations'
 import { findInstallationAccount } from '@/lib/github/organizations'
 import { isUsableSession } from '@/lib/session'
 
-import { AcceptForm } from './AcceptForm'
 import { joinRosterAction } from './actions'
-import { JoinRosterForm } from '@/components/JoinRosterForm'
+import { TeamPicker } from './TeamPicker'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Port of AssignmentInvitationsController#show, with the
- * `check_should_redirect_to_roster_page` before_action that renders
- * `join_roster` instead, and the `show` branch of `route_based_on_status`.
+ * Port of GroupAssignmentInvitationsController#show, with the
+ * `check_user_not_group_member` and `check_should_redirect_to_roster_page`
+ * before_actions.
  *
- * The original's #success is not ported: its whole body is a link to
- * `current_submission.github_repository.html_url`, and no repository exists in
- * this port yet. `completed` is unreachable for the same reason, so every
- * status past `unaccepted` lands on /setup.
+ * The three routes the original's `route_based_on_status` sorts between are the
+ * same three here: no team yet → this picker; a team that never accepted →
+ * /accept; anything past that → /setup.
  */
-export default async function AssignmentInvitationPage(
-  props: PageProps<'/assignment-invitations/[key]'>,
+export default async function GroupAssignmentInvitationPage(
+  props: PageProps<'/group-assignment-invitations/[key]'>,
 ) {
   const { key } = await props.params
   const searchParams = await props.searchParams
 
   const session = await auth()
-
-  // The original's `authenticate_user!`, which redirected to login_path and
-  // came back here. Rendered rather than redirected: `/` would sign them in
-  // and land on /classrooms, which a student has no business seeing, and the
-  // assignment they were invited to would be lost on the way.
   if (!isUsableSession(session)) return <SignIn invitationKey={key} />
 
-  const invitation = await findInvitation(session, key)
-
-  // `find_by!(key: params[:id])` raising RecordNotFound
+  const invitation = await findGroupInvitation(session, key)
   if (!invitation) notFound()
 
-  // route_based_on_status: anything past `unaccepted` belongs on #setup
-  if (invitation.status !== 'unaccepted') {
-    redirect(`/assignment-invitations/${key}/setup`)
+  // check_user_not_group_member: the pick is over once they are on a team
+  if (invitation.team) {
+    redirect(
+      invitation.status === 'unaccepted'
+        ? `/group-assignment-invitations/${key}/accept`
+        : `/group-assignment-invitations/${key}/setup`,
+    )
   }
 
-  // DA-2: the org is read from GitHub. Resolved through the App's own JWT, so
-  // it works for a student who belongs to no classroom and may not even be a
-  // member of the organization yet.
   const organization = await findInstallationAccount(invitation.classroom.installationId)
 
-  // check_should_redirect_to_roster_page: a roster exists, the student is not
-  // on it, and they did not ask to skip
   const joinRoster =
     invitation.roster !== null &&
     invitation.rosterEntry === null &&
@@ -65,7 +60,6 @@ export default async function AssignmentInvitationPage(
 
   return (
     <InvitationShell classroomTitle={invitation.classroom.title} organization={organization}>
-      {/* flash[:success] of #join_roster, which names the entry it linked */}
       {searchParams.joined === '1' && invitation.rosterEntry && (
         <div className="flash flash-success mb-4">
           Tu cuenta quedó vinculada a {invitation.rosterEntry.identifier} en el roster. Si no es
@@ -82,9 +76,9 @@ export default async function AssignmentInvitationPage(
       ) : (
         <>
           <div className="d-flex flex-items-center mb-2">
-            <PersonIcon size={22} className="mr-2 color-fg-muted" />
+            <OrganizationIcon size={22} className="mr-2 color-fg-muted" />
             <h2 className="f2 text-normal">
-              Aceptar el assignment <strong>{invitation.assignmentTitle}</strong>
+              Aceptar el assignment grupal <strong>{invitation.assignmentTitle}</strong>
             </h2>
           </div>
 
@@ -94,47 +88,57 @@ export default async function AssignmentInvitationPage(
               <strong className="text-mono">{invitation.rosterEntry.identifier}</strong>.
             </p>
           ) : invitation.roster ? (
-            // They skipped: the original left no trace of this, and a teacher
-            // chasing an unlinked account is the cost of that silence
             <p className="color-fg-muted">
               Todavía no elegiste tu {invitation.roster.identifierName.toLowerCase()}.{' '}
-              <a href={`/assignment-invitations/${key}`}>Elegirlo ahora</a>
+              <a href={`/group-assignment-invitations/${key}`}>Elegirlo ahora</a>
             </p>
           ) : null}
 
-          <div className="Box my-4">
-            <div className="Box-row">
-              {invitation.enabled ? (
-                <p className="mb-0">
-                  Aceptar este assignment te va a dar acceso al repositorio{' '}
-                  <strong className="text-mono">
-                    {invitation.assignmentSlug}-{session.user.githubLogin}
-                  </strong>{' '}
-                  en la organización{' '}
-                  {organization ? (
-                    <a href={`https://github.com/${organization.login}`}>@{organization.login}</a>
-                  ) : (
-                    'de la cátedra'
-                  )}{' '}
-                  en GitHub.
-                </p>
-              ) : (
-                // Decision for this port: the reason is shown on the way in,
-                // instead of only after clicking a button that cannot work.
-                // AssignmentInvitation#reason_for_disabled_invitations
-                <p className="mb-0">{invitation.disabledReason}</p>
-              )}
-            </div>
-          </div>
+          {invitation.enabled ? (
+            <>
+              <div className="Box my-4">
+                <div className="Box-row">
+                  <p className="mb-0">
+                    Aceptar este assignment le va a dar a tu equipo acceso a un repositorio en la
+                    organización{' '}
+                    {organization ? (
+                      <a href={`https://github.com/${organization.login}`}>@{organization.login}</a>
+                    ) : (
+                      'de la cátedra'
+                    )}{' '}
+                    en GitHub.
+                  </p>
+                  {/* "Please be certain that the team you are selecting is the
+                      correct team as you cannot change this later" — softened,
+                      because unlike the original there is a teacher screen that
+                      can fix it */}
+                  <p className="mb-0 mt-2 color-fg-muted">
+                    Elegí con cuidado: no vas a poder cambiarte de equipo solo. Si te equivocás,
+                    escribile al docente.
+                  </p>
+                </div>
+              </div>
 
-          {invitation.enabled && <AcceptForm invitationKey={key} />}
+              <TeamPicker
+                invitationKey={key}
+                {...(await listInvitationTeams(session, key))}
+                maxMembers={invitation.maxMembers}
+              />
+            </>
+          ) : (
+            <div className="Box my-4">
+              <div className="Box-row">
+                <p className="mb-0">{invitation.disabledReason}</p>
+              </div>
+            </div>
+          )}
         </>
       )}
     </InvitationShell>
   )
 }
 
-/** The `join_roster` view, whose list is the only thing that needs a query */
+/** The `join_roster` view, shared with the individual flow */
 async function JoinRoster({
   invitationKey,
   identifierName,
@@ -144,12 +148,12 @@ async function JoinRoster({
   identifierName: string
   session: Session
 }) {
-  const entries = await listUnlinkedRosterEntries(session, invitationKey)
+  const entries = await listUnlinkedEntriesForGroup(session, invitationKey)
 
   return (
     <>
       <div className="d-flex flex-items-center mb-2">
-        <PersonIcon size={22} className="mr-2 color-fg-muted" />
+        <OrganizationIcon size={22} className="mr-2 color-fg-muted" />
         <h2 className="f2 text-normal">Sumate al roster del classroom</h2>
       </div>
 
@@ -160,10 +164,10 @@ async function JoinRoster({
 
       <JoinRosterForm
         invitationKey={invitationKey}
-        joinRosterAction={joinRosterAction}
         identifierName={identifierName}
         entries={entries}
-        skipHref={`/assignment-invitations/${invitationKey}?roster=ignore`}
+        skipHref={`/group-assignment-invitations/${invitationKey}?roster=ignore`}
+        joinRosterAction={joinRosterAction}
       />
     </>
   )
@@ -183,7 +187,7 @@ function SignIn({ invitationKey }: { invitationKey: string }) {
           action={async () => {
             'use server'
             await signIn('github', {
-              redirectTo: `/assignment-invitations/${invitationKey}`,
+              redirectTo: `/group-assignment-invitations/${invitationKey}`,
             })
           }}
         >

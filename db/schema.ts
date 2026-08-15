@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import {
   bigint,
   boolean,
+  foreignKey,
   index,
   integer,
   pgEnum,
@@ -9,6 +10,7 @@ import {
   primaryKey,
   serial,
   timestamp,
+  unique,
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core'
@@ -396,6 +398,283 @@ export const inviteStatuses = pgTable(
   ],
 )
 
+/**
+ * A reusable set of teams. Port of `groupings`.
+ *
+ * The teams of a classroom belong to a set, not to an assignment, which is what
+ * lets the second group assignment of the term run on the teams formed for the
+ * first one — the `select` of `_group_assignment_form_options.html.erb`.
+ */
+export const groupings = pgTable(
+  'groupings',
+  {
+    id: serial('id').primaryKey(),
+    organizationId: integer('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 255 }).notNull(),
+    slug: varchar('slug', { length: 255 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('index_groupings_on_organization_id').on(table.organizationId),
+    // validates :title, uniqueness: { scope: :organization }
+    uniqueIndex('index_groupings_on_organization_id_and_title').on(
+      table.organizationId,
+      table.title,
+    ),
+    // validates :slug, uniqueness: { scope: :organization }
+    uniqueIndex('index_groupings_on_organization_id_and_slug').on(table.organizationId, table.slug),
+    // What the composite foreign key in `groups` points at, so that a group's
+    // denormalised `organization_id` cannot disagree with its grouping's.
+    unique('groupings_id_organization_id_key').on(table.id, table.organizationId),
+  ],
+)
+
+/**
+ * One team. Port of `groups`.
+ *
+ * Deliberate divergences from the original:
+ *
+ *  - `github_team_id` is not here. The original backs every group with a GitHub
+ *    team and gives the team push access to the repository; this port makes
+ *    each member an outside collaborator instead, the same mechanism the
+ *    individual assignments already use. The original itself explains why its
+ *    own design is not worth copying, in `app/models/assignment_repo.rb:45`:
+ *    it used one-person teams for individual assignments too, until "the new
+ *    organization permissions came out […] we were able to move these students
+ *    over to being an outside collaborator". It migrated the individual path
+ *    and left the group one behind. Teams also drag along organization
+ *    membership, an invitation the student has to accept, and an `admin:org`
+ *    scope on a student's token (`config/initializers/scopes.rb:6`).
+ *  - The name is unique per **classroom**, where the original scopes it to the
+ *    grouping. Several classrooms share one GitHub organization, so this is the
+ *    scope a student can actually be told about: "ese nombre ya está usado en
+ *    este classroom".
+ */
+export const groups = pgTable(
+  'groups',
+  {
+    id: serial('id').primaryKey(),
+    groupingId: integer('grouping_id').notNull(),
+    /**
+     * Denormalised from the grouping, so that "unique within the classroom" is
+     * an index instead of a query. The composite foreign key below is what
+     * keeps it honest.
+     */
+    organizationId: integer('organization_id').notNull(),
+    title: varchar('title', { length: 255 }).notNull(),
+    /** `title.parameterize` (Sluggable). Ends up in the repo name */
+    slug: varchar('slug', { length: 255 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('index_groups_on_grouping_id').on(table.groupingId),
+    foreignKey({
+      columns: [table.groupingId, table.organizationId],
+      foreignColumns: [groupings.id, groupings.organizationId],
+      name: 'groups_grouping_id_organization_id_fkey',
+    }).onDelete('cascade'),
+    uniqueIndex('index_groups_on_organization_id_and_slug').on(table.organizationId, table.slug),
+    // What the composite foreign key in `groups_users` points at
+    unique('groups_id_grouping_id_key').on(table.id, table.groupingId),
+  ],
+)
+
+/**
+ * Who is on which team. Replaces the original's `repo_accesses` +
+ * `groups_repo_accesses` pair.
+ *
+ * `repo_accesses` is a (user, organization) row whose whole job is to record
+ * that the student was added to the GitHub organization and to carry the
+ * one-person team of the legacy individual flow. With no organization
+ * membership and no teams there is nothing left for it to hold, so the
+ * many-to-many collapses straight onto `users`.
+ */
+export const groupsUsers = pgTable(
+  'groups_users',
+  {
+    groupId: integer('group_id').notNull(),
+    /** Denormalised from the group, for the uniqueness below */
+    groupingId: integer('grouping_id').notNull(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.groupId, table.userId] }),
+    index('index_groups_users_on_user_id').on(table.userId),
+    foreignKey({
+      columns: [table.groupId, table.groupingId],
+      foreignColumns: [groups.id, groups.groupingId],
+      name: 'groups_users_group_id_grouping_id_fkey',
+    }).onDelete('cascade'),
+    // A student belongs to exactly one team of a given set. The original only
+    // ever asks the question — `Group.joins(:repo_accesses).find_by(grouping:,
+    // repo_accesses: { id: })` in GroupAssignmentInvitation#group — and nothing
+    // stops two rows from existing, so two tabs on the team picker put a
+    // student on two teams and give them two repositories.
+    uniqueIndex('index_groups_users_on_grouping_id_and_user_id').on(
+      table.groupingId,
+      table.userId,
+    ),
+  ],
+)
+
+/**
+ * Group assignments. Port of `group_assignments`, and the mirror of
+ * `assignments` above — same columns, same divergences (no
+ * `template_repos_enabled`, no deadlines), plus the set of teams and the two
+ * limits.
+ *
+ * A separate table rather than a flag on `assignments`, as in the original: it
+ * keeps `assignment_repos.user_id` and `group_assignment_repos.group_id` both
+ * NOT NULL and their unique indexes meaningful. The sharing happens in the
+ * TypeScript, which is where the original shares it too
+ * (`CreateGitHubRepoService::Exercise` and its two subclasses).
+ *
+ * The uniqueness that is *not* here: the original's
+ * `validate :uniqueness_of_slug_across_organization` also refuses a slug that
+ * an individual `Assignment` of the same classroom already holds, and this port
+ * widens that to every classroom sharing the same `organizations.github_id` —
+ * `<slug>-<team>` is a repository name, repository names are unique per GitHub
+ * organization, and one organization hosts every year's classroom. Neither
+ * check can be an index (they span tables and rows), so both live in
+ * lib/data/group-assignments.ts.
+ */
+export const groupAssignments = pgTable(
+  'group_assignments',
+  {
+    id: serial('id').primaryKey(),
+    publicRepo: boolean('public_repo').notNull().default(true),
+    title: varchar('title', { length: 255 }).notNull(),
+    organizationId: integer('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    /** The set of teams this assignment runs on. `belongs_to :grouping` */
+    groupingId: integer('grouping_id')
+      .notNull()
+      .references(() => groupings.id),
+    creatorId: integer('creator_id')
+      .notNull()
+      .references(() => users.id),
+    /** Prefixes every team repo: `<slug>-<team-slug>` */
+    slug: varchar('slug', { length: 255 }).notNull(),
+    starterCodeRepoId: bigint('starter_code_repo_id', { mode: 'number' }),
+    /** Null means no limit, as in the original */
+    maxMembers: integer('max_members'),
+    maxTeams: integer('max_teams'),
+    studentsAreRepoAdmins: boolean('students_are_repo_admins').notNull().default(false),
+    invitationsEnabled: boolean('invitations_enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('index_group_assignments_on_organization_id').on(table.organizationId),
+    index('index_group_assignments_on_grouping_id').on(table.groupingId),
+    index('index_group_assignments_on_deleted_at').on(table.deletedAt),
+    uniqueIndex('index_group_assignments_on_organization_id_and_slug')
+      .on(table.organizationId, table.slug)
+      .where(sql`${table.deletedAt} is null`),
+    uniqueIndex('index_group_assignments_on_organization_id_and_title')
+      .on(table.organizationId, table.title)
+      .where(sql`${table.deletedAt} is null`),
+  ],
+)
+
+/** The invitation link of a group assignment. Port of `group_assignment_invitations` */
+export const groupAssignmentInvitations = pgTable(
+  'group_assignment_invitations',
+  {
+    id: serial('id').primaryKey(),
+    key: varchar('key', { length: 255 }).notNull(),
+    groupAssignmentId: integer('group_assignment_id')
+      .notNull()
+      .references(() => groupAssignments.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('index_group_assignment_invitations_on_group_assignment_id').on(table.groupAssignmentId),
+    index('index_group_assignment_invitations_on_deleted_at').on(table.deletedAt),
+    uniqueIndex('index_group_assignment_invitations_on_key').on(table.key),
+  ],
+)
+
+/**
+ * One team's repository for one group assignment. Port of
+ * `group_assignment_repos`.
+ *
+ * The same shape as `assignment_repos`, with the team where the student is: the
+ * row exists only once the GitHub repository does, and everything before that
+ * lives in `group_invite_statuses`.
+ */
+export const groupAssignmentRepos = pgTable(
+  'group_assignment_repos',
+  {
+    id: serial('id').primaryKey(),
+    githubRepoId: bigint('github_repo_id', { mode: 'number' }).notNull(),
+    groupAssignmentId: integer('group_assignment_id')
+      .notNull()
+      .references(() => groupAssignments.id, { onDelete: 'cascade' }),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('index_group_assignment_repos_on_group_assignment_id').on(table.groupAssignmentId),
+    index('index_group_assignment_repos_on_group_id').on(table.groupId),
+    uniqueIndex('index_group_assignment_repos_on_github_repo_id').on(table.githubRepoId),
+    // `validates :group, uniqueness: { scope: :group_assignment }`. In the
+    // database here: the whole team is racing the same button, and two members
+    // getting through at once would build the team two repositories.
+    uniqueIndex('index_group_assignment_repos_on_assignment_id_and_group_id').on(
+      table.groupAssignmentId,
+      table.groupId,
+    ),
+  ],
+)
+
+/**
+ * One row per (invitation, team). Port of `group_invite_statuses`.
+ *
+ * Keyed on the team, not on the student: the repository belongs to the team, so
+ * whoever accepts first drives it to `completed` and the rest of the team joins
+ * a repository that is already there. Reuses the `invite_status` enum, which is
+ * the same lifecycle.
+ */
+export const groupInviteStatuses = pgTable(
+  'group_invite_statuses',
+  {
+    id: serial('id').primaryKey(),
+    status: inviteStatusEnum('status').notNull().default('unaccepted'),
+    groupAssignmentInvitationId: integer('group_assignment_invitation_id')
+      .notNull()
+      .references(() => groupAssignmentInvitations.id, { onDelete: 'cascade' }),
+    groupId: integer('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('index_group_invite_statuses_on_group_id').on(table.groupId),
+    // validates :group_id, uniqueness: { scope: :group_assignment_invitation_id,
+    // message: "should only have 1 invitation per group" }
+    uniqueIndex('index_group_invite_statuses_on_invitation_id_and_group_id').on(
+      table.groupAssignmentInvitationId,
+      table.groupId,
+    ),
+  ],
+)
+
 export type User = typeof users.$inferSelect
 export type Organization = typeof organizations.$inferSelect
 export type Assignment = typeof assignments.$inferSelect
@@ -404,3 +683,9 @@ export type Roster = typeof rosters.$inferSelect
 export type RosterEntry = typeof rosterEntries.$inferSelect
 export type InviteStatus = typeof inviteStatuses.$inferSelect
 export type AssignmentRepo = typeof assignmentRepos.$inferSelect
+export type Grouping = typeof groupings.$inferSelect
+export type Group = typeof groups.$inferSelect
+export type GroupAssignment = typeof groupAssignments.$inferSelect
+export type GroupAssignmentInvitation = typeof groupAssignmentInvitations.$inferSelect
+export type GroupAssignmentRepo = typeof groupAssignmentRepos.$inferSelect
+export type GroupInviteStatus = typeof groupInviteStatuses.$inferSelect

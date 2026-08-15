@@ -43,6 +43,13 @@
       "when": 1786801787994,
       "tag": "0005_eager_madripoor",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786817813628,
+      "tag": "0006_boring_bloodstorm",
+      "breakpoints": true
     }
   ]
 }

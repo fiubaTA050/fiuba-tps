@@ -5,10 +5,8 @@ import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { acceptInvitation, joinRoster } from '@/lib/data/invitations'
-import { positiveInteger } from '@/lib/form'
+import { positiveInteger, type InvitationActionState } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
-
-import type { InvitationActionState } from './state'
 
 /**
  * Port of AssignmentInvitationsController#accept and #join_roster.

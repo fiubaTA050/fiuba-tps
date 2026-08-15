@@ -2,8 +2,7 @@
 
 import { useActionState } from 'react'
 
-import { joinRosterAction } from './actions'
-import { EMPTY_STATE } from './state'
+import { EMPTY_STATE, type InvitationActionState } from '@/lib/form'
 
 /**
  * Port of `shared/_shared_join_roster.html.erb`: the list the student picks
@@ -14,17 +13,27 @@ import { EMPTY_STATE } from './state'
  * id as its own `name`/`value` — the browser submits only the button that was
  * pressed, so it is the same request, without a few hundred forms in the page
  * for a cátedra-sized roster.
+ *
+ * The action is a prop because the screen is shared: the original renders this
+ * same `_shared_join_roster` from both invitation controllers, and each posts
+ * to its own #join_roster.
  */
 export function JoinRosterForm({
   invitationKey,
   identifierName,
   entries,
   skipHref,
+  joinRosterAction,
 }: {
   invitationKey: string
   identifierName: string
   entries: { id: number; identifier: string }[]
   skipHref: string
+  /** #join_roster of whichever invitation controller this screen belongs to */
+  joinRosterAction: (
+    previous: InvitationActionState,
+    formData: FormData,
+  ) => Promise<InvitationActionState>
 }) {
   const [state, action, pending] = useActionState(joinRosterAction, EMPTY_STATE)
 

@@ -8,7 +8,7 @@ import { claimPendingInvitation, findStudentRepository } from '@/lib/data/reposi
 import { findInstallationAccount } from '@/lib/github/organizations'
 import { isUsableSession } from '@/lib/session'
 
-import { SetupProgress } from './SetupProgress'
+import { SetupProgress } from '@/components/SetupProgress'
 
 export const dynamic = 'force-dynamic'
 
@@ -79,7 +79,7 @@ export default async function AssignmentInvitationSetupPage(
       ) : null}
 
       <SetupProgress
-        invitationKey={key}
+        basePath={`/assignment-invitations/${key}`}
         initialStatus={invitation.status}
         initialRepoUrl={repository?.htmlUrl ?? null}
         repoName={`${invitation.assignmentSlug}-${session.user.githubLogin}`}

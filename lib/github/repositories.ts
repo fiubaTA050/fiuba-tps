@@ -208,6 +208,39 @@ export async function addCollaborator(
 }
 
 /**
+ * The other direction, for a teacher moving a student off a team.
+ *
+ * The original never needs this: access there comes from the GitHub team, so
+ * removing somebody from the team removes it everywhere at once
+ * (`Group#remove_from_github_team`). With collaborators the access is per
+ * repository and has to be taken back the same way.
+ *
+ * Also revokes a collaborator invitation that was never accepted, which
+ * `removeCollaborator` does on its own — otherwise a student could accept an
+ * email invitation to a repository they were already moved off.
+ */
+export async function removeCollaborator(
+  installationId: number,
+  fullName: string,
+  username: string,
+): Promise<void> {
+  const [owner, repo] = fullName.split('/')
+
+  try {
+    await installationClient(installationId).rest.repos.removeCollaborator({
+      owner,
+      repo,
+      username,
+    })
+  } catch (error) {
+    // The repository is gone, or they were never a collaborator. Both are the
+    // state we were after.
+    if (isNotFound(error)) return
+    throw error
+  }
+}
+
+/**
  * Port of the second half:
  *
  *   exercise.collaborator.github_user.accept_repository_invitation(invitation.id)

@@ -182,10 +182,21 @@ export async function listUnlinkedRosterEntries(
   const invitation = await findInvitation(session, key)
   if (!invitation?.roster) return []
 
+  return unlinkedEntriesOf(invitation.roster.id)
+}
+
+/**
+ * The same list for a roster already resolved. Shared with the group flow,
+ * whose `join_roster` screen is the same one — `_shared_join_roster` in the
+ * original, rendered by both invitation controllers.
+ */
+export async function unlinkedEntriesOf(
+  rosterId: number,
+): Promise<{ id: number; identifier: string }[]> {
   return db
     .select({ id: rosterEntries.id, identifier: rosterEntries.identifier })
     .from(rosterEntries)
-    .where(and(eq(rosterEntries.rosterId, invitation.roster.id), isNull(rosterEntries.userId)))
+    .where(and(eq(rosterEntries.rosterId, rosterId), isNull(rosterEntries.userId)))
     .orderBy(asc(rosterEntries.identifier))
 }
 
@@ -268,13 +279,30 @@ export async function joinRoster(
   const invitation = await findInvitation(session, key)
   if (!invitation) return { success: false, error: 'No encontramos esa invitación.' }
 
-  if (!invitation.roster) {
+  return linkRosterEntry(session, invitation.roster, invitation.rosterEntry, entryId)
+}
+
+/**
+ * The body of #join_roster, for a roster already resolved.
+ *
+ * Shared with the group flow: `InvitationsControllerMethods#join_roster` is a
+ * concern in the original precisely because both invitation controllers
+ * include it, and the only thing that differs is which invitation was used to
+ * find the classroom.
+ */
+export async function linkRosterEntry(
+  session: Session,
+  roster: { id: number } | null,
+  currentEntry: { identifier: string } | null,
+  entryId: number,
+): Promise<JoinRosterResult> {
+  if (!roster) {
     return { success: false, error: 'Este classroom no tiene un roster.' }
   }
 
   // user_on_roster? — already linked, nothing to do
-  if (invitation.rosterEntry) {
-    return { success: true, identifier: invitation.rosterEntry.identifier }
+  if (currentEntry) {
+    return { success: true, identifier: currentEntry.identifier }
   }
 
   // `roster_entries.find(...)` raising RecordNotFound, which the original's
@@ -286,7 +314,7 @@ export async function joinRoster(
       userId: rosterEntries.userId,
     })
     .from(rosterEntries)
-    .where(and(eq(rosterEntries.id, entryId), eq(rosterEntries.rosterId, invitation.roster.id)))
+    .where(and(eq(rosterEntries.id, entryId), eq(rosterEntries.rosterId, roster.id)))
 
   if (!entry) {
     return { success: false, error: 'No encontramos ese identificador en el roster.' }
@@ -504,7 +532,7 @@ function takenMessage(identifier: string): string {
 }
 
 /** AssignmentInvitation#enabled? and #reason_for_disabled_invitations */
-function disabledState(
+export function disabledState(
   invitationsEnabled: boolean,
   archivedAt: Date | null,
 ): { enabled: boolean; disabledReason: string | null } {

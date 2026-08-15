@@ -154,6 +154,47 @@ export async function findClassroom(
   }
 }
 
+/** The classroom row a teacher is allowed to act on, with nothing read from GitHub */
+export type TeachingClassroom = {
+  id: number
+  /** The GitHub organization behind it. Several classrooms can share one */
+  githubId: number
+  installationId: number
+  archivedAt: Date | null
+}
+
+/**
+ * The same authorization boundary as `findClassroom`, without the round trip to
+ * GitHub. Port of Orgs::Controller#ensure_current_organization_visible_to_current_user.
+ *
+ * The writers — creating an assignment, a team, a roster — need the id and
+ * whether the classroom is archived, and none of them need the avatar or the
+ * login, so paying for the org lookup on every one of them would be waste.
+ */
+export async function findTeachingClassroom(
+  session: Session,
+  slug: string,
+): Promise<TeachingClassroom | null> {
+  const [row] = await db
+    .select({
+      id: organizations.id,
+      githubId: organizations.githubId,
+      installationId: organizations.installationId,
+      archivedAt: organizations.archivedAt,
+    })
+    .from(organizations)
+    .innerJoin(organizationsUsers, eq(organizationsUsers.organizationId, organizations.id))
+    .where(
+      and(
+        eq(organizations.slug, slug),
+        eq(organizationsUsers.userId, Number(session.user.id)),
+        isNull(organizations.deletedAt),
+      ),
+    )
+
+  return row ?? null
+}
+
 /**
  * Port of OrganizationWebhook#retrieve_org_hook_id!
  *

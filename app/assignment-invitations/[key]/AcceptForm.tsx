@@ -3,7 +3,7 @@
 import { useActionState } from 'react'
 
 import { acceptAction } from './actions'
-import { EMPTY_STATE } from './state'
+import { EMPTY_STATE } from '@/lib/form'
 
 /**
  * The `form_tag` of `assignment_invitations/show.html.erb`, whose only control

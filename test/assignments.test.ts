@@ -2,7 +2,15 @@ import { eq } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { assignmentInvitations, assignments, organizations, organizationsUsers, users } from '@/db/schema'
+import {
+  assignmentInvitations,
+  assignments,
+  groupAssignments,
+  groupings,
+  organizations,
+  organizationsUsers,
+  users,
+} from '@/db/schema'
 
 import { createTestDatabase } from './helpers/db'
 
@@ -64,14 +72,15 @@ async function classroomTeacher(login = 'eespina-fiuba'): Promise<Session> {
 }
 
 let nextGithubId = 1000
+let nextSlug = 1
 
 /** The classroom_org of the original's factories, with its teacher linked */
 async function classroomOrg(
   session: Session,
-  options: { slug?: string; archivedAt?: Date } = {},
+  options: { slug?: string; archivedAt?: Date; githubId?: number } = {},
 ) {
-  const githubId = nextGithubId++
-  const slug = options.slug ?? `${githubId}-classroom`
+  const githubId = options.githubId ?? nextGithubId++
+  const slug = options.slug ?? `${githubId}-${nextSlug++}-classroom`
 
   const [row] = await db
     .insert(organizations)
@@ -82,7 +91,7 @@ async function classroomOrg(
       slug,
       archivedAt: options.archivedAt ?? null,
     })
-    .returning({ id: organizations.id, slug: organizations.slug })
+    .returning({ id: organizations.id, slug: organizations.slug, title: organizations.title })
 
   await db
     .insert(organizationsUsers)
@@ -104,6 +113,7 @@ beforeEach(async () => {
   ;({ db } = await createTestDatabase())
   nextUid = 1
   nextGithubId = 1000
+  nextSlug = 1
   // clearAllMocks only clears calls, not implementations, so the defaults have
   // to be restored here or one test's stub leaks into the next
   findRepositoryByFullName.mockResolvedValue(TEMPLATE)
@@ -308,6 +318,48 @@ describe('createAssignment — validations', () => {
     expect(await createAssignment(session, second.slug, VALID)).toEqual({
       success: true,
       slug: 'tp1',
+    })
+  })
+
+  // Divergence, widening `uniqueness_of_slug_across_organization`: the slug is
+  // a repository prefix, and repository names belong to the GitHub org. The
+  // cátedra runs one classroom per term on a single org, so `tp1` in 2026a and
+  // `tp1` in 2026b would fight over the same repositories.
+  it('rejects a slug already used by another classroom of the same GitHub org', async () => {
+    const session = await classroomTeacher()
+    const first = await classroomOrg(session, { githubId: 7777 })
+    const second = await classroomOrg(session, { githubId: 7777 })
+
+    await createAssignment(session, first.slug, VALID)
+    const result = await createAssignment(session, second.slug, { ...VALID, title: 'otro' })
+
+    expect(result).toMatchObject({ success: false, field: 'slug' })
+    // The message names the classroom holding it, or the teacher cannot act on it
+    expect((result as { error: string }).error).toContain(first.title)
+  })
+
+  it('lets the two kinds of assignment share a title, but not a prefix', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session, { githubId: 8888 })
+
+    await db.insert(groupAssignments).values({
+      organizationId: classroom.id,
+      groupingId: (
+        await db
+          .insert(groupings)
+          .values({ organizationId: classroom.id, title: 'Equipos', slug: 'equipos' })
+          .returning({ id: groupings.id })
+      )[0].id,
+      creatorId: Number(session.user.id),
+      title: VALID.title,
+      slug: VALID.slug,
+    })
+
+    // `Assignment.where(slug:, organization:)` in the original's
+    // uniqueness_of_slug_across_organization, in the other direction
+    expect(await createAssignment(session, classroom.slug, VALID)).toMatchObject({
+      success: false,
+      field: 'slug',
     })
   })
 
