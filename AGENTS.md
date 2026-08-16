@@ -52,11 +52,32 @@ reference code without mental translation. The confusing one:
   its markup, and `app/globals.css` its `.UnderlineNav` / `.Counter` /
   `.breadcrumb-item` rules. Only two tabs exist here — the other two have
   nothing behind them yet. The shell is composed by each page instead of being
-  a layout, because the new-assignment screen wears only the breadcrumb, the
-  same as the live site, and a layout cannot opt one route out. **The screens
-  inside the shell are still ported from the Rails views**: the live site
-  changed the frame, not the flows, and its roster still says "Create roster",
-  "Update students", "Add roster entries".
+  a layout, because the new-assignment screen and the two assignment dashboards
+  wear only the breadcrumb, the same as the live site, and a layout cannot opt
+  a route out. **The screens inside the shell are still ported from the Rails
+  views**: the live site changed the frame, not the flows, and its roster still
+  says "Create roster", "Update students", "Add roster entries".
+- **The assignment dashboard follows the live site too**, for the same reason:
+  header band, `StatTiles`, and one `.assignment-repo-list` row per student or
+  team with its repository, last commit and commit count. Four things the live
+  header carries are not ported and are not coming — Sync assignments (nothing
+  propagates to existing repos, see below), autograding, Reuse assignment, and
+  the `gh classroom clone` command. The live "Late" label and the per-team
+  deadline extension need deadlines, which are not ported either. The commit
+  data for the whole cohort comes from one GraphQL query
+  (`listRepositorySnapshots`), never one REST call per repository.
+- **"Entregado" is one commit of the student's own**, and the count on the
+  dashboard is net of the commit the repository was created with. Neither rule
+  is the original's. Its `SharedAssignmentRepoView#submission_succeeded?` is
+  `deadline&.passed? && submission_sha.present?` — no deadlines here, so that
+  label could never appear; the live site has since moved to a commit-based
+  reading ("Submitted: students who've committed to repository") and this
+  follows it. Its `AssignmentRepoable#number_of_commits` subtracts the *starter
+  code repository's* commit count, which is right only on its importer path:
+  this port always calls `POST /repos/.../generate`, and GitHub squashes a
+  template into a single "Initial commit" whatever its history — measured, a
+  starter of 2 commits gives a student repo of 1, so the original's formula
+  would give -1. The baseline is 1 with starter code and 0 without.
 - **Group assignments do not use GitHub Teams.** The original gives every group
   a GitHub team and grants the team push access to the repository, which forces
   every student into the organization as a member. Here each member is an

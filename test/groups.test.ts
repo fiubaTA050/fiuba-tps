@@ -512,6 +512,36 @@ describe('listGroupAssignmentAcceptances', () => {
     expect(assignmentId).toBeGreaterThan(0)
   })
 
+  /** What the dashboard resolves against GitHub, null until a repo exists */
+  it('carries the repository id of the team that has one', async () => {
+    const classroomId = await classroom()
+    const session = await teacherOf(classroomId)
+    const groupingId = await grouping(classroomId)
+    const withRepo = await group(groupingId, classroomId, 'Distreet boys')
+    await group(groupingId, classroomId, 'threads')
+
+    const { assignmentId } = await groupAssignment(
+      classroomId,
+      groupingId,
+      Number(session.user.id),
+    )
+
+    await db
+      .insert(groupAssignmentRepos)
+      .values({ groupAssignmentId: assignmentId, groupId: withRepo, githubRepoId: 987654 })
+
+    const acceptances = await listGroupAssignmentAcceptances(
+      session,
+      await slugOf(classroomId),
+      '2026a-tp1-mapreduce',
+    )
+
+    expect(acceptances?.teams.map((team) => [team.title, team.repoId])).toEqual([
+      ['Distreet boys', 987654],
+      ['threads', null],
+    ])
+  })
+
   it('returns null for a classroom the caller does not teach', async () => {
     const classroomId = await classroom()
     const groupingId = await grouping(classroomId)

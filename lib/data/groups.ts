@@ -133,6 +133,8 @@ export function validateTeamTitle(title: string): { error: string } | null {
 export type TeamAcceptance = Team & {
   /** GroupInviteStatus, `unaccepted` when the team never accepted this one */
   status: InviteStatusValue
+  /** The team's repository on GitHub, null while none exists (DA-2: only the id) */
+  repoId: number | null
 }
 
 export type GroupAssignmentAcceptances = {
@@ -151,10 +153,10 @@ export type GroupAssignmentAcceptances = {
  * the reason listed in lib/data/invitations.ts: the acceptance is recorded
  * before any repository exists, and the teacher wants to see it then.
  *
- * The repository URLs are deliberately not resolved. DA-2 would mean one GitHub
- * call per team on every render of this page, and the individual assignment
- * page already settled the same question the same way — the state is what the
- * teacher is here for, and the repository is one click away in the org.
+ * Returns the repository ids, not the repositories. DA-2 means the names and
+ * the URLs are read from GitHub at render time, and doing that one team at a
+ * time would be one call per row; the page resolves the whole set at once with
+ * `listRepositorySnapshots` instead.
  */
 export async function listGroupAssignmentAcceptances(
   session: Session,
@@ -203,8 +205,19 @@ export async function listGroupAssignmentAcceptances(
 
   const byTeam = new Map(statuses.map((row) => [row.groupId, row.status]))
 
+  const repos = await db
+    .select({ groupId: groupAssignmentRepos.groupId, repoId: groupAssignmentRepos.githubRepoId })
+    .from(groupAssignmentRepos)
+    .where(eq(groupAssignmentRepos.groupAssignmentId, assignment.id))
+
+  const repoByTeam = new Map(repos.map((row) => [row.groupId, row.repoId]))
+
   return {
-    teams: teams.map((team) => ({ ...team, status: byTeam.get(team.id) ?? 'unaccepted' })),
+    teams: teams.map((team) => ({
+      ...team,
+      status: byTeam.get(team.id) ?? 'unaccepted',
+      repoId: repoByTeam.get(team.id) ?? null,
+    })),
     identifierName: roster?.identifierName ?? null,
     studentsNotOnTeam: roster ? await studentsNotOnTeam(roster.id, assignment.groupingId) : [],
   }

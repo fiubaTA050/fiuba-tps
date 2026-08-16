@@ -319,6 +319,155 @@ export function secondaryRateLimitDelay(error: unknown): number | null {
 }
 
 /**
+ * What the assignment dashboard shows for one student's repository: where it
+ * is, and how far along it is. DA-2 again — only `github_repo_id` is stored,
+ * everything here is read at render time.
+ */
+export type RepositorySnapshot = {
+  id: number
+  fullName: string
+  htmlUrl: string
+  /** Null when the repository has no commits at all */
+  latestCommitAt: Date | null
+  /**
+   * The student's **own** commits: what the repository carries, minus the one
+   * it was born with. Zero means nothing was handed in — see
+   * `listRepositorySnapshots` on why the baseline is what it is.
+   */
+  commitCount: number
+}
+
+/** Bounds the worst case on an org that has accumulated years of repositories */
+const SNAPSHOT_PAGES = 10
+const SNAPSHOT_PAGE_SIZE = 100
+
+type SnapshotPage = {
+  organization: {
+    repositories: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null }
+      nodes: {
+        databaseId: number | null
+        nameWithOwner: string
+        url: string
+        defaultBranchRef: {
+          target: { committedDate?: string; history?: { totalCount: number } } | null
+        } | null
+      }[]
+    }
+  } | null
+}
+
+/**
+ * The snapshots of a set of repositories, in one or two API calls rather than
+ * one per repository.
+ *
+ * The dashboard needs the name, the URL, the commit count and the date of the
+ * last commit for every student of the assignment. Asked one repository at a
+ * time that is 49 round trips inside the teacher's request for one cohort of
+ * TA050 — the shape the GitHub token caching note already flagged, and the
+ * reason `docs/creacion-de-repos.md` cares about call counts at all.
+ *
+ * There is no way to ask for specific repositories by their numeric id: the
+ * REST lookup is one call each, and GraphQL's `nodes(ids:)` wants the global
+ * node ids, which are not what is stored. So this walks the organization's
+ * repositories instead, newest push first, and stops as soon as every id it
+ * was asked for has turned up — one page for a cohort that is currently
+ * working, and bounded by SNAPSHOT_PAGES in the pathological case.
+ *
+ * GraphQL and not REST because `GET /orgs/{org}/repos` carries neither the
+ * commit count nor the last commit date, and both are one field here.
+ *
+ * Ids that never turn up are simply absent from the map: the repository was
+ * deleted or moved out of the org, which is the NullGitHubRepository case the
+ * callers already render as unreachable.
+ *
+ * `baselineCommits` is what every repository of the assignment starts with,
+ * subtracted so the count is the student's own work. **Deliberately not the
+ * original's formula.** `AssignmentRepoable#number_of_commits`
+ * (app/models/concerns/assignment_repoable.rb:39) subtracts the *starter code
+ * repository's* commit count, which is right only on its importer path, where
+ * the starter's history is copied into the student's repo. This port always
+ * generates from a template (`POST /repos/.../generate`, no
+ * `include_all_branches`), and GitHub squashes a template into a single
+ * "Initial commit" whatever its history is — measured on TA050: a starter of
+ * 2 commits produces a student repo of exactly 1. Subtracting the starter's 2
+ * would have given -1. So the baseline is 1 with starter code and 0 without.
+ */
+export async function listRepositorySnapshots(
+  installationId: number,
+  orgLogin: string,
+  wanted: Iterable<number>,
+  baselineCommits = 0,
+): Promise<Map<number, RepositorySnapshot>> {
+  const pending = new Set(wanted)
+  const snapshots = new Map<number, RepositorySnapshot>()
+  if (pending.size === 0) return snapshots
+
+  const octokit = installationClient(installationId)
+  let cursor: string | null = null
+
+  for (let page = 0; page < SNAPSHOT_PAGES; page++) {
+    let data: SnapshotPage
+
+    try {
+      data = await octokit.graphql<SnapshotPage>(
+        `query($login: String!, $size: Int!, $cursor: String) {
+          organization(login: $login) {
+            repositories(
+              first: $size
+              after: $cursor
+              orderBy: { field: PUSHED_AT, direction: DESC }
+            ) {
+              pageInfo { hasNextPage endCursor }
+              nodes {
+                databaseId
+                nameWithOwner
+                url
+                defaultBranchRef {
+                  target {
+                    ... on Commit { committedDate history { totalCount } }
+                  }
+                }
+              }
+            }
+          }
+        }`,
+        { login: orgLogin, size: SNAPSHOT_PAGE_SIZE, cursor },
+      )
+    } catch {
+      // The org vanished, or the App lost access to it. Every row falls back to
+      // "unreachable", which is what a partial map already means.
+      return snapshots
+    }
+
+    const repositories = data.organization?.repositories
+    if (!repositories) return snapshots
+
+    for (const node of repositories.nodes) {
+      if (node.databaseId === null || !pending.delete(node.databaseId)) continue
+
+      const commit = node.defaultBranchRef?.target
+      // Clamped: a student who rewrites history can leave fewer commits than
+      // the repository was born with, and a negative count means nothing
+      const commitCount = Math.max(0, (commit?.history?.totalCount ?? 0) - baselineCommits)
+
+      snapshots.set(node.databaseId, {
+        id: node.databaseId,
+        fullName: node.nameWithOwner,
+        htmlUrl: node.url,
+        latestCommitAt: commit?.committedDate ? new Date(commit.committedDate) : null,
+        commitCount,
+      })
+    }
+
+    if (pending.size === 0 || !repositories.pageInfo.hasNextPage) break
+    cursor = repositories.pageInfo.endCursor
+  }
+
+  return snapshots
+}
+
+/**
  * Port of GitHubRepository#empty?.
  *
  * Like the original, an API error counts as empty: `rescue GitHub::Error;

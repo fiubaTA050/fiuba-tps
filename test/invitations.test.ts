@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   assignmentInvitations,
+  assignmentRepos,
   assignments,
   inviteStatuses,
   organizations,
@@ -49,6 +50,9 @@ const {
   listAssignmentAcceptances,
   listUnlinkedRosterEntries,
 } = await import('@/lib/data/invitations')
+
+// The teacher's side of the two cases below: what the edit screen writes
+const { deleteAssignment, updateAssignment } = await import('@/lib/data/assignments')
 
 let nextUid = 1
 let nextGithubId = 1000
@@ -488,6 +492,83 @@ describe('listAssignmentAcceptances', () => {
     expect(acceptances?.acceptedCount).toBe(1)
   })
 
+  /**
+   * What the dashboard resolves against GitHub. The id is null until the
+   * student's browser finishes creating the repository, which is exactly why
+   * this list is keyed off invite_statuses and not assignment_repos.
+   */
+  it('carries the repository id of whoever has one', async () => {
+    const teacher = await classroomTeacher()
+    const withRepo = await classroomStudent()
+    const withoutRepo = await classroomStudent()
+    const { classroom, assignment, key } = await classroomWithAssignment(teacher)
+    const roster = await attachRoster(classroom.id, ['101', '102'])
+
+    await joinRoster(withRepo, key, (await entryFor(roster.id, '101')).id)
+    await acceptInvitation(withRepo, key)
+    await joinRoster(withoutRepo, key, (await entryFor(roster.id, '102')).id)
+    await acceptInvitation(withoutRepo, key)
+
+    await db.insert(assignmentRepos).values({
+      assignmentId: assignment.id,
+      userId: Number(withRepo.user.id),
+      githubRepoId: 987654,
+    })
+
+    const acceptances = await listAssignmentAcceptances(teacher, classroom.slug, 'tp0')
+
+    expect(acceptances?.entries.map((entry) => [entry.identifier, entry.repoId])).toEqual([
+      ['101', 987654],
+      ['102', null],
+    ])
+  })
+
+  // The same for a student who accepted without claiming an identifier
+  it('carries the repository id of an acceptance with no roster entry', async () => {
+    const teacher = await classroomTeacher()
+    const student = await classroomStudent()
+    const { classroom, assignment, key } = await classroomWithAssignment(teacher)
+
+    await acceptInvitation(student, key)
+    await db.insert(assignmentRepos).values({
+      assignmentId: assignment.id,
+      userId: Number(student.user.id),
+      githubRepoId: 123456,
+    })
+
+    const acceptances = await listAssignmentAcceptances(teacher, classroom.slug, 'tp0')
+
+    expect(acceptances?.unlinkedAccounts.map((account) => account.repoId)).toEqual([123456])
+  })
+
+  // A repository of another assignment must not be attributed to this one
+  it('ignores the repository the same student holds for another assignment', async () => {
+    const teacher = await classroomTeacher()
+    const student = await classroomStudent()
+    const { classroom, key } = await classroomWithAssignment(teacher)
+
+    const [other] = await db
+      .insert(assignments)
+      .values({
+        organizationId: classroom.id,
+        creatorId: Number(teacher.user.id),
+        title: 'TP1',
+        slug: 'tp1',
+      })
+      .returning({ id: assignments.id })
+
+    await acceptInvitation(student, key)
+    await db.insert(assignmentRepos).values({
+      assignmentId: other.id,
+      userId: Number(student.user.id),
+      githubRepoId: 555,
+    })
+
+    const acceptances = await listAssignmentAcceptances(teacher, classroom.slug, 'tp0')
+
+    expect(acceptances?.unlinkedAccounts.map((account) => account.repoId)).toEqual([null])
+  })
+
   // OrganizationAuthorization: the teacher boundary still applies here
   it('returns null for somebody who does not teach the classroom', async () => {
     const teacher = await classroomTeacher()
@@ -521,5 +602,81 @@ describe('listAssignmentAcceptances', () => {
 
     expect((await listAssignmentAcceptances(teacher, classroom.slug, 'tp0'))?.acceptedCount).toBe(1)
     expect((await listAssignmentAcceptances(teacher, classroom.slug, 'tp1'))?.acceptedCount).toBe(0)
+  })
+})
+
+/**
+ * The two ends the edit and delete screens reach into. The rejections
+ * themselves are covered above; what is new here is the path that causes them —
+ * a teacher closing submissions or deleting the assignment.
+ */
+describe('what editing the assignment does to its link', () => {
+  /** Everything `updateAssignment` needs, matching the row the helper inserts */
+  const FIELDS = {
+    title: 'TP0',
+    slug: 'tp0',
+    publicRepo: false,
+    invitationsEnabled: true,
+    studentsAreRepoAdmins: false,
+    starterCodeRepo: '',
+  }
+
+  // The live site's "Assignment status" set to Inactive
+  it('stops accepting once the teacher sets the assignment inactive', async () => {
+    const teacher = await classroomTeacher()
+    const student = await classroomStudent()
+    const { classroom, key } = await classroomWithAssignment(teacher)
+
+    expect(await acceptInvitation(student, key)).toEqual({ success: true, status: 'accepted' })
+
+    await updateAssignment(teacher, classroom.slug, 'tp0', {
+      ...FIELDS,
+      invitationsEnabled: false,
+    })
+
+    const other = await classroomStudent('otra-alumna')
+    expect(await acceptInvitation(other, key)).toEqual({
+      success: false,
+      error: INVITATIONS_DISABLED,
+    })
+
+    // AssignmentInvitation#enabled? is what the page reads to disable the link
+    expect(await findInvitation(other, key)).toMatchObject({
+      enabled: false,
+      disabledReason: INVITATIONS_DISABLED,
+    })
+  })
+
+  /**
+   * The student who already accepted keeps their acceptance — and, in the
+   * organization, their repository. Closing submissions is not revoking them.
+   */
+  it('leaves an acceptance already made alone', async () => {
+    const teacher = await classroomTeacher()
+    const student = await classroomStudent()
+    const { classroom, key } = await classroomWithAssignment(teacher)
+
+    await acceptInvitation(student, key)
+    await updateAssignment(teacher, classroom.slug, 'tp0', {
+      ...FIELDS,
+      invitationsEnabled: false,
+    })
+
+    expect(await currentStatus(student, key)).toBe('accepted')
+  })
+
+  /**
+   * The soft delete is enough on its own: every read the student reaches
+   * inner-joins on `deleted_at is null`, so the page 404s with no extra work.
+   */
+  it('makes the invitation link unreachable once the assignment is deleted', async () => {
+    const teacher = await classroomTeacher()
+    const student = await classroomStudent()
+    const { classroom, key } = await classroomWithAssignment(teacher)
+
+    await deleteAssignment(teacher, classroom.slug, 'tp0')
+
+    expect(await findInvitation(student, key)).toBeNull()
+    expect(await acceptInvitation(student, key)).toMatchObject({ success: false })
   })
 })

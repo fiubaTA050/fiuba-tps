@@ -575,3 +575,233 @@
   border-color: var(--borderColor-accent-emphasis, #0969da) !important;
   box-shadow: 0 0 0 2px var(--borderColor-accent-emphasis, #0969da);
 }
+
+/*
+ * The assignment dashboard: the list of student repositories and the pieces it
+ * is built from.
+ *
+ * Same source and same reasoning as the breadcrumb/UnderlineNav block above —
+ * the archived Rails views have none of this, so the rules are copied off a
+ * saved copy of the live assignment dashboard (see the captures noted in
+ * docs/, taken from classroom.github.com). `.AvatarStack`, `.Progress` and
+ * `.Box--condensed` are @primer/view-components; `.css-truncate` and
+ * `.Link--muted` are primer 10 survivors v22 dropped; `.assignment-repo-list`
+ * is classroom.github.com's own.
+ *
+ * The tokens are kept, as in that block: v22 defines all of them except
+ * --borderRadius-small, resolved here to its 3px value.
+ */
+
+.Box--condensed {
+  line-height: 1.25;
+}
+
+.Box--condensed .Box-header,
+.Box--condensed .Box-body,
+.Box--condensed .Box-footer,
+.Box--condensed .Box-row {
+  padding: var(--stack-padding-condensed) var(--stack-padding-normal);
+}
+
+.assignment-repo-list .assignment-repo-list-item:not(:first-child) {
+  border-top: 1px solid var(--borderColor-muted, #e3e3e3);
+}
+
+.assignment-repo-list-item {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  font-size: 14px;
+}
+
+.assignment-repo-list-item:last-child {
+  padding-bottom: 0;
+}
+
+.css-truncate.css-truncate-target,
+.css-truncate .css-truncate-target {
+  display: inline-block;
+  max-width: 125px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+/* After the rule above, not before: same specificity, so the order is what
+   raises the 125px default to the width a padrón and a name need */
+.assignment-repo-list-item .css-truncate-target {
+  max-width: 20rem;
+}
+
+.Link--muted {
+  color: var(--fgColor-muted) !important;
+}
+
+.Link--muted:hover {
+  color: var(--fgColor-accent) !important;
+  text-decoration: none;
+}
+
+.Link--primary {
+  color: var(--fgColor-default) !important;
+}
+
+.Link--primary:hover {
+  color: var(--fgColor-accent) !important;
+}
+
+/* The stacked member avatars of a team's row */
+
+.AvatarStack {
+  position: relative;
+  height: 20px;
+  min-width: 26px;
+}
+
+.AvatarStack .AvatarStack-body {
+  position: absolute;
+}
+
+.AvatarStack.AvatarStack--two {
+  min-width: 36px;
+}
+
+.AvatarStack.AvatarStack--three-plus {
+  min-width: 46px;
+}
+
+.AvatarStack-body {
+  display: flex;
+  background: var(--bgColor-default);
+  border-radius: 100px;
+}
+
+.AvatarStack-body .avatar {
+  position: relative;
+  display: flex;
+  box-sizing: initial;
+  height: 20px;
+  margin-right: -11px;
+  background-color: var(--bgColor-default);
+  border-right: var(--borderWidth-thin) solid var(--bgColor-default);
+  border-radius: 3px;
+  box-shadow: none;
+  transition: margin;
+}
+
+.AvatarStack-body .avatar:first-child {
+  z-index: 3;
+}
+
+.AvatarStack-body .avatar:last-child {
+  z-index: 1;
+  border-right: 0;
+}
+
+.AvatarStack-body .avatar img {
+  border-radius: 3px;
+}
+
+/* Past the third one the avatars hide behind `.avatar-more` and fan out on
+   hover, which is how the live site fits a team of five in the row */
+.AvatarStack-body .avatar:nth-child(n + 4) {
+  display: none;
+  opacity: 0;
+}
+
+.AvatarStack-body:hover .avatar {
+  margin-right: 3px;
+}
+
+.AvatarStack-body:hover .avatar:nth-child(n + 4) {
+  display: flex;
+  opacity: 1;
+}
+
+.AvatarStack-body:hover .avatar-more {
+  display: none !important;
+}
+
+.avatar.avatar-more {
+  z-index: 1;
+  margin-right: 0;
+  background: var(--bgColor-muted);
+}
+
+.avatar.avatar-more::before,
+.avatar.avatar-more::after {
+  position: absolute;
+  display: block;
+  height: 20px;
+  content: '';
+  border-radius: 2px;
+  outline: var(--borderWidth-thin) solid var(--bgColor-default);
+}
+
+.avatar.avatar-more::before {
+  width: 17px;
+  background: var(--avatarStack-fade-bgColor-muted);
+}
+
+.avatar.avatar-more::after {
+  width: 14px;
+  background: var(--avatarStack-fade-bgColor-default);
+}
+
+.AvatarStack--right .AvatarStack-body {
+  right: 0;
+  flex-direction: row-reverse;
+}
+
+.AvatarStack--right .AvatarStack-body:hover .avatar {
+  margin-right: 0;
+  margin-left: 3px;
+}
+
+.AvatarStack--right .AvatarStack-body .avatar:not(:last-child) {
+  border-left: 0;
+}
+
+.AvatarStack--right .avatar {
+  margin-right: 0;
+  margin-left: -11px;
+  border-right: 0;
+  border-left: var(--borderWidth-thin) solid var(--bgColor-default);
+}
+
+.AvatarStack--right .avatar.avatar-more {
+  background: var(--avatarStack-fade-bgColor-default);
+}
+
+.AvatarStack--right .avatar.avatar-more::before {
+  width: 5px;
+}
+
+.AvatarStack--right .avatar.avatar-more::after {
+  width: 2px;
+  background: var(--bgColor-muted);
+}
+
+/* The submissions bar of the stat tiles. Not the `.progress-bar` above: that
+   one is the original's own, on the student's setup screen. */
+
+.Progress {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  background-color: var(--bgColor-neutral-muted);
+  border-radius: 6px;
+  outline: 1px solid transparent;
+}
+
+.Progress--small {
+  height: 5px;
+}
+
+.Progress-item {
+  outline: 2px solid transparent;
+}
+
+.Progress-item + .Progress-item {
+  margin-left: 2px;
+}

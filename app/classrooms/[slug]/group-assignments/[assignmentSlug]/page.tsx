@@ -1,39 +1,35 @@
-import {
-  FileCodeIcon,
-  LockIcon,
-  OrganizationIcon,
-  PeopleIcon,
-  RepoIcon,
-  ShieldLockIcon,
-} from '@primer/octicons-react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
-import { ClassroomShell } from '@/components/ClassroomShell'
-import { InvitationLink } from '@/components/InvitationLink'
+import { AssignmentHeader } from '@/components/AssignmentHeader'
+import {
+  AssignmentRepoList,
+  MemberAvatars,
+  RepoListItem,
+  submissionLabel,
+  type SubmissionLabel,
+} from '@/components/AssignmentRepoList'
+import { Breadcrumb } from '@/components/Breadcrumb'
+import { StatTiles } from '@/components/StatTiles'
 import { findGroupAssignment } from '@/lib/data/group-assignments'
-import { listGroupAssignmentAcceptances } from '@/lib/data/groups'
+import { listGroupAssignmentAcceptances, type TeamAcceptance } from '@/lib/data/groups'
 import { findClassroom } from '@/lib/data/organizations'
-import { findRepositoryById } from '@/lib/github/repositories'
+import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
+import type { RepositorySnapshot } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
 import { baseUrl } from '@/lib/url'
 
 export const dynamic = 'force-dynamic'
 
-/** The label of each team's state, from SetupStatus */
-const STATUS_LABEL: Record<string, string> = {
-  unaccepted: 'Sin aceptar',
-  accepted: 'Aceptado, sin repo',
-  waiting: 'En espera',
-  creating_repo: 'Creando el repo',
-  importing_starter_code: 'Copiando starter code',
-  completed: 'Con repo',
-  errored_creating_repo: 'Falló la creación del repo',
-  errored_importing_starter_code: 'Falló la copia del starter code',
-}
-
-/** Port of group_assignments#show */
+/**
+ * Port of group_assignments#show, on the live site's dashboard layout: the
+ * same header and counters as the individual one, with a row per team instead
+ * of per student.
+ *
+ * The live site's per-team deadline extension is not here — deadlines are not
+ * ported (db/schema.ts).
+ */
 export default async function GroupAssignmentPage(
   props: PageProps<'/classrooms/[slug]/group-assignments/[assignmentSlug]'>,
 ) {
@@ -50,191 +46,201 @@ export default async function GroupAssignmentPage(
 
   if (!classroom || !assignment || !acceptances) notFound()
 
-  const justCreated = (await props.searchParams).created === '1'
+  const searchParams = await props.searchParams
+  const justCreated = searchParams.created === '1'
+  const justUpdated = searchParams.updated === '1'
 
   const invitationUrl = `${await baseUrl()}/group-assignment-invitations/${assignment.invitationKey}`
   const invitationsEnabled = assignment.invitationsEnabled && !classroom.archivedAt
 
-  const starterCode =
-    assignment.starterCodeRepoId !== null && classroom.organization
-      ? await findRepositoryById(
+  const repoIds = acceptances.teams
+    .map((team) => team.repoId)
+    .filter((id): id is number => id !== null)
+
+  const [starterCode, snapshots] = classroom.organization
+    ? await Promise.all([
+        assignment.starterCodeRepoId === null
+          ? null
+          : findRepositoryById(classroom.organization.installationId, assignment.starterCodeRepoId),
+        listRepositorySnapshots(
           classroom.organization.installationId,
-          assignment.starterCodeRepoId,
-        )
-      : null
+          classroom.organization.login,
+          repoIds,
+          assignment.starterCodeRepoId === null ? 0 : 1,
+        ),
+      ])
+    : [null, new Map()]
 
   const accepted = acceptances.teams.filter((team) => team.status !== 'unaccepted').length
+  const submitted = repoIds.filter((id) => (snapshots.get(id)?.commitCount ?? 0) > 0).length
 
   return (
-    <ClassroomShell session={session} classroom={classroom} tab="assignments">
-      {justCreated && (
-        <div className="flash flash-success mb-4">
-          Assignment grupal creado. Compartí el link de invitación con los alumnos: el primero de
-          cada equipo lo crea y el resto se suma.
-        </div>
-      )}
+    <>
+      <Breadcrumb
+        items={[
+          { label: 'Classrooms', href: '/classrooms' },
+          { label: classroom.title, href: `/classrooms/${classroom.slug}` },
+          {
+            label: assignment.title,
+            href: `/classrooms/${classroom.slug}/group-assignments/${assignment.slug}`,
+          },
+        ]}
+      />
 
-      <div className="d-flex flex-items-center mb-2">
-        <OrganizationIcon size={22} className="mr-2 color-fg-muted" />
-        <h2 className="f2 text-normal flex-auto">{assignment.title}</h2>
-      </div>
+      <div className="container-xl p-responsive">
+        {justCreated && (
+          <div className="flash flash-success mt-4">
+            Assignment grupal creado. Compartí el link de invitación con los alumnos: el primero de
+            cada equipo lo crea y el resto se suma.
+          </div>
+        )}
 
-      <p className="color-fg-muted">
-        Assignment grupal · los repos se van a llamar <code>{assignment.slug}-equipo</code> ·
-        equipos de{' '}
-        <Link href={`/classrooms/${classroom.slug}/groupings/${assignment.grouping.slug}`}>
-          {assignment.grouping.title}
-        </Link>
-      </p>
+        {justUpdated && <div className="flash flash-success mt-4">Assignment actualizado.</div>}
 
-      <div className="Box my-4">
-        <div className="Box-row">
-          <h3 className="h5 mb-2">Link de invitación</h3>
-          <InvitationLink url={invitationUrl} disabled={!invitationsEnabled} />
-          <p className="note mt-2 mb-0">
-            {invitationsEnabled ? (
-              <>Compartilo con los alumnos para que armen su equipo y acepten el assignment.</>
-            ) : (
-              <span className="color-fg-attention">
-                {classroom.archivedAt
-                  ? 'El link está deshabilitado porque el classroom está archivado.'
-                  : 'El link está deshabilitado: este assignment no acepta invitaciones.'}
-              </span>
-            )}
-          </p>
-        </div>
+        <AssignmentHeader
+          title={assignment.title}
+          group
+          active={assignment.invitationsEnabled}
+          starterCodeRepoId={assignment.starterCodeRepoId}
+          starterCode={starterCode}
+          editHref={`/classrooms/${classroom.slug}/group-assignments/${assignment.slug}/edit`}
+          invitationUrl={invitationUrl}
+          invitationsEnabled={invitationsEnabled}
+          disabledReason={
+            invitationsEnabled
+              ? null
+              : classroom.archivedAt
+                ? 'El link está deshabilitado porque el classroom está archivado.'
+                : 'El link está deshabilitado: este assignment no acepta invitaciones.'
+          }
+        />
 
-        <div className="Box-row d-flex flex-items-center">
-          <PeopleIcon className="mr-2 color-fg-muted" />
-          <span>
-            {assignment.maxMembers === null
-              ? 'Sin máximo de integrantes por equipo'
-              : `Hasta ${assignment.maxMembers} integrantes por equipo`}
-            {' · '}
-            {assignment.maxTeams === null
-              ? 'sin máximo de equipos'
-              : `hasta ${assignment.maxTeams} equipos`}
-          </span>
-        </div>
+        <p className="color-fg-muted mb-4">
+          Equipos de{' '}
+          <Link href={`/classrooms/${classroom.slug}/groupings/${assignment.grouping.slug}`}>
+            {assignment.grouping.title}
+          </Link>
+          {' · '}
+          {assignment.maxMembers === null
+            ? 'sin máximo de integrantes'
+            : `hasta ${assignment.maxMembers} integrantes`}
+          {' · '}
+          {assignment.maxTeams === null ? 'sin máximo de equipos' : `hasta ${assignment.maxTeams} equipos`}
+        </p>
 
-        <div className="Box-row d-flex flex-items-center">
-          <FileCodeIcon className="mr-2 color-fg-muted" />
-          <span>
-            {assignment.starterCodeRepoId === null ? (
-              <>Sin starter code, cada equipo arranca de un repo vacío</>
-            ) : starterCode ? (
-              <>
-                Starter code:{' '}
-                <a href={starterCode.htmlUrl} className="text-mono">
-                  {starterCode.fullName}
-                </a>
-              </>
-            ) : (
-              <span className="color-fg-attention">
-                Starter code inaccesible: el repo se borró o la App perdió acceso
-              </span>
-            )}
-          </span>
-        </div>
+        <h2 className="mb-2">Detalle del assignment</h2>
 
-        <div className="Box-row d-flex flex-items-center">
-          {assignment.publicRepo ? (
-            <RepoIcon className="mr-2 color-fg-muted" />
-          ) : (
-            <LockIcon className="mr-2 color-fg-attention" />
-          )}
-          <span>
-            Repositorios <strong>{assignment.publicRepo ? 'públicos' : 'privados'}</strong>
-          </span>
-        </div>
+        <StatTiles
+          tiles={[
+            {
+              label: 'Equipos',
+              total: acceptances.teams.length,
+              parts: [
+                { value: accepted, label: 'aceptaron' },
+                { value: acceptances.teams.length - accepted, label: 'sin aceptar' },
+              ],
+            },
+            {
+              label: 'Sin equipo',
+              total: acceptances.studentsNotOnTeam.length,
+              parts: [{ value: acceptances.studentsNotOnTeam.length, label: 'alumnos' }],
+            },
+            {
+              label: 'Entregas',
+              total: repoIds.length,
+              parts: [
+                { value: submitted, label: 'con commits' },
+                { value: repoIds.length - submitted, label: 'sin commits' },
+              ],
+              progress: repoIds.length === 0 ? undefined : submitted / repoIds.length,
+            },
+          ]}
+        />
 
-        <div className="Box-row d-flex flex-items-center">
-          <ShieldLockIcon className="mr-2 color-fg-muted" />
-          <span>
-            Los alumnos <strong>{assignment.studentsAreRepoAdmins ? 'son' : 'no son'}</strong> admin
-            del repo de su equipo
-          </span>
-        </div>
-      </div>
-
-      <div className="d-flex flex-items-center flex-justify-between mb-2">
-        <h3 className="f4">
-          Equipos <span className="Counter">{acceptances.teams.length}</span>
-        </h3>
-        <span className="f6 color-fg-muted">{accepted} aceptaron</span>
-      </div>
-
-      {acceptances.teams.length === 0 ? (
-        <div className="blankslate blankslate-spacious">
-          <h3 className="mb-2">Todavía no hay equipos</h3>
-          <p className="color-fg-muted mb-0">
-            Los equipos aparecen acá a medida que los alumnos los arman desde el link.
-          </p>
-        </div>
-      ) : (
-        <div className="Box">
-          {acceptances.teams.map((team) => (
-            <div
-              className="Box-row d-md-flex flex-items-center flex-justify-between"
-              key={team.id}
-            >
-              <div className="col-md-6">
-                <strong>{team.title}</strong>
-                <span className="d-block f6 color-fg-muted">
-                  {team.members.length === 0
-                    ? 'Sin integrantes'
-                    : team.members.map((member) => `@${member.githubLogin}`).join(', ')}
-                </span>
-              </div>
-
-              <div className="col-md-3 f6 color-fg-muted text-mono">
-                {team.status === 'completed' ? `${assignment.slug}-${team.slug}` : ''}
-              </div>
-
-              <div className="col-md-3 text-md-right">
-                <span
-                  className={`Label ${
-                    team.status === 'completed'
-                      ? 'Label--success'
-                      : team.status.startsWith('errored')
-                        ? 'Label--danger'
-                        : ''
-                  }`}
-                >
-                  {STATUS_LABEL[team.status] ?? team.status}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* `@students_not_on_team` of the original's #show */}
-      {acceptances.identifierName !== null && (
-        <>
-          <h3 className="f4 mt-5 mb-2">
-            Sin equipo{' '}
-            <span className="Counter">{acceptances.studentsNotOnTeam.length}</span>
-          </h3>
-
-          {acceptances.studentsNotOnTeam.length === 0 ? (
-            <p className="color-fg-muted">
-              Todos los {acceptances.identifierName.toLowerCase()}es del roster están en un equipo.
+        {acceptances.teams.length === 0 ? (
+          <div className="blankslate blankslate-spacious">
+            <h3 className="mb-2">Todavía no hay equipos</h3>
+            <p className="color-fg-muted mb-0">
+              Los equipos aparecen acá a medida que los alumnos los arman desde el link.
             </p>
-          ) : (
-            <div className="Box">
+          </div>
+        ) : (
+          <AssignmentRepoList title="Equipos">
+            {acceptances.teams.map((team) => {
+              const snapshot = team.repoId === null ? null : (snapshots.get(team.repoId) ?? null)
+
+              return (
+                <RepoListItem
+                  key={team.id}
+                  avatar={null}
+                  name={
+                    snapshot ? (
+                      <a href={snapshot.htmlUrl} className="Link Link--primary">
+                        {team.title}
+                      </a>
+                    ) : (
+                      team.title
+                    )
+                  }
+                  label={teamLabel(team, snapshot)}
+                  meta={
+                    team.members.length === 0 ? (
+                      <p className="color-fg-muted mr-3 text-small mb-0">Sin integrantes</p>
+                    ) : undefined
+                  }
+                  trailing={<MemberAvatars members={team.members} />}
+                  snapshot={snapshot}
+                />
+              )
+            })}
+          </AssignmentRepoList>
+        )}
+
+        {/* `@students_not_on_team` of the original's #show */}
+        {acceptances.identifierName !== null && acceptances.studentsNotOnTeam.length > 0 && (
+          <div className="mt-4">
+            <AssignmentRepoList title="Sin equipo">
               {acceptances.studentsNotOnTeam.map((student) => (
-                <div className="Box-row d-flex flex-justify-between" key={student.identifier}>
+                <div
+                  className="assignment-repo-list-item d-flex flex-justify-between"
+                  key={student.identifier}
+                >
                   <span className="text-mono">{student.identifier}</span>
                   <span className="color-fg-muted">
                     {student.githubLogin ? `@${student.githubLogin}` : 'Sin cuenta vinculada'}
                   </span>
                 </div>
               ))}
-            </div>
-          )}
-        </>
-      )}
-    </ClassroomShell>
+            </AssignmentRepoList>
+          </div>
+        )}
+      </div>
+    </>
   )
+}
+
+/**
+ * A team's label. Unlike a student, a team carries the setup statuses of
+ * SetupStatus — its repository is built by whichever member arrives first, and
+ * a failure there is what the teacher has to see (docs/creacion-de-repos.md).
+ */
+function teamLabel(team: TeamAcceptance, snapshot: RepositorySnapshot | null): SubmissionLabel {
+  if (team.status === 'unaccepted') return { text: 'Sin aceptar', tone: 'neutral' }
+
+  if (team.status.startsWith('errored')) {
+    return {
+      text:
+        team.status === 'errored_creating_repo'
+          ? 'Falló la creación del repo'
+          : 'Falló la copia del starter code',
+      tone: 'danger',
+    }
+  }
+
+  if (team.repoId === null) {
+    // accepted, waiting, creating_repo, importing_starter_code
+    return { text: 'Creando el repo', tone: 'attention' }
+  }
+
+  return submissionLabel(true, snapshot)
 }

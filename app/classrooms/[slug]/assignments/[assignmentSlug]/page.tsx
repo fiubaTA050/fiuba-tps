@@ -1,13 +1,13 @@
-import { FileCodeIcon, LockIcon, PersonIcon, RepoIcon, ShieldLockIcon } from '@primer/octicons-react'
 import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
-import { ClassroomShell } from '@/components/ClassroomShell'
-import { InvitationLink } from '@/components/InvitationLink'
+import { AssignmentHeader } from '@/components/AssignmentHeader'
+import { Breadcrumb } from '@/components/Breadcrumb'
+import { StatTiles } from '@/components/StatTiles'
 import { findAssignment } from '@/lib/data/assignments'
 import { listAssignmentAcceptances } from '@/lib/data/invitations'
 import { findClassroom } from '@/lib/data/organizations'
-import { findRepositoryById } from '@/lib/github/repositories'
+import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
 import { baseUrl } from '@/lib/url'
 
@@ -16,12 +16,17 @@ import { AcceptanceList } from './AcceptanceList'
 export const dynamic = 'force-dynamic'
 
 /**
- * Port of assignments#show: the invitation link, the assignment's settings,
- * and below them who accepted and who is missing.
+ * Port of assignments#show: the invitation link, the counters, and below them
+ * one row per student with their repository.
  *
  * The original keyed that list off `assignment_repos`; here it comes from
  * `invite_statuses`, which is where an acceptance lands before any repository
  * exists. See lib/data/invitations.ts.
+ *
+ * The frame is the breadcrumb alone, not ClassroomShell: the live
+ * classroom.github.com drops the tab bar on this screen, the same as on the
+ * new-assignment one — an assignment is a step away from the classroom rather
+ * than one of its tabs.
  */
 export default async function AssignmentPage(
   props: PageProps<'/classrooms/[slug]/assignments/[assignmentSlug]'>,
@@ -39,8 +44,10 @@ export default async function AssignmentPage(
 
   if (!classroom || !assignment || !acceptances) notFound()
 
-  // flash[:success]: only right after creating, not on every later visit
-  const justCreated = (await props.searchParams).created === '1'
+  // flash[:success]: only right after creating or saving, not on every later visit
+  const searchParams = await props.searchParams
+  const justCreated = searchParams.created === '1'
+  const justUpdated = searchParams.updated === '1'
 
   // InvitationHelper#invitation_url, without the short_key branch
   const invitationUrl = `${await baseUrl()}/assignment-invitations/${assignment.invitationKey}`
@@ -48,95 +55,110 @@ export default async function AssignmentPage(
   // AssignmentInvitation#enabled?
   const invitationsEnabled = assignment.invitationsEnabled && !classroom.archivedAt
 
-  // DA-2: only the id is stored, the name is read from GitHub at render time.
-  // Null when the template was deleted or the App lost access — the
-  // NullGitHubRepository case, shown as unreachable rather than hidden.
-  const starterCode =
-    assignment.starterCodeRepoId !== null && classroom.organization
-      ? await findRepositoryById(
+  const repoIds = [...acceptances.entries, ...acceptances.unlinkedAccounts]
+    .map((row) => row.repoId)
+    .filter((id): id is number => id !== null)
+
+  // DA-2: only the ids are stored, everything shown about a repository is read
+  // from GitHub here. Both calls are skipped when the org is unreachable, which
+  // is the same NullGitHubRepository case the rows already render.
+  const [starterCode, snapshots] = classroom.organization
+    ? await Promise.all([
+        assignment.starterCodeRepoId === null
+          ? null
+          : findRepositoryById(classroom.organization.installationId, assignment.starterCodeRepoId),
+        listRepositorySnapshots(
           classroom.organization.installationId,
-          assignment.starterCodeRepoId,
-        )
-      : null
+          classroom.organization.login,
+          repoIds,
+          // A repo generated from a template is born with one commit; one
+          // created empty, with none
+          assignment.starterCodeRepoId === null ? 0 : 1,
+        ),
+      ])
+    : [null, new Map()]
+
+  const submitted = repoIds.filter((id) => (snapshots.get(id)?.commitCount ?? 0) > 0).length
+  const students = acceptances.entries.length + acceptances.unlinkedAccounts.length
 
   return (
-    <ClassroomShell session={session} classroom={classroom} tab="assignments">
+    <>
+      <Breadcrumb
+        items={[
+          { label: 'Classrooms', href: '/classrooms' },
+          { label: classroom.title, href: `/classrooms/${classroom.slug}` },
+          {
+            label: assignment.title,
+            href: `/classrooms/${classroom.slug}/assignments/${assignment.slug}`,
+          },
+        ]}
+      />
+
+      <div className="container-xl p-responsive">
         {justCreated && (
-          <div className="flash flash-success mb-4">
+          <div className="flash flash-success mt-4">
             Assignment creado. Compartí el link de invitación con los alumnos.
           </div>
         )}
 
-        <div className="d-flex flex-items-center mb-2">
-          <PersonIcon size={22} className="mr-2 color-fg-muted" />
-          <h2 className="f2 text-normal flex-auto">{assignment.title}</h2>
-        </div>
+        {/* flash[:success] = "Assignment \"...\" is being updated" */}
+        {justUpdated && <div className="flash flash-success mt-4">Assignment actualizado.</div>}
 
-        <p className="color-fg-muted">
-          Assignment individual · los repos se van a llamar{' '}
-          <code>{assignment.slug}-usuario</code>
-        </p>
+        <AssignmentHeader
+          title={assignment.title}
+          group={false}
+          active={assignment.invitationsEnabled}
+          starterCodeRepoId={assignment.starterCodeRepoId}
+          starterCode={starterCode}
+          editHref={`/classrooms/${classroom.slug}/assignments/${assignment.slug}/edit`}
+          invitationUrl={invitationUrl}
+          invitationsEnabled={invitationsEnabled}
+          disabledReason={
+            invitationsEnabled
+              ? null
+              : // The two reasons of
+                // AssignmentInvitation#reason_for_disabled_invitations
+                classroom.archivedAt
+                ? 'El link está deshabilitado porque el classroom está archivado.'
+                : 'El link está deshabilitado: este assignment no acepta invitaciones.'
+          }
+        />
 
-        <div className="Box my-4">
-          <div className="Box-row">
-            <h3 className="h5 mb-2">Link de invitación</h3>
-            <InvitationLink url={invitationUrl} disabled={!invitationsEnabled} />
-            <p className="note mt-2 mb-0">
-              {invitationsEnabled ? (
-                <>Compartilo con los alumnos para que acepten el assignment.</>
-              ) : (
-                // The two reasons of AssignmentInvitation#reason_for_disabled_invitations
-                <span className="color-fg-attention">
-                  {classroom.archivedAt
-                    ? 'El link está deshabilitado porque el classroom está archivado.'
-                    : 'El link está deshabilitado: este assignment no acepta invitaciones.'}
-                </span>
-              )}
-            </p>
-          </div>
+        <h2 className="mb-2">Detalle del assignment</h2>
 
-          <div className="Box-row d-flex flex-items-center">
-            <FileCodeIcon className="mr-2 color-fg-muted" />
-            <span>
-              {assignment.starterCodeRepoId === null ? (
-                <>Sin starter code, cada alumno arranca de un repo vacío</>
-              ) : starterCode ? (
-                <>
-                  Starter code:{' '}
-                  <a href={starterCode.htmlUrl} className="text-mono">
-                    {starterCode.fullName}
-                  </a>
-                </>
-              ) : (
-                <span className="color-fg-attention">
-                  Starter code inaccesible: el repo se borró o la App perdió acceso
-                </span>
-              )}
-            </span>
-          </div>
+        <StatTiles
+          tiles={[
+            {
+              label: 'Alumnos',
+              total: students,
+              parts: [
+                { value: acceptances.entries.length, label: 'en el roster' },
+                { value: acceptances.unlinkedAccounts.length, label: 'sin vincular' },
+              ],
+            },
+            {
+              label: 'Aceptaron',
+              total: acceptances.acceptedCount,
+              parts: [{ value: acceptances.acceptedCount, label: 'alumnos' }],
+            },
+            {
+              label: 'Entregas',
+              total: repoIds.length,
+              parts: [
+                { value: submitted, label: 'con commits' },
+                { value: repoIds.length - submitted, label: 'sin commits' },
+              ],
+              progress: repoIds.length === 0 ? undefined : submitted / repoIds.length,
+            },
+          ]}
+        />
 
-          <div className="Box-row d-flex flex-items-center">
-            {assignment.publicRepo ? (
-              <RepoIcon className="mr-2 color-fg-muted" />
-            ) : (
-              <LockIcon className="mr-2 color-fg-attention" />
-            )}
-            <span>
-              Repositorios <strong>{assignment.publicRepo ? 'públicos' : 'privados'}</strong>
-            </span>
-          </div>
-
-          <div className="Box-row d-flex flex-items-center">
-            <ShieldLockIcon className="mr-2 color-fg-muted" />
-            <span>
-              Los alumnos{' '}
-              <strong>{assignment.studentsAreRepoAdmins ? 'son' : 'no son'}</strong> admin de su
-              repo
-            </span>
-          </div>
-        </div>
-
-        <AcceptanceList acceptances={acceptances} assignmentTitle={assignment.title} />
-    </ClassroomShell>
+        <AcceptanceList
+          acceptances={acceptances}
+          assignmentTitle={assignment.title}
+          snapshots={snapshots}
+        />
+      </div>
+    </>
   )
 }

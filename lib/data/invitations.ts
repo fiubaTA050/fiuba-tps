@@ -5,6 +5,7 @@ import type { Session } from 'next-auth'
 
 import {
   assignmentInvitations,
+  assignmentRepos,
   assignments,
   inviteStatuses,
   organizations,
@@ -367,12 +368,19 @@ export type AcceptanceRow = {
   identifier: string
   githubLogin: string | null
   state: AcceptanceState
+  /**
+   * The student's repository on GitHub, null while none exists — accepted but
+   * still being created, or never accepted at all. DA-2: the id is all that is
+   * stored, the dashboard resolves it at render time.
+   */
+  repoId: number | null
 }
 
 /** A student who accepted without claiming an identifier on the roster */
 export type UnlinkedAcceptance = {
   userId: number
   githubLogin: string | null
+  repoId: number | null
 }
 
 export type AssignmentAcceptances = {
@@ -428,7 +436,7 @@ export async function listAssignmentAcceptances(
   if (!classroom) return null
 
   const [invitation] = await db
-    .select({ id: assignmentInvitations.id })
+    .select({ id: assignmentInvitations.id, assignmentId: assignments.id })
     .from(assignmentInvitations)
     .innerJoin(
       assignments,
@@ -446,9 +454,22 @@ export async function listAssignmentAcceptances(
 
   // Everyone who accepted, whatever they did about the roster
   const accepted = await db
-    .select({ userId: inviteStatuses.userId, githubLogin: users.githubLogin })
+    .select({
+      userId: inviteStatuses.userId,
+      githubLogin: users.githubLogin,
+      repoId: assignmentRepos.githubRepoId,
+    })
     .from(inviteStatuses)
     .innerJoin(users, eq(users.id, inviteStatuses.userId))
+    // Null until the student's browser finishes creating it — the whole point
+    // of keying this list off invite_statuses instead of assignment_repos
+    .leftJoin(
+      assignmentRepos,
+      and(
+        eq(assignmentRepos.assignmentId, invitation.assignmentId),
+        eq(assignmentRepos.userId, inviteStatuses.userId),
+      ),
+    )
     .where(
       and(
         eq(inviteStatuses.assignmentInvitationId, invitation.id),
@@ -474,9 +495,17 @@ export async function listAssignmentAcceptances(
       userId: rosterEntries.userId,
       githubLogin: users.githubLogin,
       statusId: inviteStatuses.id,
+      repoId: assignmentRepos.githubRepoId,
     })
     .from(rosterEntries)
     .leftJoin(users, eq(users.id, rosterEntries.userId))
+    .leftJoin(
+      assignmentRepos,
+      and(
+        eq(assignmentRepos.assignmentId, invitation.assignmentId),
+        eq(assignmentRepos.userId, rosterEntries.userId),
+      ),
+    )
     // The LEFT JOIN of `order_for_view`, against invite_statuses instead of
     // assignment_repos: a match means this entry's account accepted *this*
     // assignment.
@@ -512,6 +541,7 @@ export async function listAssignmentAcceptances(
       identifier: entry.identifier,
       githubLogin: entry.githubLogin,
       state: acceptanceState(entry.userId, entry.statusId),
+      repoId: entry.repoId,
     })),
     unlinkedAccounts: accepted.filter((account) => !onRoster.has(account.userId)),
     acceptedCount: accepted.length,
