@@ -2,7 +2,7 @@ import 'server-only'
 
 import { randomBytes } from 'node:crypto'
 
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, ne } from 'drizzle-orm'
 
 import { assignments, groupAssignments, organizations } from '@/db/schema'
 import { db } from '@/lib/db'
@@ -101,6 +101,17 @@ export function validateTitleAndSlug(title: string, slug: string): FieldError | 
 export type SlugClash = { classroomId: number; classroomTitle: string }
 
 /**
+ * The assignment doing the asking, when it already exists.
+ *
+ * Rails got this for free: `validates :slug, uniqueness: { scope: }` excludes
+ * the record being saved, and `uniqueness_of_slug_across_organization` ran
+ * `Assignment.where(...)` on a scope that a persisted record is not compared
+ * against. Here the query is written by hand, so the exclusion has to be too —
+ * without it, saving an assignment without touching its prefix finds itself.
+ */
+export type SlugClashExclusion = { kind: 'individual' | 'group'; id: number }
+
+/**
  * Whether any assignment already claims this repository prefix, anywhere in the
  * GitHub organization.
  *
@@ -121,7 +132,11 @@ export type SlugClash = { classroomId: number; classroomTitle: string }
  * Not an index: it spans two tables and every classroom of an organization.
  * The suffix loop in lib/data/repositories.ts stays as the last backstop.
  */
-export async function findSlugClash(githubId: number, slug: string): Promise<SlugClash | null> {
+export async function findSlugClash(
+  githubId: number,
+  slug: string,
+  exclude?: SlugClashExclusion,
+): Promise<SlugClash | null> {
   const individual = await db
     .select({ classroomId: organizations.id, classroomTitle: organizations.title })
     .from(assignments)
@@ -134,6 +149,7 @@ export async function findSlugClash(githubId: number, slug: string): Promise<Slu
         eq(organizations.githubId, githubId),
         eq(assignments.slug, slug),
         isNull(assignments.deletedAt),
+        exclude?.kind === 'individual' ? ne(assignments.id, exclude.id) : undefined,
       ),
     )
     .limit(1)
@@ -152,6 +168,7 @@ export async function findSlugClash(githubId: number, slug: string): Promise<Slu
         eq(organizations.githubId, githubId),
         eq(groupAssignments.slug, slug),
         isNull(groupAssignments.deletedAt),
+        exclude?.kind === 'group' ? ne(groupAssignments.id, exclude.id) : undefined,
       ),
     )
     .limit(1)

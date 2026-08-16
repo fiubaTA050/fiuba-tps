@@ -42,7 +42,9 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
   if (!classroom) notFound()
 
   // flash[:success]: only right after creating, not on every later visit
-  const justCreated = (await props.searchParams).created === '1'
+  const searchParams = await props.searchParams
+  const justCreated = searchParams.created === '1'
+  const justDeleted = searchParams.deleted === '1'
 
   const origin = await baseUrl()
   // organizations#new_assignment: one button, and the chooser asks which kind
@@ -77,6 +79,14 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
         <div className="flash flash-success mb-4">
           Classroom creado. El permiso de repositorio por defecto de la organización quedó en
           <strong> none</strong>, así los alumnos no ven los repos de sus compañeros.
+        </div>
+      )}
+
+      {/* flash[:success] = "\"...\" is being deleted", except nothing is queued
+          and nothing leaves GitHub — see deleteAssignment */}
+      {justDeleted && (
+        <div className="flash flash-success mb-4">
+          Assignment borrado. Los repositorios de los alumnos siguen en la organización de GitHub.
         </div>
       )}
 
@@ -128,6 +138,11 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
                 <div>
                   <h3 className="f3 text-normal lh-condensed">
                     <Link href={assignment.href}>{assignment.title}</Link>
+                    {/* The live site's assignment status, where the archived
+                        `toggle_invitations` checkbox used to be */}
+                    {!assignment.invitationsEnabled && (
+                      <span className="Label Label--attention ml-2 v-align-middle">Inactivo</span>
+                    )}
                   </h3>
                   <p className="color-fg-muted mb-0">
                     {assignment.subtitle} · {assignment.publicRepo ? 'público' : 'privado'}

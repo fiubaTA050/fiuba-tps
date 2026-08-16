@@ -91,7 +91,23 @@ consigo mismo. Mismo cuidado con `isTitleTaken`.
 
 ### Borrar: qué pasa con los repos de los alumnos
 
-**Esta es la decisión que hay que tomar con el docente antes de escribir código.**
+**Decidido el 15/08/2026 con el docente: borrado lógico y nada más.**
+Implementado así en `deleteAssignment` y `deleteGroupAssignment`, y anotado como
+divergencia en `AGENTS.md`.
+
+Al decidirlo se verificó una cosa que esta spec daba por abierta: **el sitio vivo
+sigue borrando los repos**, no sólo el código archivado. El modal archivado
+`_delete_assignment_modal.html.erb` ya lo decía —"this will also delete N
+participant repository under the X organization", con el nombre del assignment
+tipeado para confirmar— y en
+[community#134180](https://github.com/orgs/community/discussions/134180)
+(jul 2024) un docente lo confirma sobre classroom.github.com. En
+[#135806](https://github.com/orgs/community/discussions/135806) hay un caso de
+agosto 2024 de alguien que borró un assignment desde Edit sin querer y se llevó
+100+ repos: ése es exactamente el modo de falla que evitamos.
+
+Como acá no se va nada de GitHub, el botón no pide tipear el nombre: alcanza un
+`confirm`, igual que el resto de las acciones destructivas del port.
 
 El original borra los repos. `AssignmentsController#destroy` hace un borrado
 lógico (`deleted_at`) y encola `DestroyResourceJob`, que hace `resource.destroy`;

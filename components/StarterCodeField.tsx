@@ -25,11 +25,14 @@ import type { GitHubRepository } from '@/lib/github/repositories'
 export function StarterCodeField({
   templates,
   invalid,
+  initialValue = '',
 }: {
   templates: GitHubRepository[]
   invalid: boolean
+  /** `owner/name` already saved, when the edit screen is the one asking */
+  initialValue?: string
 }) {
-  const [value, setValue] = useState('')
+  const [value, setValue] = useState(initialValue)
   // Results carry the query they answer, which is what makes "still searching"
   // derivable instead of a second state the effect has to keep in sync.
   const [results, setResults] = useState<{

@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import { assignmentInvitations, assignments, groupAssignments } from '@/db/schema'
@@ -32,6 +32,9 @@ export type { AssignmentField }
 export type CreateAssignmentResult =
   | { success: true; slug: string }
   | { success: false; error: string; field: AssignmentField }
+
+/** #destroy has nothing to say about a field: it either happened or it did not */
+export type DeleteAssignmentResult = { success: true } | { success: false; error: string }
 
 export type AssignmentListItem = {
   id: number
@@ -281,8 +284,186 @@ export async function createAssignment(
   return { success: true, slug }
 }
 
-/** `Assignment.where(title:, organization:)` — the title stays scoped to the classroom */
-async function isTitleTaken(organizationId: number, title: string): Promise<boolean> {
+/**
+ * Port of AssignmentsController#update, which delegated to
+ * `Assignment::Editor#perform`.
+ *
+ * The editor did three things: recreate the deadline, `update_attributes` and
+ * then walk `previous_changes` handing each one to
+ * `update_attribute_for_all_assignment_repos`. The first does not exist here
+ * (no deadlines), and **the third is deliberately dropped**: its `case` had a
+ * single `when "public_repo"`, which enqueued `AssignmentRepositoryVisibilityJob`
+ * to flip every repository already created. There is no queue here, and doing
+ * it inline is one GitHub call per student against a 60 s function ceiling —
+ * so nothing propagates, the same stance the original already took for
+ * `students_are_repo_admins`. See docs/edicion-y-borrado-de-assignments.md.
+ *
+ * The validations run in the same order as #create, GitHub last, for the same
+ * reason: a submission that repeats a title costs no API calls.
+ */
+export async function updateAssignment(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  input: NewAssignmentInput,
+): Promise<CreateAssignmentResult> {
+  const title = input.title.trim()
+  const slug = input.slug.trim()
+
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+
+  if (!classroom) {
+    return { success: false, error: 'No encontramos ese classroom.', field: 'base' }
+  }
+
+  // validate :organization_is_not_archived, which reads "you cannot create or
+  // modify assignments in archived classrooms" — it covers this path too.
+  if (classroom.archivedAt) {
+    return {
+      success: false,
+      error: 'No se pueden modificar assignments en un classroom archivado.',
+      field: 'base',
+    }
+  }
+
+  const [existing] = await db
+    .select({ id: assignments.id })
+    .from(assignments)
+    .where(
+      and(
+        eq(assignments.organizationId, classroom.id),
+        eq(assignments.slug, assignmentSlug),
+        isNull(assignments.deletedAt),
+      ),
+    )
+
+  // `find_by!` raised; the screen answers 404 and this is its message
+  if (!existing) {
+    return { success: false, error: 'No encontramos ese assignment.', field: 'base' }
+  }
+
+  const invalid = validateTitleAndSlug(title, slug)
+  if (invalid) return { success: false, ...invalid }
+
+  // Both uniqueness checks exclude the row being saved. Rails got that from
+  // `uniqueness`; here it is the explicit argument, and without it saving
+  // without touching the prefix collides with itself.
+  if (await isTitleTaken(classroom.id, title, existing.id)) {
+    return {
+      success: false,
+      error: `Ya existe un assignment llamado "${title}" en este classroom.`,
+      field: 'title',
+    }
+  }
+
+  const clash = await findSlugClash(classroom.githubId, slug, {
+    kind: 'individual',
+    id: existing.id,
+  })
+
+  if (clash) {
+    return { success: false, error: slugClashMessage(slug, clash, classroom.id), field: 'slug' }
+  }
+
+  const starterCode = await resolveStarterCode(classroom.installationId, input.starterCodeRepo)
+  if (starterCode.error) return { success: false, ...starterCode.error }
+
+  try {
+    await db
+      .update(assignments)
+      .set({
+        title,
+        slug,
+        starterCodeRepoId: starterCode.repositoryId,
+        publicRepo: input.publicRepo,
+        invitationsEnabled: input.invitationsEnabled,
+        studentsAreRepoAdmins: input.studentsAreRepoAdmins,
+      })
+      .where(eq(assignments.id, existing.id))
+  } catch (error) {
+    // Same race as #create, and the same backstop
+    if (isUniqueViolation(error)) {
+      return {
+        success: false,
+        error: 'Ya existe un assignment con ese nombre o prefijo en este classroom.',
+        field: 'title',
+      }
+    }
+
+    throw error
+  }
+
+  return { success: true, slug }
+}
+
+/**
+ * Port of AssignmentsController#destroy, minus its second half.
+ *
+ * The original set `deleted_at` and then enqueued `DestroyResourceJob`, which
+ * called `resource.destroy`; `assignment_repos` is `dependent: :destroy`, and
+ * each one carries a `before_destroy` —
+ * `AssignmentRepoable#silently_destroy_github_repository`,
+ * app/models/concerns/assignment_repoable.rb:10 — that deletes the repository
+ * from GitHub. Its own modal said so: "this will also delete N participant
+ * repository under the X organization".
+ *
+ * **Deliberate divergence: only the soft delete.** For a cátedra the repository
+ * is the submission and the evidence of the grading, and one click taking a
+ * hundred of them away is a worse failure than leaving repositories behind.
+ * The partial unique indexes are already `where deleted_at is null`, so the
+ * title and the prefix are freed by this alone, and every read the student
+ * reaches — findInvitationRow, loadContext — inner-joins on the same condition,
+ * so the invitation link answers 404 without any further work.
+ */
+export async function deleteAssignment(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+): Promise<DeleteAssignmentResult> {
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+  if (!classroom) return { success: false, error: 'No encontramos ese classroom.' }
+
+  const deletedAt = new Date()
+
+  const deleted = await db
+    .update(assignments)
+    .set({ deletedAt })
+    .where(
+      and(
+        eq(assignments.organizationId, classroom.id),
+        eq(assignments.slug, assignmentSlug),
+        isNull(assignments.deletedAt),
+      ),
+    )
+    .returning({ id: assignments.id })
+
+  if (deleted.length === 0) return { success: false, error: 'No encontramos ese assignment.' }
+
+  // The invitation is meaningless without its assignment, and `default_scope`
+  // hid it along with it. Soft-deleted too so the two rows read consistently.
+  await db
+    .update(assignmentInvitations)
+    .set({ deletedAt })
+    .where(
+      and(
+        eq(assignmentInvitations.assignmentId, deleted[0].id),
+        isNull(assignmentInvitations.deletedAt),
+      ),
+    )
+
+  return { success: true }
+}
+
+/**
+ * `Assignment.where(title:, organization:)` — the title stays scoped to the
+ * classroom. `exclude` is the assignment being edited, which must not find
+ * itself.
+ */
+async function isTitleTaken(
+  organizationId: number,
+  title: string,
+  exclude?: number,
+): Promise<boolean> {
   const rows = await db
     .select({ id: assignments.id })
     .from(assignments)
@@ -291,6 +472,7 @@ async function isTitleTaken(organizationId: number, title: string): Promise<bool
         eq(assignments.organizationId, organizationId),
         eq(assignments.title, title),
         isNull(assignments.deletedAt),
+        exclude === undefined ? undefined : ne(assignments.id, exclude),
       ),
     )
     .limit(1)

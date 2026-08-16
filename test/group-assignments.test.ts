@@ -49,8 +49,14 @@ const TEMPLATE = {
   isTemplate: true,
 }
 
-const { createGroupAssignment, findGroupAssignment, listGroupAssignments, listGroupings } =
-  await import('@/lib/data/group-assignments')
+const {
+  createGroupAssignment,
+  deleteGroupAssignment,
+  findGroupAssignment,
+  listGroupAssignments,
+  listGroupings,
+  updateGroupAssignment,
+} = await import('@/lib/data/group-assignments')
 
 let nextUid = 1
 let nextGithubId = 1000
@@ -121,6 +127,21 @@ const VALID = {
   groupingTitle: 'Equipos formados en agosto',
   maxMembers: null,
   maxTeams: null,
+}
+
+/**
+ * What editing takes: everything of VALID except the set of teams, which the
+ * original only offers while `new_record?`.
+ */
+const EDITABLE = {
+  title: VALID.title,
+  slug: VALID.slug,
+  publicRepo: VALID.publicRepo,
+  invitationsEnabled: VALID.invitationsEnabled,
+  studentsAreRepoAdmins: VALID.studentsAreRepoAdmins,
+  starterCodeRepo: VALID.starterCodeRepo,
+  maxMembers: VALID.maxMembers,
+  maxTeams: VALID.maxTeams,
 }
 
 beforeEach(async () => {
@@ -458,5 +479,268 @@ describe('listGroupAssignments and listGroupings', () => {
       { id: first.id, title: 'Equipos del TP1', slug: 'equipos-del-tp1', teamCount: 2 },
       expect.objectContaining({ title: 'Equipos del TP3', teamCount: 0 }),
     ])
+  })
+})
+
+/**
+ * The group half of spec/models/assignment/editor_spec.rb and of
+ * GroupAssignmentsController#update. Everything the individual one covers is
+ * shared code and is asserted there; what is repeated here is what only exists
+ * on this side.
+ */
+describe('updateGroupAssignment', () => {
+  /** A classroom with `VALID` already created in it */
+  async function withAssignment(session: Session) {
+    const classroom = await classroomOrg(session)
+    await createGroupAssignment(session, classroom.slug, VALID)
+    return classroom
+  }
+
+  it('updates the attributes', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    const result = await updateGroupAssignment(session, classroom.slug, VALID.slug, {
+      ...EDITABLE,
+      title: 'TP1 MapReduce (2026a)',
+      maxMembers: 3,
+    })
+
+    expect(result).toEqual({ success: true, slug: VALID.slug })
+
+    const [row] = await db.select().from(groupAssignments)
+    expect(row.title).toBe('TP1 MapReduce (2026a)')
+    expect(row.maxMembers).toBe(3)
+  })
+
+  it('does not clash with itself when the prefix is left alone', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    const result = await updateGroupAssignment(session, classroom.slug, VALID.slug, {
+      ...EDITABLE,
+      title: 'Otro título',
+    })
+
+    expect(result).toEqual({ success: true, slug: VALID.slug })
+  })
+
+  /**
+   * `uniqueness_of_slug_across_organization` widened: the prefix is a
+   * repository name and those belong to the GitHub organization, so an
+   * individual assignment of a sibling classroom is a clash too.
+   */
+  it('rejects a prefix used by an individual assignment of the same GitHub organization', async () => {
+    const session = await classroomTeacher()
+    const first = await classroomOrg(session, { githubId: 5000 })
+    const second = await classroomOrg(session, { githubId: 5000 })
+
+    await db.insert(assignments).values({
+      organizationId: first.id,
+      creatorId: Number(session.user.id),
+      title: 'TP individual',
+      slug: 'tp-compartido',
+    })
+
+    await createGroupAssignment(session, second.slug, VALID)
+
+    const result = await updateGroupAssignment(session, second.slug, VALID.slug, {
+      ...EDITABLE,
+      slug: 'tp-compartido',
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.success === false && result.field).toBe('slug')
+    expect(result.success === false && result.error).toContain(first.title)
+  })
+
+  /**
+   * The edit branch of `max_teams_less_than_group_count`
+   * (group_assignment.rb:78). The original has two messages for this and the
+   * creation path only ever reaches the other one, so this is the case that was
+   * missing.
+   */
+  it('rejects a max_teams below the teams the set already has', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    const grouping = await existingGrouping(classroom.id)
+    await existingTeam(grouping.id, classroom.id, 'Equipo 1')
+    await existingTeam(grouping.id, classroom.id, 'Equipo 2')
+    await existingTeam(grouping.id, classroom.id, 'Equipo 3')
+
+    await createGroupAssignment(session, classroom.slug, { ...VALID, groupingId: grouping.id })
+
+    const result = await updateGroupAssignment(session, classroom.slug, VALID.slug, {
+      ...EDITABLE,
+      maxTeams: 2,
+    })
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Este assignment ya tiene 3 equipos, así que el máximo no puede ser 2.',
+      field: 'maxTeams',
+    })
+    expect((await db.select().from(groupAssignments))[0].maxTeams).toBeNull()
+  })
+
+  it('accepts a max_teams equal to the teams the set already has', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    const grouping = await existingGrouping(classroom.id)
+    await existingTeam(grouping.id, classroom.id, 'Equipo 1')
+    await existingTeam(grouping.id, classroom.id, 'Equipo 2')
+
+    await createGroupAssignment(session, classroom.slug, { ...VALID, groupingId: grouping.id })
+
+    const result = await updateGroupAssignment(session, classroom.slug, VALID.slug, {
+      ...EDITABLE,
+      maxTeams: 2,
+    })
+
+    expect(result).toEqual({ success: true, slug: VALID.slug })
+  })
+
+  // The limits are validated the same way as at creation
+  it('rejects a max_members below 1', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    const result = await updateGroupAssignment(session, classroom.slug, VALID.slug, {
+      ...EDITABLE,
+      maxMembers: 0,
+    })
+
+    expect(result).toMatchObject({ success: false, field: 'maxMembers' })
+  })
+
+  // The set of teams is not editable, so it survives every save untouched
+  it('keeps the set of teams', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    const grouping = await existingGrouping(classroom.id)
+    await createGroupAssignment(session, classroom.slug, { ...VALID, groupingId: grouping.id })
+
+    await updateGroupAssignment(session, classroom.slug, VALID.slug, {
+      ...EDITABLE,
+      title: 'Otro título',
+    })
+
+    expect((await db.select().from(groupAssignments))[0].groupingId).toBe(grouping.id)
+  })
+
+  it('closes submissions by setting the assignment inactive', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    await updateGroupAssignment(session, classroom.slug, VALID.slug, {
+      ...EDITABLE,
+      invitationsEnabled: false,
+    })
+
+    expect((await db.select().from(groupAssignments))[0].invitationsEnabled).toBe(false)
+  })
+
+  // validate :organization_is_not_archived — "create or modify"
+  it('refuses to modify an assignment of an archived classroom', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+    await db.update(organizations).set({ archivedAt: new Date() })
+
+    const result = await updateGroupAssignment(session, classroom.slug, VALID.slug, {
+      ...EDITABLE,
+      title: 'Otro título',
+    })
+
+    expect(result).toMatchObject({ success: false, field: 'base' })
+  })
+
+  it('refuses a teacher who is not a member of the classroom', async () => {
+    const owner = await classroomTeacher('owner')
+    const stranger = await classroomTeacher('stranger')
+    const classroom = await withAssignment(owner)
+
+    const result = await updateGroupAssignment(stranger, classroom.slug, VALID.slug, {
+      ...EDITABLE,
+      title: 'Otro título',
+    })
+
+    expect(result).toMatchObject({ success: false, field: 'base' })
+    expect((await db.select().from(groupAssignments))[0].title).toBe(VALID.title)
+  })
+})
+
+/** Port of `describe "DELETE #destroy"` of the group controller spec */
+describe('deleteGroupAssignment', () => {
+  it('sets deleted_at and hides the assignment', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    await createGroupAssignment(session, classroom.slug, VALID)
+
+    expect(await deleteGroupAssignment(session, classroom.slug, VALID.slug)).toEqual({
+      success: true,
+    })
+
+    expect((await db.select().from(groupAssignments))[0].deletedAt).not.toBeNull()
+    expect(await listGroupAssignments(session, classroom.slug)).toEqual([])
+    expect(await findGroupAssignment(session, classroom.slug, VALID.slug)).toBeNull()
+    expect((await db.select().from(groupAssignmentInvitations))[0].deletedAt).not.toBeNull()
+  })
+
+  it('frees the title and the prefix for a new assignment', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    await createGroupAssignment(session, classroom.slug, VALID)
+
+    await deleteGroupAssignment(session, classroom.slug, VALID.slug)
+
+    expect(
+      await createGroupAssignment(session, classroom.slug, {
+        ...VALID,
+        groupingTitle: 'Equipos nuevos',
+      }),
+    ).toEqual({ success: true, slug: VALID.slug })
+  })
+
+  /**
+   * The set of teams belongs to the classroom, not to the assignment, and
+   * another one may be sharing it — the original's DestroyResourceJob did not
+   * touch it either.
+   */
+  it('leaves the set of teams and its teams alone', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    const grouping = await existingGrouping(classroom.id)
+    await existingTeam(grouping.id, classroom.id, 'Equipo 1')
+    await createGroupAssignment(session, classroom.slug, { ...VALID, groupingId: grouping.id })
+
+    await deleteGroupAssignment(session, classroom.slug, VALID.slug)
+
+    expect(await db.select().from(groupings)).toHaveLength(1)
+    expect(await db.select().from(groups)).toHaveLength(1)
+  })
+
+  it('refuses a teacher who is not a member of the classroom', async () => {
+    const owner = await classroomTeacher('owner')
+    const stranger = await classroomTeacher('stranger')
+    const classroom = await classroomOrg(owner)
+    await createGroupAssignment(owner, classroom.slug, VALID)
+
+    expect(await deleteGroupAssignment(stranger, classroom.slug, VALID.slug)).toEqual({
+      success: false,
+      error: 'No encontramos ese classroom.',
+    })
+    expect((await db.select().from(groupAssignments))[0].deletedAt).toBeNull()
+  })
+
+  it('returns not found for an assignment already deleted', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    await createGroupAssignment(session, classroom.slug, VALID)
+    await deleteGroupAssignment(session, classroom.slug, VALID.slug)
+
+    expect(await deleteGroupAssignment(session, classroom.slug, VALID.slug)).toEqual({
+      success: false,
+      error: 'No encontramos ese assignment.',
+    })
   })
 })

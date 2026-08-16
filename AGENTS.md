@@ -91,6 +91,25 @@ reference code without mental translation. The confusing one:
   just the classroom, and across both kinds of assignment. The slug is a
   repository prefix and repository names belong to the org, which hosts one
   classroom per term — see `lib/data/assignment-fields.ts`.
+- **Deleting an assignment does not delete the students' repositories.** The
+  original's `#destroy` sets `deleted_at` and enqueues `DestroyResourceJob`;
+  `assignment_repos` is `dependent: :destroy` and each row carries a
+  `before_destroy` that deletes the repository from GitHub
+  (`app/models/concerns/assignment_repoable.rb:10`). Its own modal said so —
+  "this will also delete N participant repository under the X organization" —
+  and the live site still behaves that way. Here it is the soft delete and
+  nothing else: for a cátedra the repository *is* the submission and the
+  evidence of the grading, and one click taking a hundred of them is a worse
+  failure than leaving repositories behind. The partial unique indexes are
+  already `where deleted_at is null`, so the title and the prefix are freed by
+  that alone, and every read the student reaches inner-joins on the same
+  condition, so the invitation link 404s with no extra work.
+- **Editing propagates nothing to the repositories already created**, not even
+  the visibility. `Assignment::Editor#update_attribute_for_all_assignment_repos`
+  has a single `when "public_repo"` that enqueues
+  `AssignmentRepositoryVisibilityJob`; with no queue that would be one GitHub
+  call per student inside the teacher's request, against a 60 s function
+  ceiling. Every edit screen says so next to the field it applies to.
 
 ## Rules
 
@@ -109,12 +128,10 @@ reference code without mental translation. The confusing one:
   `docs/creacion-de-repos.md`: it records the measurements, GitHub's secondary
   rate limits, why a queue is not needed at this size, and the exact condition
   that would make it needed.
-- **Editing and deleting assignments are not built yet, and the design is
-  already settled**: read `docs/edicion-y-borrado-de-assignments.md` first. It
-  records why closing submissions belongs in the edit screen and not in a
-  toggle, that no migration is needed, what must *not* propagate to existing
-  repositories, and the open decision about whether deleting an assignment
-  should delete the students' repositories the way the original does.
+- **Editing and deleting assignments follow
+  `docs/edicion-y-borrado-de-assignments.md`**, which records why closing
+  submissions belongs in the edit screen and not in a toggle, and what must
+  *not* propagate to existing repositories.
 
 ## Tests
 

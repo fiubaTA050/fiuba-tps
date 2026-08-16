@@ -10,6 +10,7 @@ import {
   groups,
   groupsUsers,
   organizations,
+  organizationsUsers,
   rosterEntries,
   rosters,
   users,
@@ -46,6 +47,11 @@ const {
   listUnlinkedEntriesForGroup,
 } = await import('@/lib/data/group-invitations')
 
+// The teacher's side: what the edit screen writes
+const { deleteGroupAssignment, updateGroupAssignment } = await import(
+  '@/lib/data/group-assignments'
+)
+
 let nextUid = 1
 let nextGithubId = 1000
 
@@ -66,9 +72,12 @@ async function student(login = 'alumno-fiuba'): Promise<Session> {
 
 type Fixture = {
   classroomId: number
+  classroomSlug: string
   groupingId: number
   assignmentId: number
   key: string
+  /** The creator, linked in organizations_users so the teacher paths accept it */
+  teacher: Session
 }
 
 /**
@@ -95,7 +104,11 @@ async function groupAssignment(
       slug: `classroom-${githubId}`,
       archivedAt: options.archived ? new Date() : null,
     })
-    .returning({ id: organizations.id })
+    .returning({ id: organizations.id, slug: organizations.slug })
+
+  await db
+    .insert(organizationsUsers)
+    .values({ organizationId: classroom.id, userId: Number(creator.user.id) })
 
   const [grouping] = await db
     .insert(groupings)
@@ -123,9 +136,11 @@ async function groupAssignment(
 
   return {
     classroomId: classroom.id,
+    classroomSlug: classroom.slug,
     groupingId: grouping.id,
     assignmentId: assignment.id,
     key,
+    teacher: creator,
   }
 }
 
@@ -479,5 +494,57 @@ describe('currentGroupStatus', () => {
     await acceptGroupInvitation(session, fixture.key, { title: 'lala' })
 
     expect(await currentGroupStatus(session, fixture.key)).toBe('accepted')
+  })
+})
+
+/**
+ * The teacher's edit and delete screens, seen from the student's link. Mirror
+ * of the same block in test/invitations.test.ts.
+ */
+describe('what editing the assignment does to its link', () => {
+  /** Everything `updateGroupAssignment` needs, matching the fixture's row */
+  const FIELDS = {
+    title: 'TP1 MapReduce',
+    slug: '2026a-tp1-mapreduce',
+    publicRepo: false,
+    invitationsEnabled: true,
+    studentsAreRepoAdmins: false,
+    starterCodeRepo: '',
+    maxMembers: null,
+    maxTeams: null,
+  }
+
+  it('stops accepting once the teacher sets the assignment inactive', async () => {
+    const fixture = await groupAssignment()
+    const first = await student()
+
+    expect(
+      await acceptGroupInvitation(first, fixture.key, { title: 'Equipo 1' }),
+    ).toMatchObject({ success: true })
+
+    await updateGroupAssignment(fixture.teacher, fixture.classroomSlug, FIELDS.slug, {
+      ...FIELDS,
+      invitationsEnabled: false,
+    })
+
+    const second = await student('otra-alumna')
+    expect(
+      await acceptGroupInvitation(second, fixture.key, { title: 'Equipo 2' }),
+    ).toMatchObject({ success: false })
+
+    // The team already formed is untouched
+    expect(await db.select().from(groups)).toHaveLength(1)
+  })
+
+  it('makes the invitation link unreachable once the assignment is deleted', async () => {
+    const fixture = await groupAssignment()
+    const session = await student()
+
+    await deleteGroupAssignment(fixture.teacher, fixture.classroomSlug, FIELDS.slug)
+
+    expect(await findGroupInvitation(session, fixture.key)).toBeNull()
+    expect(
+      await acceptGroupInvitation(session, fixture.key, { title: 'Equipo 1' }),
+    ).toMatchObject({ success: false })
   })
 })

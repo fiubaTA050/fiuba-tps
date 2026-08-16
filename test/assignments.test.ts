@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   assignmentInvitations,
+  assignmentRepos,
   assignments,
   groupAssignments,
   groupings,
@@ -50,9 +51,13 @@ const TEMPLATE = {
   isTemplate: true,
 }
 
-const { createAssignment, findAssignment, listAssignments } = await import(
-  '@/lib/data/assignments'
-)
+const {
+  createAssignment,
+  deleteAssignment,
+  findAssignment,
+  listAssignments,
+  updateAssignment,
+} = await import('@/lib/data/assignments')
 
 let nextUid = 1
 
@@ -686,5 +691,356 @@ describe('findAssignment', () => {
     await db.update(assignments).set({ deletedAt: new Date() })
 
     expect(await findAssignment(session, classroom.slug, 'tp1')).toBeNull()
+  })
+})
+
+/**
+ * Port of spec/models/assignment/editor_spec.rb and of the
+ * AssignmentsController#update cases of the controller spec. The deadline half
+ * of the editor spec is absent because deadlines are not ported.
+ */
+describe('updateAssignment', () => {
+  /** A classroom with `VALID` already created in it */
+  async function withAssignment(session: Session) {
+    const classroom = await classroomOrg(session)
+    await createAssignment(session, classroom.slug, VALID)
+    return classroom
+  }
+
+  // "can update attributes"
+  it('updates the attributes', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    const result = await updateAssignment(session, classroom.slug, 'tp1', {
+      ...VALID,
+      title: 'New Title',
+    })
+
+    expect(result).toEqual({ success: true, slug: 'tp1' })
+
+    const [row] = await db.select().from(assignments)
+    expect(row.title).toBe('New Title')
+  })
+
+  it('renames the repository prefix', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    const result = await updateAssignment(session, classroom.slug, 'tp1', {
+      ...VALID,
+      slug: 'tp1-2026a',
+    })
+
+    expect(result).toEqual({ success: true, slug: 'tp1-2026a' })
+    expect((await db.select().from(assignments))[0].slug).toBe('tp1-2026a')
+  })
+
+  /**
+   * `context "public_repo is changed"`, inverted. The original enqueued
+   * AssignmentRepositoryVisibilityJob from
+   * Editor#update_attribute_for_all_assignment_repos; here nothing propagates,
+   * so the repositories already created keep the visibility they were made
+   * with. See docs/edicion-y-borrado-de-assignments.md.
+   */
+  it('changes public_repo without touching the repositories already created', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    const [assignment] = await db.select().from(assignments)
+    const [user] = await db
+      .insert(users)
+      .values({ uid: 9001, githubLogin: 'alumna' })
+      .returning({ id: users.id })
+
+    await db.insert(assignmentRepos).values({
+      assignmentId: assignment.id,
+      userId: user.id,
+      githubRepoId: 424242,
+    })
+
+    await updateAssignment(session, classroom.slug, 'tp1', { ...VALID, publicRepo: true })
+
+    expect((await db.select().from(assignments))[0].publicRepo).toBe(true)
+    // The repository still points at the same GitHub repo, still owned by the
+    // same student: no job was enqueued and no call was made. DA-2 means the
+    // name is not stored, so the repo on GitHub keeps whatever it was made with.
+    const repos = await db.select().from(assignmentRepos)
+    expect(repos).toHaveLength(1)
+    expect(repos[0]).toMatchObject({ githubRepoId: 424242, userId: user.id })
+  })
+
+  // The live site's "Assignment status" dropdown, which is where the archived
+  // `toggle_invitations` went
+  it('closes submissions by setting the assignment inactive', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    await updateAssignment(session, classroom.slug, 'tp1', {
+      ...VALID,
+      invitationsEnabled: false,
+    })
+
+    expect((await db.select().from(assignments))[0].invitationsEnabled).toBe(false)
+  })
+
+  /**
+   * Not in the original: `validates :slug, uniqueness:` excluded the record
+   * being saved for free, and the hand-written query here has to be told to.
+   */
+  it('does not clash with itself when the prefix is left alone', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    const result = await updateAssignment(session, classroom.slug, 'tp1', {
+      ...VALID,
+      title: 'Otro título',
+    })
+
+    expect(result).toEqual({ success: true, slug: 'tp1' })
+  })
+
+  it('does not clash with itself when the title is left alone', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    const result = await updateAssignment(session, classroom.slug, 'tp1', {
+      ...VALID,
+      slug: 'tp1-bis',
+    })
+
+    expect(result).toEqual({ success: true, slug: 'tp1-bis' })
+  })
+
+  it('rejects a prefix that another assignment of the classroom already uses', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+    await createAssignment(session, classroom.slug, { ...VALID, title: 'TP 2', slug: 'tp2' })
+
+    const result = await updateAssignment(session, classroom.slug, 'tp1', {
+      ...VALID,
+      slug: 'tp2',
+    })
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Ya existe un assignment con el prefijo "tp2" en este classroom.',
+      field: 'slug',
+    })
+  })
+
+  /**
+   * Not in the original either: its uniqueness check was scoped to one
+   * classroom, and the prefix is a repository name, which belongs to the whole
+   * GitHub organization. The message has to name the other classroom, because
+   * the teacher cannot see it from here.
+   */
+  it('rejects a prefix used by another classroom of the same GitHub organization', async () => {
+    const session = await classroomTeacher()
+    const first = await classroomOrg(session, { githubId: 5000 })
+    const second = await classroomOrg(session, { githubId: 5000 })
+
+    await createAssignment(session, first.slug, VALID)
+    await createAssignment(session, second.slug, { ...VALID, title: 'TP 1 bis', slug: 'tp1-bis' })
+
+    const result = await updateAssignment(session, second.slug, 'tp1-bis', {
+      ...VALID,
+      title: 'TP 1 bis',
+      slug: 'tp1',
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.success === false && result.field).toBe('slug')
+    expect(result.success === false && result.error).toContain(first.title)
+  })
+
+  it('rejects a title that another assignment of the classroom already uses', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+    await createAssignment(session, classroom.slug, { ...VALID, title: 'TP 2', slug: 'tp2' })
+
+    const result = await updateAssignment(session, classroom.slug, 'tp1', {
+      ...VALID,
+      title: 'TP 2',
+    })
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Ya existe un assignment llamado "TP 2" en este classroom.',
+      field: 'title',
+    })
+  })
+
+  /**
+   * `context "slug is empty"`. The original reloaded the record so the form
+   * would not render with a blank prefix; here nothing was written in the first
+   * place, which is the same guarantee stated on the database.
+   */
+  it('leaves the assignment intact when the prefix is empty', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+
+    const result = await updateAssignment(session, classroom.slug, 'tp1', { ...VALID, slug: '' })
+
+    expect(result).toEqual({
+      success: false,
+      error: 'El prefijo no puede estar vacío.',
+      field: 'slug',
+    })
+    expect((await db.select().from(assignments))[0].slug).toBe('tp1')
+  })
+
+  // validate :organization_is_not_archived — "create or modify"
+  it('refuses to modify an assignment of an archived classroom', async () => {
+    const session = await classroomTeacher()
+    const classroom = await withAssignment(session)
+    await db.update(organizations).set({ archivedAt: new Date() })
+
+    const result = await updateAssignment(session, classroom.slug, 'tp1', {
+      ...VALID,
+      title: 'New Title',
+    })
+
+    expect(result).toEqual({
+      success: false,
+      error: 'No se pueden modificar assignments en un classroom archivado.',
+      field: 'base',
+    })
+  })
+
+  // DA-4: the boundary is findTeachingClassroom, not the caller
+  it('refuses a teacher who is not a member of the classroom', async () => {
+    const owner = await classroomTeacher('owner')
+    const stranger = await classroomTeacher('stranger')
+    const classroom = await withAssignment(owner)
+
+    const result = await updateAssignment(stranger, classroom.slug, 'tp1', {
+      ...VALID,
+      title: 'New Title',
+    })
+
+    expect(result).toEqual({
+      success: false,
+      error: 'No encontramos ese classroom.',
+      field: 'base',
+    })
+    expect((await db.select().from(assignments))[0].title).toBe('Trabajo Practico 1')
+  })
+
+  it('returns not found for an unknown assignment', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    const result = await updateAssignment(session, classroom.slug, 'tp1', VALID)
+
+    expect(result).toEqual({
+      success: false,
+      error: 'No encontramos ese assignment.',
+      field: 'base',
+    })
+  })
+})
+
+/**
+ * Port of `describe "DELETE #destroy"`. Its second and third cases —
+ * DestroyResourceJob and the statsd event — have no equivalent: the job is
+ * exactly what this port does not do, see `deleteAssignment`.
+ */
+describe('deleteAssignment', () => {
+  // "sets the `deleted_at` column for the assignment"
+  it('sets deleted_at and hides the assignment', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    await createAssignment(session, classroom.slug, VALID)
+
+    expect(await deleteAssignment(session, classroom.slug, 'tp1')).toEqual({ success: true })
+
+    const [row] = await db.select().from(assignments)
+    expect(row.deletedAt).not.toBeNull()
+    expect(await listAssignments(session, classroom.slug)).toEqual([])
+    expect(await findAssignment(session, classroom.slug, 'tp1')).toBeNull()
+  })
+
+  it('soft-deletes the invitation along with it', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    await createAssignment(session, classroom.slug, VALID)
+
+    await deleteAssignment(session, classroom.slug, 'tp1')
+
+    expect((await db.select().from(assignmentInvitations))[0].deletedAt).not.toBeNull()
+  })
+
+  /**
+   * The partial unique indexes are `where deleted_at is null`, so this works
+   * without any extra bookkeeping — and it is the reason a soft delete is
+   * enough to call the assignment gone.
+   */
+  it('frees the title and the prefix for a new assignment', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    await createAssignment(session, classroom.slug, VALID)
+
+    await deleteAssignment(session, classroom.slug, 'tp1')
+
+    expect(await createAssignment(session, classroom.slug, VALID)).toEqual({
+      success: true,
+      slug: 'tp1',
+    })
+  })
+
+  /**
+   * The divergence, asserted. The original's `dependent: :destroy` plus
+   * `AssignmentRepoable#silently_destroy_github_repository` deleted every
+   * student repository from GitHub; here the rows — and the repositories they
+   * name — are left alone.
+   */
+  it('leaves the students´ repositories alone', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    await createAssignment(session, classroom.slug, VALID)
+
+    const [assignment] = await db.select().from(assignments)
+    const [user] = await db
+      .insert(users)
+      .values({ uid: 9002, githubLogin: 'alumno' })
+      .returning({ id: users.id })
+
+    await db.insert(assignmentRepos).values({
+      assignmentId: assignment.id,
+      userId: user.id,
+      githubRepoId: 515151,
+    })
+
+    await deleteAssignment(session, classroom.slug, 'tp1')
+
+    const repos = await db.select().from(assignmentRepos)
+    expect(repos).toHaveLength(1)
+    expect(repos[0].githubRepoId).toBe(515151)
+  })
+
+  it('refuses a teacher who is not a member of the classroom', async () => {
+    const owner = await classroomTeacher('owner')
+    const stranger = await classroomTeacher('stranger')
+    const classroom = await classroomOrg(owner)
+    await createAssignment(owner, classroom.slug, VALID)
+
+    expect(await deleteAssignment(stranger, classroom.slug, 'tp1')).toEqual({
+      success: false,
+      error: 'No encontramos ese classroom.',
+    })
+    expect((await db.select().from(assignments))[0].deletedAt).toBeNull()
+  })
+
+  it('returns not found for an assignment already deleted', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    await createAssignment(session, classroom.slug, VALID)
+    await deleteAssignment(session, classroom.slug, 'tp1')
+
+    expect(await deleteAssignment(session, classroom.slug, 'tp1')).toEqual({
+      success: false,
+      error: 'No encontramos ese assignment.',
+    })
   })
 })

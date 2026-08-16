@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, asc, count, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, count, eq, isNull, ne, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
@@ -41,6 +41,8 @@ export type CreateGroupAssignmentResult =
   | { success: true; slug: string }
   | { success: false; error: string; field: GroupAssignmentField }
 
+export type DeleteGroupAssignmentResult = { success: true } | { success: false; error: string }
+
 export type GroupAssignmentListItem = {
   id: number
   title: string
@@ -77,6 +79,16 @@ export type NewGroupAssignmentInput = {
   maxMembers: number | null
   maxTeams: number | null
 }
+
+/**
+ * What editing can change. The set of teams is not in it: the original only
+ * offers it inside `if @group_assignment.new_record?`, and the live site says
+ * the assignment type cannot change after creation either.
+ */
+export type EditGroupAssignmentInput = Omit<
+  NewGroupAssignmentInput,
+  'groupingId' | 'groupingTitle'
+>
 
 const SELECTION = {
   id: groupAssignments.id,
@@ -331,6 +343,167 @@ export async function createGroupAssignment(
   return { success: true, slug }
 }
 
+/**
+ * Port of GroupAssignmentsController#update, the mirror of `updateAssignment`.
+ *
+ * Same three divergences as the individual one — no deadline, nothing
+ * propagates to the repositories already created, and both uniqueness checks
+ * exclude the row being saved — plus the one that only exists here:
+ * `max_teams_less_than_group_count` is re-run against the teams the set
+ * already holds. The original has two messages for it
+ * (group_assignment.rb:78), one for `new_record?` and one for an edit; the
+ * creation path only ever reaches the first, so this is where the second
+ * finally gets used.
+ */
+export async function updateGroupAssignment(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  input: EditGroupAssignmentInput,
+): Promise<CreateGroupAssignmentResult> {
+  const title = input.title.trim()
+  const slug = input.slug.trim()
+
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+
+  if (!classroom) {
+    return { success: false, error: 'No encontramos ese classroom.', field: 'base' }
+  }
+
+  // validate :organization_is_not_archived — "create or modify"
+  if (classroom.archivedAt) {
+    return {
+      success: false,
+      error: 'No se pueden modificar assignments en un classroom archivado.',
+      field: 'base',
+    }
+  }
+
+  const [existing] = await db
+    .select({ id: groupAssignments.id, groupingId: groupAssignments.groupingId })
+    .from(groupAssignments)
+    .where(
+      and(
+        eq(groupAssignments.organizationId, classroom.id),
+        eq(groupAssignments.slug, assignmentSlug),
+        isNull(groupAssignments.deletedAt),
+      ),
+    )
+
+  if (!existing) {
+    return { success: false, error: 'No encontramos ese assignment.', field: 'base' }
+  }
+
+  const invalid = validateTitleAndSlug(title, slug)
+  if (invalid) return { success: false, ...invalid }
+
+  const limits = validateLimits(input.maxMembers, input.maxTeams)
+  if (limits) return { success: false, ...limits }
+
+  if (await isTitleTaken(classroom.id, title, existing.id)) {
+    return {
+      success: false,
+      error: `Ya existe un assignment llamado "${title}" en este classroom.`,
+      field: 'title',
+    }
+  }
+
+  const clash = await findSlugClash(classroom.githubId, slug, { kind: 'group', id: existing.id })
+  if (clash) {
+    return { success: false, error: slugClashMessage(slug, clash, classroom.id), field: 'slug' }
+  }
+
+  // The edit branch of `max_teams_less_than_group_count`: the set is fixed, so
+  // unlike at creation it can already be full.
+  if (input.maxTeams !== null) {
+    const teamCount = await countTeams(existing.groupingId)
+
+    if (input.maxTeams < teamCount) {
+      return {
+        success: false,
+        error: `Este assignment ya tiene ${teamCount} equipos, así que el máximo no puede ser ${input.maxTeams}.`,
+        field: 'maxTeams',
+      }
+    }
+  }
+
+  const starterCode = await resolveStarterCode(classroom.installationId, input.starterCodeRepo)
+  if (starterCode.error) return { success: false, ...starterCode.error }
+
+  try {
+    await db
+      .update(groupAssignments)
+      .set({
+        title,
+        slug,
+        starterCodeRepoId: starterCode.repositoryId,
+        publicRepo: input.publicRepo,
+        invitationsEnabled: input.invitationsEnabled,
+        studentsAreRepoAdmins: input.studentsAreRepoAdmins,
+        maxMembers: input.maxMembers,
+        maxTeams: input.maxTeams,
+      })
+      .where(eq(groupAssignments.id, existing.id))
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return {
+        success: false,
+        error: 'Ya existe un assignment con ese nombre o prefijo en este classroom.',
+        field: 'title',
+      }
+    }
+
+    throw error
+  }
+
+  return { success: true, slug }
+}
+
+/**
+ * Port of GroupAssignmentsController#destroy, soft delete only — see
+ * `deleteAssignment` for why the repositories stay.
+ *
+ * The set of teams is left alone: it belongs to the classroom, not to this
+ * assignment, and another one may well be sharing it. The original's
+ * `DestroyResourceJob` did not touch it either.
+ */
+export async function deleteGroupAssignment(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+): Promise<DeleteGroupAssignmentResult> {
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+  if (!classroom) return { success: false, error: 'No encontramos ese classroom.' }
+
+  const deletedAt = new Date()
+
+  const deleted = await db
+    .update(groupAssignments)
+    .set({ deletedAt })
+    .where(
+      and(
+        eq(groupAssignments.organizationId, classroom.id),
+        eq(groupAssignments.slug, assignmentSlug),
+        isNull(groupAssignments.deletedAt),
+      ),
+    )
+    .returning({ id: groupAssignments.id })
+
+  if (deleted.length === 0) return { success: false, error: 'No encontramos ese assignment.' }
+
+  await db
+    .update(groupAssignmentInvitations)
+    .set({ deletedAt })
+    .where(
+      and(
+        eq(groupAssignmentInvitations.groupAssignmentId, deleted[0].id),
+        isNull(groupAssignmentInvitations.deletedAt),
+      ),
+    )
+
+  return { success: true }
+}
+
 /** The chosen set of teams, or the one that is about to be created for it */
 type ResolvedGrouping =
   | { existing: true; id: number }
@@ -437,7 +610,12 @@ async function countTeams(groupingId: number): Promise<number> {
   return row.count
 }
 
-async function isTitleTaken(organizationId: number, title: string): Promise<boolean> {
+/** `exclude` is the assignment being edited, which must not find itself */
+async function isTitleTaken(
+  organizationId: number,
+  title: string,
+  exclude?: number,
+): Promise<boolean> {
   const rows = await db
     .select({ id: groupAssignments.id })
     .from(groupAssignments)
@@ -446,6 +624,7 @@ async function isTitleTaken(organizationId: number, title: string): Promise<bool
         eq(groupAssignments.organizationId, organizationId),
         eq(groupAssignments.title, title),
         isNull(groupAssignments.deletedAt),
+        exclude === undefined ? undefined : ne(groupAssignments.id, exclude),
       ),
     )
     .limit(1)

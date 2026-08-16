@@ -12,6 +12,19 @@ export function positiveInteger(value: FormDataEntryValue | null): number | null
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
 }
 
+/**
+ * A limit field: blank is "no limit", anything else goes through as typed.
+ *
+ * Deliberately not `positiveInteger`, which would turn a 0 into null and hand
+ * the teacher a silent "no limit" instead of the message that says why 0 is not
+ * a limit. `validateLimits` in the data layer is what rejects it.
+ */
+export function limitField(value: FormDataEntryValue | null): number | null {
+  if (typeof value !== 'string' || value.trim() === '') return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : 0
+}
+
 /** What the invitation forms hand back to `useActionState`, mirroring the flashes */
 export type InvitationActionState = {
   error: string | null
