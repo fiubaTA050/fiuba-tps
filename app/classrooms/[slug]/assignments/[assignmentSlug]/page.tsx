@@ -126,29 +126,37 @@ export default async function AssignmentPage(
 
         <h2 className="mb-2">Detalle del assignment</h2>
 
+        {/* The live "Students total", "Accepted assignments" and "Assignment
+            submissions", with the numbers the docs define for each. Its fourth
+            tile, "Passing students", is autograding and is not ported. */}
         <StatTiles
           tiles={[
             {
               label: 'Alumnos',
               total: students,
               parts: [
+                // "the number of students on the classroom's roster"
                 { value: acceptances.entries.length, label: 'en el roster' },
-                { value: acceptances.unlinkedAccounts.length, label: 'sin vincular' },
+                // "GitHub accounts that have accepted the assignment and are
+                // not associated with a roster identifier"
+                { value: acceptances.unlinkedAccounts.length, label: 'agregados' },
               ],
             },
             {
-              label: 'Aceptaron',
+              // "the number of accounts that have accepted this assignment"
+              label: 'Assignments aceptados',
               total: acceptances.acceptedCount,
               parts: [{ value: acceptances.acceptedCount, label: 'alumnos' }],
             },
             {
+              // "the number of students that have submitted the assignment",
+              // which here means a commit of their own — see submissionLabel
               label: 'Entregas',
-              total: repoIds.length,
+              total: acceptances.acceptedCount,
               parts: [
-                { value: submitted, label: 'con commits' },
-                { value: repoIds.length - submitted, label: 'sin commits' },
+                { value: submitted, label: 'entregaron' },
+                { value: acceptances.acceptedCount - submitted, label: 'sin entregar' },
               ],
-              progress: repoIds.length === 0 ? undefined : submitted / repoIds.length,
             },
           ]}
         />

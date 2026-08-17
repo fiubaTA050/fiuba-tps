@@ -10,6 +10,7 @@ import { submissionLabel, type RepoRow, type SubmissionLabel } from '@/lib/assig
 import { findGroupAssignment } from '@/lib/data/group-assignments'
 import { listGroupAssignmentAcceptances, type TeamAcceptance } from '@/lib/data/groups'
 import { findClassroom } from '@/lib/data/organizations'
+import { rosterSummary } from '@/lib/data/rosters'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import type { RepositorySnapshot } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
@@ -33,10 +34,13 @@ export default async function GroupAssignmentPage(
 
   const { slug, assignmentSlug } = await props.params
 
-  const [classroom, assignment, acceptances] = await Promise.all([
+  // The roster's size is the first tile's "alumnos en el roster"; it is an
+  // indexed count, and `findClassroom` is memoised per request
+  const [classroom, assignment, acceptances, roster] = await Promise.all([
     findClassroom(session, slug),
     findGroupAssignment(session, slug, assignmentSlug),
     listGroupAssignmentAcceptances(session, slug, assignmentSlug),
+    rosterSummary(session, slug),
   ])
 
   if (!classroom || !assignment || !acceptances) notFound()
@@ -125,29 +129,32 @@ export default async function GroupAssignmentPage(
 
         <h2 className="mb-2">Detalle del assignment</h2>
 
+        {/* The group counterpart of the live tiles: the docs describe it as
+            "total teams, rostered students, students not on a team, accepted
+            teams, submitted teams", so the first tile counts teams and breaks
+            down students, exactly as the live one does. */}
         <StatTiles
           tiles={[
             {
               label: 'Equipos',
               total: acceptances.teams.length,
               parts: [
-                { value: accepted, label: 'aceptaron' },
-                { value: acceptances.teams.length - accepted, label: 'sin aceptar' },
+                { value: roster?.count ?? 0, label: 'alumnos en el roster' },
+                { value: acceptances.studentsNotOnTeam.length, label: 'sin equipo' },
               ],
             },
             {
-              label: 'Sin equipo',
-              total: acceptances.studentsNotOnTeam.length,
-              parts: [{ value: acceptances.studentsNotOnTeam.length, label: 'alumnos' }],
+              label: 'Equipos que aceptaron',
+              total: accepted,
+              parts: [{ value: accepted, label: 'equipos' }],
             },
             {
               label: 'Entregas',
-              total: repoIds.length,
+              total: accepted,
               parts: [
-                { value: submitted, label: 'con commits' },
-                { value: repoIds.length - submitted, label: 'sin commits' },
+                { value: submitted, label: 'entregaron' },
+                { value: accepted - submitted, label: 'sin entregar' },
               ],
-              progress: repoIds.length === 0 ? undefined : submitted / repoIds.length,
             },
           ]}
         />

@@ -1,28 +1,26 @@
 /**
  * The row of counters the live assignment dashboard puts under its header,
- * between the title band and the list of repositories.
+ * between the title band and the list of repositories. Markup from a saved
+ * copy of that page: a `clearfix gutter-condensed` row of `Box`es, the label as
+ * an `h5` with a `Counter`, and the numbers as `h3` inside `col-6 float-left`
+ * halves.
  *
- * The live site shows four: Students total, Accepted assignments, Assignment
- * submissions and **Passed students**. The fourth counts autograding results
- * and there is no autograding here, so it is dropped and its `.Progress` bar
- * moves onto the submissions tile — the one number on this page that is a
- * fraction of a whole worth seeing at a glance.
- *
- * Markup from the capture: a `clearfix gutter-condensed` row of `Box`es, the
- * label as `h5` with a `Counter`, and the parts as `h3` numbers with a muted
- * caption.
+ * The live site shows four tiles and this shows the first three, which the
+ * docs define as: **Rostered students**, "the number of students on the
+ * classroom's roster"; **Added students**, "the number of GitHub accounts that
+ * have accepted the assignment and are not associated with a roster
+ * identifier"; **Accepted students**, "the number of accounts that have
+ * accepted this assignment"; and **Assignment submissions**, "the number of
+ * students that have submitted the assignment". The fourth, **Passing
+ * students**, counts autograding results and is dropped along with the
+ * `.Progress` bar that only it carried — which is also why every tile here is
+ * the same two-number shape, and so the same height.
  */
 export type StatTile = {
   label: string
   total: number
-  /** The breakdown under the total; one or two of them, as the live site does */
+  /** One or two halves, as on the live site */
   parts: { value: number; label: string }[]
-  /**
-   * 0..1. Renders the bar of the live "Passed students" tile. Leave it out
-   * when the whole is zero — a bar that is 100% "missing" reads as a failure
-   * where there is simply nothing yet.
-   */
-  progress?: number
 }
 
 export function StatTiles({ tiles }: { tiles: StatTile[] }) {
@@ -31,8 +29,13 @@ export function StatTiles({ tiles }: { tiles: StatTile[] }) {
 
   return (
     <div className="clearfix gutter-condensed pb-3 mb-3">
-      {tiles.map((tile) => (
-        <div key={tile.label} className={`${column} float-left col-sm-12 mb-3 mb-md-0`}>
+      {tiles.map((tile, index) => (
+        <div
+          key={tile.label}
+          className={`${column} float-left col-sm-12 ${
+            index === tiles.length - 1 ? 'mt-sm-3 mt-md-0' : 'mb-sm-3 mb-md-0'
+          }`}
+        >
           <div className="Box">
             <div className="Box-body">
               <p className="h5">
@@ -55,21 +58,6 @@ export function StatTiles({ tiles }: { tiles: StatTile[] }) {
                   </div>
                 ))}
               </div>
-
-              {/* The live site squeezes this beside the numbers, which only
-                  fits its single-part "Passed students" tile */}
-              {tile.progress !== undefined && (
-                <span className="Progress Progress--small mt-2">
-                  <span
-                    className="Progress-item color-bg-success-emphasis"
-                    style={{ width: `${Math.round(tile.progress * 100)}%` }}
-                  />
-                  <span
-                    className="Progress-item color-bg-danger-emphasis"
-                    style={{ width: `${100 - Math.round(tile.progress * 100)}%` }}
-                  />
-                </span>
-              )}
             </div>
           </div>
         </div>
