@@ -10,11 +10,18 @@ import { useEffect, useState } from 'react'
  * Clipboard API does the same without the library. The readonly field stays:
  * it is what lets a teacher on a browser that refuses clipboard access still
  * select the URL by hand.
+ *
+ * The live site uses both shapes: the field on an assignment's own page, and a
+ * plain "Copy invite link" button on the classroom's assignment list, where the
+ * URL itself would crowd the row. `variant` picks between them; the clipboard
+ * handling is the same either way.
  */
 export function InvitationLink({
   url,
   disabled = false,
   width,
+  variant = 'field',
+  className,
 }: {
   url: string
   disabled?: boolean
@@ -24,6 +31,9 @@ export function InvitationLink({
    * where the link shares a row with other things and has to flex.
    */
   width?: string
+  variant?: 'field' | 'button'
+  /** Only for the button variant, which sits inline in a row of actions */
+  className?: string
 }) {
   const [copied, setCopied] = useState(false)
 
@@ -41,6 +51,25 @@ export function InvitationLink({
       // Clipboard access denied, or an insecure origin. The field is readonly,
       // not disabled, so selecting the text by hand still works.
     }
+  }
+
+  if (variant === 'button') {
+    return (
+      <button
+        type="button"
+        onClick={copy}
+        disabled={disabled}
+        className={`btn ${className ?? ''}`}
+        aria-label={`Link de invitación: ${url}`}
+      >
+        {copied ? (
+          <CheckIcon className="color-fg-success mr-2" />
+        ) : (
+          <CopyIcon className="mr-2 color-fg-muted" />
+        )}
+        {copied ? 'Copiado' : 'Copiar link de invitación'}
+      </button>
+    )
   }
 
   return (

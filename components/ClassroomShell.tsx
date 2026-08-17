@@ -54,51 +54,35 @@ export async function ClassroomShell({
       <div className="color-bg-subtle border-bottom">
         <div className="p-responsive">
           <div className="pt-3 pt-md-4">
-            <div className="container-lg d-flex flex-items-center">
-              {/* DA-2: the avatar and the login come from GitHub at render
-                  time. The live site shows no avatar here; keeping it is what
-                  tells two classrooms of different orgs apart at a glance, and
-                  it is the one thing worth saving from the original banner */}
-              {classroom.organization ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={classroom.organization.avatarUrl}
-                  className="avatar mr-3"
-                  height={48}
-                  width={48}
-                  alt={`@${classroom.organization.login}`}
-                />
-              ) : (
-                <span className="color-fg-attention mr-3">
-                  <AlertIcon size={32} />
-                </span>
-              )}
-
-              <div>
-                <h1 className="d-flex flex-items-center">
-                  <Link
-                    href={`/classrooms/${classroom.slug}`}
-                    className="color-fg-default no-underline"
+            <div className="container-lg">
+              {/* Title and the org login under it, nothing else: the live band
+                  carries no avatar, and the archived GeoPattern banner it
+                  replaced is not coming back either */}
+              <h1 className="d-flex flex-items-center">
+                <Link
+                  href={`/classrooms/${classroom.slug}`}
+                  className="color-fg-default no-underline"
+                >
+                  {classroom.title}
+                </Link>
+                {classroom.archivedAt && <span className="Label Label--gray ml-2">Archivado</span>}
+              </h1>
+              {/* DA-2: the login comes from GitHub at render time */}
+              <p className="f5 pb-1 mb-0">
+                {classroom.organization ? (
+                  <a
+                    className="color-fg-muted no-underline"
+                    href={`https://github.com/${classroom.organization.login}`}
                   >
-                    {classroom.title}
-                  </Link>
-                  {classroom.archivedAt && (
-                    <span className="Label Label--gray ml-2">Archivado</span>
-                  )}
-                </h1>
-                <p className="f5 pb-1 mb-0">
-                  {classroom.organization ? (
-                    <a
-                      className="color-fg-muted no-underline"
-                      href={`https://github.com/${classroom.organization.login}`}
-                    >
-                      {classroom.organization.login}
-                    </a>
-                  ) : (
-                    <span className="color-fg-muted">Organización inaccesible</span>
-                  )}
-                </p>
-              </div>
+                    {classroom.organization.login}
+                  </a>
+                ) : (
+                  <span className="color-fg-attention d-inline-flex flex-items-center">
+                    <AlertIcon className="mr-1" />
+                    Organización inaccesible
+                  </span>
+                )}
+              </p>
             </div>
 
             <div className="container-lg mt-3 position-relative">

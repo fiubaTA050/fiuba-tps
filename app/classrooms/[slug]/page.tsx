@@ -1,4 +1,13 @@
-import { OrganizationIcon, PersonIcon } from '@primer/octicons-react'
+import {
+  DotFillIcon,
+  LockIcon,
+  PencilIcon,
+  PeopleIcon,
+  PersonIcon,
+  PlusIcon,
+  RepoIcon,
+  TrashIcon,
+} from '@primer/octicons-react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
@@ -18,12 +27,13 @@ type Listed = {
   key: string
   title: string
   href: string
+  editHref: string
   invitationUrl: string
   invitationsEnabled: boolean
   publicRepo: boolean
   group: boolean
   /** The set of teams, for a group assignment */
-  subtitle: string
+  groupingTitle: string | null
 }
 
 /** Port of organizations#show and its assignments/_assignment.html.erb partial */
@@ -55,21 +65,23 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
       key: `individual-${assignment.id}`,
       title: assignment.title,
       href: `/classrooms/${classroom.slug}/assignments/${assignment.slug}`,
+      editHref: `/classrooms/${classroom.slug}/assignments/${assignment.slug}/edit`,
       invitationUrl: invitationUrl(origin, 'assignment', assignment),
       invitationsEnabled: assignment.invitationsEnabled,
       publicRepo: assignment.publicRepo,
       group: false,
-      subtitle: 'Assignment individual',
+      groupingTitle: null,
     })),
     ...groupAssignments.map((assignment) => ({
       key: `group-${assignment.id}`,
       title: assignment.title,
       href: `/classrooms/${classroom.slug}/group-assignments/${assignment.slug}`,
+      editHref: `/classrooms/${classroom.slug}/group-assignments/${assignment.slug}/edit`,
       invitationUrl: invitationUrl(origin, 'group-assignment', assignment),
       invitationsEnabled: assignment.invitationsEnabled,
       publicRepo: assignment.publicRepo,
       group: true,
-      subtitle: `Assignment grupal · ${assignment.grouping.title}`,
+      groupingTitle: assignment.grouping.title,
     })),
   ]
 
@@ -90,6 +102,8 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
         </div>
       )}
 
+      {/* `d-flex flex-justify-between` with the h2 and a primary button
+          carrying a `plus` leading visual, as the live site has it */}
       <div className="d-md-flex flex-items-center flex-justify-between mb-3">
         <h2 className="f2 text-normal">Assignments</h2>
         {listed.length > 0 && (
@@ -101,6 +115,7 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
             role="button"
             aria-disabled={Boolean(classroom.archivedAt)}
           >
+            <PlusIcon className="mr-2" />
             Nuevo assignment
           </Link>
         )}
@@ -120,41 +135,96 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
           )}
         </div>
       ) : (
-        <div className="Box">
+        // Not a `Box`: the live list is a run of full-width rows separated by
+        // `border-top`, with no card around them.
+        <div>
           {listed.map((assignment) => (
-            <article
-              key={assignment.key}
-              className="Box-row d-md-flex flex-items-center flex-justify-between"
-            >
-              <div className="col-md-7 d-flex flex-items-center mb-3 mb-md-0">
-                {/* The original's own distinction: `assignment-icon-group`
-                    carries an `organization` octicon, the individual one a
-                    `person` */}
-                {assignment.group ? (
-                  <OrganizationIcon size={22} className="mr-3 color-fg-muted flex-shrink-0" />
-                ) : (
-                  <PersonIcon size={22} className="mr-3 color-fg-muted flex-shrink-0" />
-                )}
-                <div>
-                  <h3 className="f3 text-normal lh-condensed">
-                    <Link href={assignment.href}>{assignment.title}</Link>
-                    {/* The live site's assignment status, where the archived
-                        `toggle_invitations` checkbox used to be */}
-                    {!assignment.invitationsEnabled && (
-                      <span className="Label Label--attention ml-2 v-align-middle">Inactivo</span>
-                    )}
-                  </h3>
-                  <p className="color-fg-muted mb-0">
-                    {assignment.subtitle} · {assignment.publicRepo ? 'público' : 'privado'}
-                  </p>
-                </div>
-              </div>
+            <article key={assignment.key} className="border-top color-bg-default py-3 py-md-4">
+              {/* The live row wraps this in `gutter-md`, which is a pair: the
+                  row pulls itself 16px out on both sides and every `col-*`
+                  child pads the same 16px back in. Without the grid columns —
+                  the columns here are just two flex items — only the negative
+                  half applies and the row overhangs its own `border-top`. */}
+              <div className="d-md-flex flex-items-center flex-justify-between">
+                <div className="d-flex flex-items-center">
+                  <div>
+                    <h3 className="f3 text-normal lh-condensed">
+                      <Link href={assignment.href}>{assignment.title}</Link>
+                    </h3>
 
-              <div className="col-md-4">
-                <InvitationLink
-                  url={assignment.invitationUrl}
-                  disabled={!assignment.invitationsEnabled || Boolean(classroom.archivedAt)}
-                />
+                    {/* The live meta line: a `dot-fill` and the status, then the
+                        kind of assignment. The archived views had neither —
+                        their status was the `toggle_invitations` checkbox. */}
+                    <div className="d-flex flex-items-center flex-wrap pt-2">
+                      <div className="d-flex flex-items-center pr-4">
+                        <DotFillIcon
+                          className={`mr-1 ${
+                            assignment.invitationsEnabled ? 'color-fg-success' : 'color-fg-muted'
+                          }`}
+                        />
+                        <span>{assignment.invitationsEnabled ? 'Activo' : 'Inactivo'}</span>
+                      </div>
+
+                      <p className="color-fg-muted d-flex flex-items-center mb-0 pr-4">
+                        {assignment.group ? (
+                          <PeopleIcon className="mr-1" />
+                        ) : (
+                          <PersonIcon className="mr-1" />
+                        )}
+                        {assignment.group
+                          ? `Assignment grupal de ${assignment.groupingTitle}`
+                          : 'Assignment individual'}
+                      </p>
+
+                      {/* Not on the live row, kept from ours: which visibility
+                          the repos get is the other thing a teacher checks
+                          before handing the link out. */}
+                      <p className="color-fg-muted d-flex flex-items-center mb-0">
+                        {assignment.publicRepo ? (
+                          <RepoIcon className="mr-1" />
+                        ) : (
+                          <LockIcon className="mr-1" />
+                        )}
+                        {assignment.publicRepo ? 'Repos públicos' : 'Repos privados'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="d-flex flex-items-center flex-justify-end flex-shrink-0 mt-3 mt-md-0">
+                  <InvitationLink
+                    variant="button"
+                    url={assignment.invitationUrl}
+                    disabled={!assignment.invitationsEnabled || Boolean(classroom.archivedAt)}
+                  />
+
+                  {/* The live site's two icon-only buttons. Its trash opens a
+                      delete modal; here deleting lives in the edit screen's
+                      danger zone — see docs/edicion-y-borrado-de-assignments.md
+                      — so it links straight to it, and it is red at rest, not
+                      only on hover: it is the one action on the row that
+                      destroys something. `color-fg-danger` is a utility and
+                      wins on `!important`, so it goes only when the link is
+                      live — otherwise it would repaint the disabled state. */}
+                  <Link
+                    href={assignment.editHref}
+                    className={`btn-octicon ml-2 ${classroom.archivedAt ? 'disabled' : ''}`}
+                    aria-disabled={Boolean(classroom.archivedAt)}
+                    aria-label={`Editar ${assignment.title}`}
+                  >
+                    <PencilIcon />
+                  </Link>
+                  <Link
+                    href={`${assignment.editHref}#borrar`}
+                    className={`btn-octicon btn-octicon-danger ${
+                      classroom.archivedAt ? 'disabled' : 'color-fg-danger'
+                    }`}
+                    aria-disabled={Boolean(classroom.archivedAt)}
+                    aria-label={`Borrar ${assignment.title}`}
+                  >
+                    <TrashIcon />
+                  </Link>
+                </div>
               </div>
             </article>
           ))}
