@@ -1,12 +1,10 @@
-import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 
 import { PGlite } from '@electric-sql/pglite'
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite'
+import { inject } from 'vitest'
 
 import * as schema from '@/db/schema'
-
-const MIGRATIONS_DIR = join(process.cwd(), 'db/migrations')
 
 type TestDatabase = { db: PgliteDatabase<typeof schema>; client: PGlite }
 
@@ -14,12 +12,15 @@ type TestDatabase = { db: PgliteDatabase<typeof schema>; client: PGlite }
  * One database per test file, emptied between tests.
  *
  * Vitest isolates each test file in its own worker, so this module-level
- * instance is per file: the first `beforeEach` builds it, and every later one
- * truncates. Measured on this schema: building costs **650 ms** — a fresh
- * PGlite plus the seven migrations — and truncating all 16 tables costs
- * **11 ms**. With 207 database-backed tests, rebuilding per test spent ~135 s
- * of CPU on setup alone, which is what pegged every core for the length of a
- * run.
+ * instance is per file: the first `beforeEach` restores it, and every later
+ * one truncates. Measured on this schema: restoring the template costs
+ * **130 ms** and truncating all 16 tables costs **11 ms**. Rebuilding per test
+ * instead spent ~135 s of CPU on setup alone, which is what pegged every core
+ * for the length of a run.
+ *
+ * It restores rather than builds: `initdb` is 590 ms of the 642 ms a fresh
+ * migrated database costs, and test/helpers/global-setup.ts pays it once for
+ * the whole run instead of once per file.
  *
  * `RESTART IDENTITY` is what keeps this equivalent to a fresh database rather
  * than merely close to one: the sequences go back to 1, so the tests that
@@ -42,19 +43,9 @@ export async function createTestDatabase(): Promise<TestDatabase> {
     return instance
   }
 
-  const client = new PGlite()
+  const client = new PGlite({ loadDataDir: new Blob([readFileSync(inject('pgliteTemplate'))]) })
+  await client.waitReady
   const db = drizzle(client, { schema })
-
-  const files = readdirSync(MIGRATIONS_DIR)
-    .filter((file) => file.endsWith('.sql'))
-    .sort()
-
-  for (const file of files) {
-    const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8')
-    for (const statement of sql.split('--> statement-breakpoint')) {
-      if (statement.trim()) await client.exec(statement)
-    }
-  }
 
   // Built from the catalogue rather than from a hand-kept list, so a table
   // added in a later migration is emptied without anybody remembering to come
