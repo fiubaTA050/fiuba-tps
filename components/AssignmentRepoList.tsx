@@ -1,26 +1,53 @@
-import { GitCommitIcon, MarkGithubIcon, PersonIcon, RepoIcon } from '@primer/octicons-react'
+'use client'
 
-import type { RepositorySnapshot } from '@/lib/github/repositories'
+import {
+  GitCommitIcon,
+  MarkGithubIcon,
+  PersonIcon,
+  RepoIcon,
+  TriangleDownIcon,
+  XIcon,
+} from '@primer/octicons-react'
+import { useMemo, useState } from 'react'
+
+import { hasSubmitted, type RepoRow, type SubmissionTone } from '@/lib/assignment-rows'
 
 /**
- * The list of repositories on an assignment dashboard, and the one row it is
- * made of. Ported from the live classroom.github.com dashboard —
- * `.assignment-repo-list-item` is its own class, copied into app/globals.css
- * together with `.AvatarStack` and `.Box--condensed`.
+ * The list of repositories on an assignment dashboard, with the filter bar the
+ * live classroom.github.com puts above it. Ported from a saved copy of that
+ * page — `.assignment-repo-list-item` is its own class, copied into
+ * app/globals.css together with `.AvatarStack` and `.Box--condensed`.
  *
  * A row carries, left to right: the avatar, the identifier, a state label, and
  * a meta line with the GitHub handle, the date of the last commit and the
  * commit count; on the right the team's members and a link to the repository.
  *
- * The live site's "Late" label is not here: it compares the last commit against
- * the assignment's deadline, and deadlines are not ported (see db/schema.ts).
+ * **Filtering is client-side, where the live site does it in the URL.** Its
+ * "Clear current search query, filters, and sorts" is a plain link back to the
+ * assignment path, because Rails re-renders the page from the database. Here
+ * the page is `force-dynamic` and its rows cost a GitHub query, so putting the
+ * filters in the URL would re-run that query on every keystroke. The whole
+ * cohort is already in the browser; filtering it there is instant and free.
+ *
+ * Two of the live filters have nothing behind them: "Passing/Failing" is
+ * autograding, and the "On-time/Late" halves of the submission filter need
+ * deadlines. Neither is ported.
  */
 
-export type SubmissionTone = 'success' | 'danger' | 'attention' | 'neutral'
+/** The live "Filter by submission", minus its two deadline options */
+type SubmissionFilter = 'submitted' | 'not_submitted'
+/** The live "Filter by accepted" */
+type AcceptedFilter = 'accepted' | 'unaccepted'
+/** The live "Filter by unlinked" */
+type UnlinkedFilter = 'identifiers' | 'accounts'
+/** The live "Sort by" */
+type Sort = 'az' | 'za' | 'newest' | 'oldest'
 
-export type SubmissionLabel = {
-  text: string
-  tone: SubmissionTone
+const SORT_LABEL: Record<Sort, string> = {
+  az: 'Alfabético A-Z',
+  za: 'Alfabético Z-A',
+  newest: 'Más reciente',
+  oldest: 'Más antiguo',
 }
 
 const TONE_CLASS: Record<SubmissionTone, string> = {
@@ -32,93 +59,308 @@ const TONE_CLASS: Record<SubmissionTone, string> = {
   neutral: 'color-bg-subtle color-fg-muted',
 }
 
-/**
- * What a row says about a repository, from the two facts the dashboard has:
- * whether a repository exists, and what GitHub says about it.
- *
- * "Entregado" is one or more commits of the student's own — the baseline the
- * repository was created with is already subtracted in
- * `listRepositorySnapshots`, so a repo still sitting at the starter code reads
- * as "Sin entregar", which is the point.
- *
- * The archived Rails app decided this differently and could not be followed:
- * `SharedAssignmentRepoView#submission_succeeded?` is
- * `deadline&.passed? && submission_sha.present?`, so the label only ever
- * appeared **after a deadline**, and deadlines are not ported. The live site
- * has since moved to the commit-based reading this follows — its own filter
- * says "Submitted: students who've committed to repository".
- *
- * `snapshot` null with an id set is the NullGitHubRepository case — the repo
- * was deleted or moved out of the org. Deleting an assignment here does not
- * delete repositories (DA-9), so the reverse is common too and harmless.
- */
-export function submissionLabel(
-  hasRepo: boolean,
-  snapshot: RepositorySnapshot | null,
-): SubmissionLabel {
-  if (!hasRepo) return { text: 'Sin repo', tone: 'neutral' }
-  if (!snapshot) return { text: 'Repo inaccesible', tone: 'attention' }
-  return snapshot.commitCount > 0
-    ? { text: 'Entregado', tone: 'success' }
-    : { text: 'Sin entregar', tone: 'danger' }
-}
+export function AssignmentRepoList({ title, rows }: { title: string; rows: RepoRow[] }) {
+  const [query, setQuery] = useState('')
+  const [submission, setSubmission] = useState<Set<SubmissionFilter>>(new Set())
+  const [accepted, setAccepted] = useState<Set<AcceptedFilter>>(new Set())
+  const [unlinked, setUnlinked] = useState<Set<UnlinkedFilter>>(new Set())
+  const [sort, setSort] = useState<Sort>('az')
 
-export function AssignmentRepoList({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}) {
+  const filtered = useMemo(() => {
+    // "the student's GitHub handle, their identifier, or the team's name"
+    const needle = query.trim().toLowerCase()
+
+    const kept = rows.filter((row) => {
+      if (
+        needle &&
+        !row.name.toLowerCase().includes(needle) &&
+        !(row.githubLogin ?? '').toLowerCase().includes(needle)
+      ) {
+        return false
+      }
+
+      // Each group is a set of checkboxes: empty means "no opinion", and two
+      // boxes of the same group are an OR, the way the live menus behave
+      if (submission.size > 0) {
+        const state: SubmissionFilter = hasSubmitted(row) ? 'submitted' : 'not_submitted'
+        if (!submission.has(state)) return false
+      }
+
+      if (accepted.size > 0) {
+        const state: AcceptedFilter = row.accepted ? 'accepted' : 'unaccepted'
+        if (!accepted.has(state)) return false
+      }
+
+      if (unlinked.size > 0) {
+        const matches =
+          (unlinked.has('identifiers') && row.unlinkedIdentifier) ||
+          (unlinked.has('accounts') && row.unlinkedAccount)
+        if (!matches) return false
+      }
+
+      return true
+    })
+
+    return [...kept].sort(compareBy(sort))
+  }, [rows, query, submission, accepted, unlinked, sort])
+
+  const dirty =
+    query !== '' || submission.size > 0 || accepted.size > 0 || unlinked.size > 0 || sort !== 'az'
+
+  function clear() {
+    setQuery('')
+    setSubmission(new Set())
+    setAccepted(new Set())
+    setUnlinked(new Set())
+    setSort('az')
+  }
+
   return (
-    <div className="Box Box--condensed">
-      <div className="Box-header">
-        <div className="d-table col-12">
-          <div className="Box-title col-6 d-table-cell">{title}</div>
+    <>
+      <h2 className="sr-only">Filtrar</h2>
+
+      <div className="d-flex flex-wrap flex-items-center mb-2">
+        <CheckboxMenu
+          label="Entrega"
+          heading="Filtrar por entrega:"
+          options={[
+            { value: 'submitted', label: 'Entregado', description: 'Tienen commits propios' },
+            {
+              value: 'not_submitted',
+              label: 'Sin entregar',
+              description: 'Todavía no subieron nada',
+            },
+          ]}
+          selected={submission}
+          onToggle={(value) => setSubmission(toggle(submission, value))}
+        />
+
+        <CheckboxMenu
+          label="Aceptación"
+          heading="Filtrar por aceptación:"
+          options={[
+            { value: 'accepted', label: 'Aceptaron', description: 'Aceptaron el assignment' },
+            { value: 'unaccepted', label: 'No aceptaron', description: 'Todavía no lo aceptaron' },
+          ]}
+          selected={accepted}
+          onToggle={(value) => setAccepted(toggle(accepted, value))}
+        />
+
+        <CheckboxMenu
+          label="Sin vincular"
+          heading="Filtrar por vínculo:"
+          options={[
+            {
+              value: 'identifiers',
+              label: 'Identificadores',
+              description: 'Nadie reclamó ese identificador',
+            },
+            {
+              value: 'accounts',
+              label: 'Cuentas de GitHub',
+              description: 'Aceptaron sin elegir su identificador',
+            },
+          ]}
+          selected={unlinked}
+          onToggle={(value) => setUnlinked(toggle(unlinked, value))}
+        />
+
+        <div className="mr-2 mb-2 flex-auto" style={{ minWidth: '14rem' }}>
+          <input
+            type="search"
+            className="form-control input-sm width-full"
+            placeholder="Buscar"
+            aria-label="Buscar por identificador, cuenta de GitHub o equipo"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+
+        <details className="dropdown details-reset details-overlay d-inline-block mr-2 mb-2">
+          <summary className="btn btn-sm" role="button" aria-haspopup="menu">
+            Orden: {SORT_LABEL[sort]}
+            <TriangleDownIcon className="ml-1" />
+          </summary>
+
+          <div role="menu" className="dropdown-menu dropdown-menu-sw mt-1" style={{ width: 200 }}>
+            {(Object.keys(SORT_LABEL) as Sort[]).map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                aria-checked={sort === option}
+                className="dropdown-item btn-link"
+                onClick={(event) => {
+                  setSort(option)
+                  event.currentTarget.closest('details')?.removeAttribute('open')
+                }}
+              >
+                {SORT_LABEL[option]}
+              </button>
+            ))}
+          </div>
+        </details>
+      </div>
+
+      {dirty && (
+        <div className="mb-2">
+          <button type="button" className="btn-link color-fg-muted" onClick={clear}>
+            <XIcon className="mr-1" />
+            Limpiar la búsqueda, los filtros y el orden
+          </button>
+        </div>
+      )}
+
+      <div className="Box Box--condensed">
+        <div className="Box-header">
+          <div className="d-table col-12">
+            <div className="Box-title col-6 d-table-cell">{title}</div>
+            <div className="col-6 d-table-cell text-right color-fg-muted text-small">
+              {filtered.length === rows.length
+                ? `${rows.length}`
+                : `${filtered.length} de ${rows.length}`}
+            </div>
+          </div>
+        </div>
+
+        <div className="Box-body">
+          {filtered.length === 0 ? (
+            <p className="color-fg-muted text-center my-3 mb-0">
+              Ninguna fila coincide con los filtros.
+            </p>
+          ) : (
+            <div className="assignment-repo-list pb-2">
+              {filtered.map((row) => (
+                <RepoListItem key={row.key} row={row} />
+              ))}
+            </div>
+          )}
         </div>
       </div>
-
-      <div className="Box-body">
-        <div className="assignment-repo-list pb-2">{children}</div>
-      </div>
-    </div>
+    </>
   )
 }
 
-export function RepoListItem({
-  avatar,
-  name,
+function compareBy(sort: Sort): (a: RepoRow, b: RepoRow) => number {
+  if (sort === 'az') return (a, b) => a.name.localeCompare(b.name, 'es')
+  if (sort === 'za') return (a, b) => b.name.localeCompare(a.name, 'es')
+
+  // "from the most recently updated assignment to the least recently updated".
+  // A row with no commit of its own has no date to sort by and goes last, in
+  // both directions — it is not the newest thing on the page, and it is not the
+  // oldest either, it is simply absent.
+  const direction = sort === 'newest' ? -1 : 1
+
+  return (a, b) => {
+    const left = a.snapshot?.latestCommitAt?.getTime()
+    const right = b.snapshot?.latestCommitAt?.getTime()
+    if (left === undefined && right === undefined) return a.name.localeCompare(b.name, 'es')
+    if (left === undefined) return 1
+    if (right === undefined) return -1
+    return (left - right) * direction
+  }
+}
+
+function toggle<T>(set: Set<T>, value: T): Set<T> {
+  const next = new Set(set)
+  if (!next.delete(value)) next.add(value)
+  return next
+}
+
+/**
+ * One of the live site's `action-menu`s with `menuitemcheckbox` items. Built on
+ * the `<details>` dropdown the port already ships, because the live markup is
+ * a `@primer/view-components` web component the port deliberately does not
+ * depend on (see the CSS note in app/globals.css).
+ */
+function CheckboxMenu<T extends string>({
   label,
-  meta,
-  trailing,
-  snapshot,
+  heading,
+  options,
+  selected,
+  onToggle,
 }: {
-  /** Null on a team row, which the live site renders with no leading visual */
-  avatar: React.ReactNode | null
-  name: React.ReactNode
-  label: SubmissionLabel
-  /** What goes before the commit counters on the meta line: the handle, usually */
-  meta?: React.ReactNode
-  /** The right-hand column, before the repository link */
-  trailing?: React.ReactNode
-  snapshot: RepositorySnapshot | null
+  label: string
+  heading: string
+  options: { value: T; label: string; description: string }[]
+  selected: Set<T>
+  onToggle: (value: T) => void
 }) {
+  return (
+    <details className="dropdown details-reset details-overlay d-inline-block mr-2 mb-2">
+      <summary className="btn btn-sm" role="button" aria-haspopup="menu">
+        {label}
+        {selected.size > 0 && <span className="Counter ml-1">{selected.size}</span>}
+        <TriangleDownIcon className="ml-1" />
+      </summary>
+
+      <div role="menu" className="dropdown-menu mt-1" style={{ width: 260 }}>
+        <div className="dropdown-header px-3 py-1 color-fg-muted text-small">{heading}</div>
+
+        {options.map((option) => (
+          <label key={option.value} className="dropdown-item d-block">
+            <input
+              type="checkbox"
+              className="mr-2"
+              checked={selected.has(option.value)}
+              onChange={() => onToggle(option.value)}
+            />
+            {option.label}
+            <span className="d-block color-fg-muted text-small" style={{ marginLeft: '1.4rem' }}>
+              {option.description}
+            </span>
+          </label>
+        ))}
+      </div>
+    </details>
+  )
+}
+
+function RepoListItem({ row }: { row: RepoRow }) {
+  const { snapshot } = row
+
   return (
     <div className="d-table col-12 assignment-repo-list-item">
       <div className="col-8 d-table-cell">
         <div className="d-flex width-full">
-          {avatar}
+          <Visual row={row} />
 
-          <div className={`flex-column ${avatar ? 'ml-3' : ''}`}>
+          <div className={`flex-column ${row.visual === 'none' ? '' : 'ml-3'}`}>
             <div className="pb-1">
-              <span className="h5 mr-2 css-truncate css-truncate-target">{name}</span>
-              <span className={`IssueLabel IssueLabel--big mr-2 ${TONE_CLASS[label.tone]}`}>
-                {label.text}
+              <span className="h5 mr-2 css-truncate css-truncate-target">
+                {snapshot && row.visual === 'none' ? (
+                  <a href={snapshot.htmlUrl} className="Link Link--primary">
+                    {row.name}
+                  </a>
+                ) : row.githubLogin && row.visual === 'account' && row.unlinkedAccount ? (
+                  <a href={`https://github.com/${row.githubLogin}`} className="Link Link--primary">
+                    {row.name}
+                  </a>
+                ) : (
+                  row.name
+                )}
+              </span>
+              <span className={`IssueLabel IssueLabel--big mr-2 ${TONE_CLASS[row.label.tone]}`}>
+                {row.label.text}
               </span>
             </div>
 
             <div className="d-flex flex-items-baseline flex-wrap">
-              {meta}
+              {!row.unlinkedAccount && row.visual !== 'none' && (
+                <p className="color-fg-muted mr-3 text-small mb-0">
+                  {row.githubLogin ? (
+                    <a href={`https://github.com/${row.githubLogin}`} className="Link Link--muted">
+                      @{row.githubLogin}
+                    </a>
+                  ) : (
+                    'Sin vincular'
+                  )}
+                </p>
+              )}
+
+              {row.visual === 'none' && row.members?.length === 0 && (
+                <p className="color-fg-muted mr-3 text-small mb-0">Sin integrantes</p>
+              )}
 
               {snapshot && (
                 <>
@@ -144,7 +386,7 @@ export function RepoListItem({
 
       <div className="col-4 d-table-cell v-align-middle">
         <div className="d-flex flex-justify-end flex-items-center">
-          {trailing}
+          {row.members && row.members.length > 0 && <MemberAvatars members={row.members} />}
 
           <div className="col-4 text-center">
             {snapshot && (
@@ -166,19 +408,22 @@ export function RepoListItem({
   )
 }
 
-/** The avatar of a GitHub account, or the octicon the live site falls back to */
-export function AccountAvatar({
-  login,
-  avatarUrl,
-  size = 40,
-}: {
-  login: string | null
-  avatarUrl?: string | null
-  size?: number
-}) {
-  if (!login) {
+function Visual({ row }: { row: RepoRow }) {
+  // A team row leads with nothing, the way the live site renders it
+  if (row.visual === 'none') return null
+
+  // `_not_in_classroom`: nobody claimed this identifier, so there is no account
+  if (row.visual === 'no-account') {
     return (
-      <span className="d-flex flex-items-center color-fg-muted" style={{ width: size }}>
+      <span className="d-flex flex-items-center color-fg-muted" style={{ width: 40 }}>
+        <PersonIcon size={24} />
+      </span>
+    )
+  }
+
+  if (!row.githubLogin) {
+    return (
+      <span className="d-flex flex-items-center color-fg-muted" style={{ width: 40 }}>
         <MarkGithubIcon size={24} />
       </span>
     )
@@ -187,32 +432,21 @@ export function AccountAvatar({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={avatarUrl ?? `https://github.com/${login}.png?size=${size * 2}`}
-      alt={`@${login}`}
-      width={size}
-      height={size}
+      src={`https://github.com/${row.githubLogin}.png?size=80`}
+      alt={`@${row.githubLogin}`}
+      width={40}
+      height={40}
       className="avatar circle flex-shrink-0"
     />
   )
 }
 
-/** `_not_in_classroom`: nobody claimed this identifier, so there is no account */
-export function NoAccountAvatar({ size = 40 }: { size?: number }) {
-  return (
-    <span className="d-flex flex-items-center color-fg-muted" style={{ width: size }}>
-      <PersonIcon size={24} />
-    </span>
-  )
-}
-
 /** The stacked member avatars of a team, `AvatarStack--right` as on the live site */
-export function MemberAvatars({
+function MemberAvatars({
   members,
 }: {
   members: { githubLogin: string | null; githubAvatarUrl: string | null }[]
 }) {
-  if (members.length === 0) return null
-
   const named = members.filter((member) => member.githubLogin !== null)
   const label = `${named.map((member) => member.githubLogin).join(', ')} ${
     named.length === 1 ? 'está en este equipo' : 'están en este equipo'

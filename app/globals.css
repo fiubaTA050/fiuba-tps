@@ -500,6 +500,22 @@
   text-align: left;
 }
 
+/*
+ * The filter menus put a muted description under each option, and on the blue
+ * hover that colour is unreadable. Primer solves the same problem the same way
+ * for its links — `.Link--muted:hover [class*=color-fg] { color: inherit }`.
+ *
+ * `white-space` because those options wrap onto two lines, which the v10 rule
+ * above forbids: it was written for one-line menu items.
+ */
+.dropdown-item:hover [class*='color-fg'] {
+  color: inherit !important;
+}
+
+.dropdown-item.d-block {
+  white-space: normal;
+}
+
 .dropdown-divider {
   height: 1px;
   margin: 4px 1px;

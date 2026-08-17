@@ -66,6 +66,13 @@ reference code without mental translation. The confusing one:
   deadline extension need deadlines, which are not ported either. The commit
   data for the whole cohort comes from one GraphQL query
   (`listRepositorySnapshots`), never one REST call per repository.
+- **The dashboard's filters run in the browser**, where the live site puts them
+  in the URL — its "Clear current search query, filters, and sorts" is a plain
+  link back to the assignment path, because Rails re-renders from the database.
+  Here the page is `force-dynamic` and its rows cost a GitHub query, so a filter
+  in the URL would re-run that query on every keystroke. Of the live filters,
+  "Passing/Failing" (autograding) and the "On-time/Late" halves of the
+  submission one (deadlines) have nothing behind them and are dropped.
 - **"Entregado" is one commit of the student's own**, and the count on the
   dashboard is net of the commit the repository was created with. Neither rule
   is the original's. Its `SharedAssignmentRepoView#submission_succeeded?` is

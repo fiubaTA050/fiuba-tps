@@ -3,15 +3,10 @@ import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { AssignmentHeader } from '@/components/AssignmentHeader'
-import {
-  AssignmentRepoList,
-  MemberAvatars,
-  RepoListItem,
-  submissionLabel,
-  type SubmissionLabel,
-} from '@/components/AssignmentRepoList'
+import { AssignmentRepoList } from '@/components/AssignmentRepoList'
 import { Breadcrumb } from '@/components/Breadcrumb'
 import { StatTiles } from '@/components/StatTiles'
+import { submissionLabel, type RepoRow, type SubmissionLabel } from '@/lib/assignment-rows'
 import { findGroupAssignment } from '@/lib/data/group-assignments'
 import { listGroupAssignmentAcceptances, type TeamAcceptance } from '@/lib/data/groups'
 import { findClassroom } from '@/lib/data/organizations'
@@ -165,53 +160,44 @@ export default async function GroupAssignmentPage(
             </p>
           </div>
         ) : (
-          <AssignmentRepoList title="Equipos">
-            {acceptances.teams.map((team) => {
+          <AssignmentRepoList
+            title="Equipos"
+            rows={acceptances.teams.map((team): RepoRow => {
               const snapshot = team.repoId === null ? null : (snapshots.get(team.repoId) ?? null)
 
-              return (
-                <RepoListItem
-                  key={team.id}
-                  avatar={null}
-                  name={
-                    snapshot ? (
-                      <a href={snapshot.htmlUrl} className="Link Link--primary">
-                        {team.title}
-                      </a>
-                    ) : (
-                      team.title
-                    )
-                  }
-                  label={teamLabel(team, snapshot)}
-                  meta={
-                    team.members.length === 0 ? (
-                      <p className="color-fg-muted mr-3 text-small mb-0">Sin integrantes</p>
-                    ) : undefined
-                  }
-                  trailing={<MemberAvatars members={team.members} />}
-                  snapshot={snapshot}
-                />
-              )
+              return {
+                key: `team-${team.id}`,
+                name: team.title,
+                // A team is searched by its name; its members carry the handles
+                githubLogin: null,
+                visual: 'none',
+                members: team.members,
+                label: teamLabel(team, snapshot),
+                snapshot,
+                accepted: team.status !== 'unaccepted',
+                unlinkedIdentifier: false,
+                unlinkedAccount: false,
+              }
             })}
-          </AssignmentRepoList>
+          />
         )}
 
-        {/* `@students_not_on_team` of the original's #show */}
+        {/* `@students_not_on_team` of the original's #show. A plain Box, not
+            the filterable list: these rows have no repository to filter by */}
         {acceptances.identifierName !== null && acceptances.studentsNotOnTeam.length > 0 && (
-          <div className="mt-4">
-            <AssignmentRepoList title="Sin equipo">
-              {acceptances.studentsNotOnTeam.map((student) => (
-                <div
-                  className="assignment-repo-list-item d-flex flex-justify-between"
-                  key={student.identifier}
-                >
-                  <span className="text-mono">{student.identifier}</span>
-                  <span className="color-fg-muted">
-                    {student.githubLogin ? `@${student.githubLogin}` : 'Sin cuenta vinculada'}
-                  </span>
-                </div>
-              ))}
-            </AssignmentRepoList>
+          <div className="Box mt-4">
+            <div className="Box-header">
+              <h3 className="Box-title">Sin equipo</h3>
+            </div>
+
+            {acceptances.studentsNotOnTeam.map((student) => (
+              <div className="Box-row d-flex flex-justify-between" key={student.identifier}>
+                <span className="text-mono">{student.identifier}</span>
+                <span className="color-fg-muted">
+                  {student.githubLogin ? `@${student.githubLogin}` : 'Sin cuenta vinculada'}
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </div>

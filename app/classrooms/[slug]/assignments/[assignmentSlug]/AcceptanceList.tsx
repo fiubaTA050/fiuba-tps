@@ -1,28 +1,22 @@
-import {
-  AccountAvatar,
-  AssignmentRepoList,
-  NoAccountAvatar,
-  RepoListItem,
-  submissionLabel,
-  type SubmissionLabel,
-} from '@/components/AssignmentRepoList'
-import type { AssignmentAcceptances, AcceptanceRow } from '@/lib/data/invitations'
+import { AssignmentRepoList } from '@/components/AssignmentRepoList'
+import { submissionLabel, type RepoRow } from '@/lib/assignment-rows'
+import type { AssignmentAcceptances } from '@/lib/data/invitations'
 import type { RepositorySnapshot } from '@/lib/github/repositories'
 
 /**
  * Who accepted the assignment, where their repository is and how far along it
  * is. Port of the roster list of `assignments/show.html.erb` and the three
  * partials `orgs/roster_entries/assignment_repos/_linked_accepted`,
- * `_linked_not_accepted` and `_not_in_classroom`, wearing the live site's
- * `.assignment-repo-list` markup.
+ * `_linked_not_accepted` and `_not_in_classroom`.
  *
- * The original's search-and-sort header is still not here: it paginated a list
- * the cátedra reads whole. The order is `RosterEntry.order_for_view`'s, done in
- * SQL.
+ * This builds the rows and hands them to the client component that filters and
+ * sorts them; the order below is only the starting one,
+ * `RosterEntry.order_for_view`, done in SQL.
  *
- * The original's second tab, "Unlinked GitHub accounts", is rendered inline
- * underneath instead: it holds the students who skipped `join_roster`, and a
- * teacher who cannot see them at a glance will not go looking behind a tab.
+ * The original's second tab, "Unlinked GitHub accounts", is folded into the
+ * same list instead of sitting behind a tab: the live filter bar has a "GitHub
+ * accounts" option under "unlinked" that singles them out, which is the same
+ * affordance without hiding them from a teacher who is not looking for them.
  */
 export function AcceptanceList({
   acceptances,
@@ -47,109 +41,61 @@ export function AcceptanceList({
     )
   }
 
+  const snapshotOf = (repoId: number | null) =>
+    repoId === null ? null : (snapshots.get(repoId) ?? null)
+
+  const rows: RepoRow[] = [
+    ...entries.map((entry): RepoRow => {
+      const snapshot = snapshotOf(entry.repoId)
+
+      return {
+        key: `entry-${entry.entryId}`,
+        name: entry.identifier,
+        githubLogin: entry.githubLogin,
+        visual: entry.state === 'not_joined' ? 'no-account' : 'account',
+        label:
+          // "Not joined classroom"
+          entry.state === 'not_joined'
+            ? { text: 'Sin cuenta vinculada', tone: 'neutral' }
+            : // `render 'shared/failed_repo_detail', text: "Not accepted"`
+              entry.state === 'linked_not_accepted'
+              ? { text: 'No aceptó', tone: 'neutral' }
+              : submissionLabel(entry.repoId !== null, snapshot),
+        snapshot,
+        accepted: entry.state === 'accepted',
+        unlinkedIdentifier: entry.state === 'not_joined',
+        unlinkedAccount: false,
+      }
+    }),
+
+    ...unlinkedAccounts.map((account): RepoRow => {
+      const snapshot = snapshotOf(account.repoId)
+
+      return {
+        key: `account-${account.userId}`,
+        name: account.githubLogin ? `@${account.githubLogin}` : 'Cuenta desconocida',
+        githubLogin: account.githubLogin,
+        visual: 'account',
+        label: submissionLabel(account.repoId !== null, snapshot),
+        snapshot,
+        accepted: true,
+        unlinkedIdentifier: false,
+        unlinkedAccount: true,
+      }
+    }),
+  ]
+
   return (
     <>
-      {entries.length > 0 && (
-        <AssignmentRepoList title={identifierName ?? 'Roster'}>
-          {entries.map((entry) => (
-            <EntryRow
-              key={entry.entryId}
-              entry={entry}
-              snapshot={entry.repoId === null ? null : (snapshots.get(entry.repoId) ?? null)}
-            />
-          ))}
-        </AssignmentRepoList>
-      )}
+      <AssignmentRepoList title={identifierName ?? 'Aceptaron el assignment'} rows={rows} />
 
-      {unlinkedAccounts.length > 0 && (
-        <div className={entries.length > 0 ? 'mt-4' : ''}>
-          <AssignmentRepoList
-            title={
-              // The live site's tab title, for the accounts with no entry
-              identifierName === null ? 'Aceptaron el assignment' : 'Cuentas de GitHub sin vincular'
-            }
-          >
-            {unlinkedAccounts.map((account) => {
-              const snapshot =
-                account.repoId === null ? null : (snapshots.get(account.repoId) ?? null)
-
-              return (
-                <RepoListItem
-                  key={account.userId}
-                  avatar={<AccountAvatar login={account.githubLogin} />}
-                  name={
-                    account.githubLogin ? (
-                      <a
-                        href={`https://github.com/${account.githubLogin}`}
-                        className="Link Link--primary"
-                      >
-                        @{account.githubLogin}
-                      </a>
-                    ) : (
-                      'Cuenta desconocida'
-                    )
-                  }
-                  label={submissionLabel(account.repoId !== null, snapshot)}
-                  snapshot={snapshot}
-                />
-              )
-            })}
-          </AssignmentRepoList>
-
-          {identifierName !== null && (
-            <p className="color-fg-muted f6 mt-2">
-              Aceptaron el assignment pero todavía no eligieron su{' '}
-              {identifierName.toLowerCase()} en el roster.
-            </p>
-          )}
-        </div>
+      {identifierName !== null && unlinkedAccounts.length > 0 && (
+        <p className="color-fg-muted f6 mt-2">
+          {unlinkedAccounts.length === 1 ? 'Hay 1 alumno' : `Hay ${unlinkedAccounts.length} alumnos`}{' '}
+          que aceptaron el assignment sin elegir su {identifierName.toLowerCase()} en el roster.
+          Filtralos con &quot;Sin vincular · Cuentas de GitHub&quot;.
+        </p>
       )}
     </>
   )
-}
-
-function EntryRow({
-  entry,
-  snapshot,
-}: {
-  entry: AcceptanceRow
-  snapshot: RepositorySnapshot | null
-}) {
-  return (
-    <RepoListItem
-      avatar={
-        entry.state === 'not_joined' ? (
-          // _not_in_classroom: the octicon takes the avatar's place
-          <NoAccountAvatar />
-        ) : (
-          <AccountAvatar login={entry.githubLogin} />
-        )
-      }
-      name={entry.identifier}
-      label={entryLabel(entry, snapshot)}
-      meta={
-        <p className="color-fg-muted mr-3 text-small mb-0">
-          {entry.githubLogin ? (
-            <a href={`https://github.com/${entry.githubLogin}`} className="Link Link--muted">
-              @{entry.githubLogin}
-            </a>
-          ) : (
-            'Sin vincular'
-          )}
-        </p>
-      }
-      snapshot={snapshot}
-    />
-  )
-}
-
-/** The three texts of the original's partials, then the repository's own state */
-function entryLabel(entry: AcceptanceRow, snapshot: RepositorySnapshot | null): SubmissionLabel {
-  // "Not joined classroom"
-  if (entry.state === 'not_joined') return { text: 'Sin cuenta vinculada', tone: 'neutral' }
-
-  // `render 'shared/failed_repo_detail', text: "Not accepted"`
-  if (entry.state === 'linked_not_accepted') return { text: 'No aceptó', tone: 'neutral' }
-
-  return submissionLabel(entry.repoId !== null, snapshot)
 }
