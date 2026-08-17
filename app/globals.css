@@ -815,13 +815,17 @@
   display: block;
 }
 
+/* A square of --control-xsmall-size with the octicon centred in it, not the
+   octicon itself: the width is what insets the icon from the right edge */
 .FormControl-input-wrap .FormControl-input-trailingAction {
   position: absolute;
   top: var(--base-size-4);
   right: var(--base-size-4);
+  z-index: 4;
   display: grid;
   align-items: center;
   justify-content: center;
+  width: var(--control-xsmall-size);
   height: var(--control-xsmall-size);
   padding: 0;
   color: var(--fgColor-muted);
