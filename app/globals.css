@@ -798,6 +798,71 @@
   background: var(--bgColor-muted);
 }
 
+/*
+ * The search field of the filter bar: a magnifier inside the left edge and a
+ * clear button inside the right one, joined to the "Filtros" button.
+ *
+ * Same source as the block above. Only the wrapper is ported — the live field
+ * is a whole `FormControl` component, and v22's `.form-control` is already the
+ * same 32px control with the same border and radius, so what is missing is the
+ * positioning of the two visuals and the padding that keeps the text off them.
+ */
+
+.FormControl-input-wrap {
+  position: relative;
+  display: grid;
+}
+
+.FormControl-input-wrap .FormControl-input-leadingVisualWrap {
+  position: absolute;
+  top: var(--base-size-8);
+  left: var(--base-size-8);
+  display: block;
+  width: var(--base-size-16);
+  height: var(--base-size-16);
+  color: var(--fgColor-muted);
+  pointer-events: none;
+}
+
+.FormControl-input-wrap .FormControl-input-trailingAction {
+  position: absolute;
+  top: var(--base-size-4);
+  right: var(--base-size-4);
+  display: grid;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-xsmall-size);
+  padding: 0;
+  color: var(--fgColor-muted);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+}
+
+.FormControl-input-wrap .FormControl-input-trailingAction:hover {
+  background: var(--control-transparent-bgColor-hover);
+}
+
+.FormControl-input-wrap--leadingVisual .form-control {
+  padding-inline-start: calc(
+    var(--control-medium-paddingInline-condensed) + var(--base-size-16) + var(--control-medium-gap)
+  );
+}
+
+.FormControl-input-wrap--trailingAction .form-control {
+  padding-inline-end: calc(
+    var(--control-medium-paddingInline-condensed) + var(--base-size-16) + var(--control-medium-gap)
+  );
+}
+
+/* The live site squares this corner with an inline style, for the same reason:
+   the field is not a `.BtnGroup-item`, so the group's own rules never reach it */
+.BtnGroup .FormControl-input-wrap .form-control {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
 /* The submissions bar of the stat tiles. Not the `.progress-bar` above: that
    one is the original's own, on the student's setup screen. */
 

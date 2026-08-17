@@ -1,11 +1,14 @@
 'use client'
 
 import {
+  CheckIcon,
   GitCommitIcon,
   MarkGithubIcon,
   PersonIcon,
   RepoIcon,
+  SearchIcon,
   TriangleDownIcon,
+  XCircleFillIcon,
   XIcon,
 } from '@primer/octicons-react'
 import { useMemo, useState } from 'react'
@@ -117,101 +120,138 @@ export function AssignmentRepoList({ title, rows }: { title: string; rows: RepoR
 
   return (
     <>
-      <h2 className="sr-only">Filtrar</h2>
+      <h2 className="sr-only">Filtrar el listado</h2>
 
-      <div className="d-flex flex-wrap flex-items-center mb-2">
-        <CheckboxMenu
-          label="Entrega"
-          heading="Filtrar por entrega:"
-          options={[
-            { value: 'submitted', label: 'Entregado', description: 'Tienen commits propios' },
-            {
-              value: 'not_submitted',
-              label: 'Sin entregar',
-              description: 'Todavía no subieron nada',
-            },
-          ]}
-          selected={submission}
-          onToggle={(value) => setSubmission(toggle(submission, value))}
-        />
-
-        <CheckboxMenu
-          label="Aceptación"
-          heading="Filtrar por aceptación:"
-          options={[
-            { value: 'accepted', label: 'Aceptaron', description: 'Aceptaron el assignment' },
-            { value: 'unaccepted', label: 'No aceptaron', description: 'Todavía no lo aceptaron' },
-          ]}
-          selected={accepted}
-          onToggle={(value) => setAccepted(toggle(accepted, value))}
-        />
-
-        <CheckboxMenu
-          label="Sin vincular"
-          heading="Filtrar por vínculo:"
-          options={[
-            {
-              value: 'identifiers',
-              label: 'Identificadores',
-              description: 'Nadie reclamó ese identificador',
-            },
-            {
-              value: 'accounts',
-              label: 'Cuentas de GitHub',
-              description: 'Aceptaron sin elegir su identificador',
-            },
-          ]}
-          selected={unlinked}
-          onToggle={(value) => setUnlinked(toggle(unlinked, value))}
-        />
-
-        <div className="mr-2 mb-2 flex-auto" style={{ minWidth: '14rem' }}>
-          <input
-            type="search"
-            className="form-control input-sm width-full"
-            placeholder="Buscar"
-            aria-label="Buscar por identificador, cuenta de GitHub o equipo"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
+      {/* The live bar: "Filters" and the search field joined in a BtnGroup on
+          the left, the rest of the menus on the right, stacking on narrow
+          screens with the search field on top */}
+      <div className="position-relative d-flex flex-column-reverse flex-lg-row flex-wrap flex-lg-nowrap">
+        <div className="d-flex flex-1 BtnGroup">
+          <CheckboxMenu
+            label="Filtros"
+            heading="Filtrar por entrega:"
+            grouped
+            options={[
+              { value: 'submitted', label: 'Entregado', description: 'Tienen commits propios' },
+              {
+                value: 'not_submitted',
+                label: 'Sin entregar',
+                description: 'Todavía no subieron nada',
+              },
+            ]}
+            selected={submission}
+            onToggle={(value) => setSubmission(toggle(submission, value))}
           />
+
+          <div className="width-full mr-2">
+            <div className="FormControl-input-wrap FormControl-input-wrap--leadingVisual FormControl-input-wrap--trailingAction">
+              <span className="FormControl-input-leadingVisualWrap">
+                <SearchIcon className="FormControl-input-leadingVisual" />
+              </span>
+
+              <input
+                type="text"
+                className="form-control width-full"
+                placeholder="Buscar en el listado"
+                aria-label="Buscar por identificador, cuenta de GitHub o equipo"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+
+              {query !== '' && (
+                <button
+                  type="button"
+                  className="FormControl-input-trailingAction"
+                  aria-label="Limpiar la búsqueda"
+                  onClick={() => setQuery('')}
+                >
+                  <XCircleFillIcon />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
-        <details className="dropdown details-reset details-overlay d-inline-block mr-2 mb-2">
-          <summary className="btn btn-sm" role="button" aria-haspopup="menu">
-            Orden: {SORT_LABEL[sort]}
-            <TriangleDownIcon className="ml-1" />
-          </summary>
+        <div className="d-flex flex-wrap mb-2 mb-lg-0">
+          <CheckboxMenu
+            label="Filtrar por cuentas sin vincular"
+            heading="Filtrar por vínculo:"
+            options={[
+              {
+                value: 'identifiers',
+                label: 'Identificadores',
+                description: 'Nadie reclamó ese identificador',
+              },
+              {
+                value: 'accounts',
+                label: 'Cuentas de GitHub',
+                description: 'Aceptaron sin elegir su identificador',
+              },
+            ]}
+            selected={unlinked}
+            onToggle={(value) => setUnlinked(toggle(unlinked, value))}
+          />
 
-          <div role="menu" className="dropdown-menu dropdown-menu-sw mt-1" style={{ width: 200 }}>
-            {(Object.keys(SORT_LABEL) as Sort[]).map((option) => (
-              <button
-                key={option}
-                type="button"
-                role="menuitemradio"
-                aria-checked={sort === option}
-                className="dropdown-item btn-link"
-                onClick={(event) => {
-                  setSort(option)
-                  event.currentTarget.closest('details')?.removeAttribute('open')
-                }}
-              >
-                {SORT_LABEL[option]}
-              </button>
-            ))}
-          </div>
-        </details>
+          <CheckboxMenu
+            label="Filtrar por aceptación"
+            heading="Filtrar por aceptación:"
+            options={[
+              { value: 'accepted', label: 'Aceptaron', description: 'Aceptaron el assignment' },
+              {
+                value: 'unaccepted',
+                label: 'No aceptaron',
+                description: 'Todavía no lo aceptaron',
+              },
+            ]}
+            selected={accepted}
+            onToggle={(value) => setAccepted(toggle(accepted, value))}
+          />
+
+          <details className="dropdown details-reset details-overlay d-inline-block mr-2 mb-2 mb-lg-0">
+            <summary className="btn" role="button" aria-haspopup="menu">
+              Orden
+              <TriangleDownIcon className="ml-1" />
+            </summary>
+
+            <div role="menu" className="dropdown-menu dropdown-menu-sw mt-1" style={{ width: 200 }}>
+              {(Object.keys(SORT_LABEL) as Sort[]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={sort === option}
+                  className="dropdown-item btn-link"
+                  onClick={(event) => {
+                    setSort(option)
+                    event.currentTarget.closest('details')?.removeAttribute('open')
+                  }}
+                >
+                  <CheckIcon
+                    className={`mr-2 ${sort === option ? '' : 'v-hidden'}`}
+                    aria-hidden="true"
+                  />
+                  {SORT_LABEL[option]}
+                </button>
+              ))}
+            </div>
+          </details>
+        </div>
       </div>
 
+      {/* `#js-clear-filters` on the live site, which hides it until something
+          is set — there it is a link back to the assignment path, here there
+          is no URL state to go back to */}
       {dirty && (
-        <div className="mb-2">
-          <button type="button" className="btn-link color-fg-muted" onClick={clear}>
+        <div className="mt-3">
+          <button type="button" className="btn-link Link Link--muted" onClick={clear}>
             <XIcon className="mr-1" />
             Limpiar la búsqueda, los filtros y el orden
           </button>
         </div>
       )}
 
-      <div className="Box Box--condensed">
+      {/* `<div class="mt-3">` around the list on the live site */}
+      <div className="Box Box--condensed mt-3">
         <div className="Box-header">
           <div className="d-table col-12">
             <div className="Box-title col-6 d-table-cell">{title}</div>
@@ -279,16 +319,27 @@ function CheckboxMenu<T extends string>({
   options,
   selected,
   onToggle,
+  grouped = false,
 }: {
   label: string
   heading: string
   options: { value: T; label: string; description: string }[]
   selected: Set<T>
   onToggle: (value: T) => void
+  /** Sits inside the BtnGroup, joined to the search field on its right */
+  grouped?: boolean
 }) {
   return (
-    <details className="dropdown details-reset details-overlay d-inline-block mr-2 mb-2">
-      <summary className="btn btn-sm" role="button" aria-haspopup="menu">
+    <details
+      className={`dropdown details-reset details-overlay ${
+        grouped ? 'BtnGroup-parent' : 'd-inline-block mr-2 mb-2 mb-lg-0'
+      }`}
+    >
+      <summary
+        className={`btn ${grouped ? 'BtnGroup-item' : ''}`}
+        role="button"
+        aria-haspopup="menu"
+      >
         {label}
         {selected.size > 0 && <span className="Counter ml-1">{selected.size}</span>}
         <TriangleDownIcon className="ml-1" />
