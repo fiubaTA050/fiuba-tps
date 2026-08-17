@@ -12,6 +12,7 @@ import {
 import {
   findSlugClash,
   invitationKey,
+  invitationShortKey,
   resolveStarterCode,
   slugClashMessage,
   validateTitleAndSlug,
@@ -51,6 +52,8 @@ export type GroupAssignmentListItem = {
   invitationsEnabled: boolean
   studentsAreRepoAdmins: boolean
   invitationKey: string
+  /** Null on invitations created before short keys existed */
+  invitationShortKey: string | null
   starterCodeRepoId: number | null
   maxMembers: number | null
   maxTeams: number | null
@@ -98,6 +101,7 @@ const SELECTION = {
   invitationsEnabled: groupAssignments.invitationsEnabled,
   studentsAreRepoAdmins: groupAssignments.studentsAreRepoAdmins,
   invitationKey: groupAssignmentInvitations.key,
+  invitationShortKey: groupAssignmentInvitations.shortKey,
   starterCodeRepoId: groupAssignments.starterCodeRepoId,
   maxMembers: groupAssignments.maxMembers,
   maxTeams: groupAssignments.maxTeams,
@@ -324,6 +328,7 @@ export async function createGroupAssignment(
       await tx.insert(groupAssignmentInvitations).values({
         groupAssignmentId: row.id,
         key: invitationKey(),
+        shortKey: invitationShortKey(),
       })
     })
   } catch (error) {

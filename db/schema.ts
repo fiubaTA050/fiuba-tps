@@ -252,6 +252,13 @@ export const assignmentInvitations = pgTable(
     id: serial('id').primaryKey(),
     /** SecureRandom.hex(16) in the original's `assign_key` */
     key: varchar('key', { length: 255 }).notNull(),
+    /**
+     * The eight characters behind `/a/<short_key>`, from the original's
+     * ShortKey concern. Nullable: rows created before it existed keep only the
+     * long key, and the link falls back to it, exactly as
+     * `InvitationHelper#invitation_key` does.
+     */
+    shortKey: varchar('short_key', { length: 255 }),
     assignmentId: integer('assignment_id')
       .notNull()
       .references(() => assignments.id, { onDelete: 'cascade' }),
@@ -263,6 +270,11 @@ export const assignmentInvitations = pgTable(
     index('index_assignment_invitations_on_assignment_id').on(table.assignmentId),
     index('index_assignment_invitations_on_deleted_at').on(table.deletedAt),
     uniqueIndex('index_assignment_invitations_on_key').on(table.key),
+    // The original indexes this without a unique constraint and leaves the
+    // uniqueness to `validates :short_key, uniqueness: true`, which is a
+    // read-then-write and races. Unique here, where it cannot: Postgres allows
+    // any number of NULLs, so the `allow_nil` half still holds.
+    uniqueIndex('index_assignment_invitations_on_short_key').on(table.shortKey),
   ],
 )
 
@@ -592,6 +604,8 @@ export const groupAssignmentInvitations = pgTable(
   {
     id: serial('id').primaryKey(),
     key: varchar('key', { length: 255 }).notNull(),
+    /** The eight characters behind `/g/<short_key>`, as on the individual one */
+    shortKey: varchar('short_key', { length: 255 }),
     groupAssignmentId: integer('group_assignment_id')
       .notNull()
       .references(() => groupAssignments.id, { onDelete: 'cascade' }),
@@ -603,6 +617,7 @@ export const groupAssignmentInvitations = pgTable(
     index('index_group_assignment_invitations_on_group_assignment_id').on(table.groupAssignmentId),
     index('index_group_assignment_invitations_on_deleted_at').on(table.deletedAt),
     uniqueIndex('index_group_assignment_invitations_on_key').on(table.key),
+    uniqueIndex('index_group_assignment_invitations_on_short_key').on(table.shortKey),
   ],
 )
 

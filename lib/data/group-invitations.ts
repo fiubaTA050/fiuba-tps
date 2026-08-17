@@ -87,6 +87,24 @@ export async function findGroupInvitation(
   return row && toStudentInvitation(row)
 }
 
+/**
+ * The long key behind a `/g/<short_key>` link. Sessionless for the same reason
+ * as its individual twin — see `findKeyByShortKey` in lib/data/invitations.ts.
+ */
+export async function findKeyByShortKey(shortKey: string): Promise<string | null> {
+  const [row] = await db
+    .select({ key: groupAssignmentInvitations.key })
+    .from(groupAssignmentInvitations)
+    .where(
+      and(
+        eq(groupAssignmentInvitations.shortKey, shortKey),
+        isNull(groupAssignmentInvitations.deletedAt),
+      ),
+    )
+
+  return row?.key ?? null
+}
+
 /** The same read keeping the ids the writers need. Private, as in the individual flow */
 async function findGroupInvitationRow(session: Session, key: string) {
   const userId = Number(session.user.id)

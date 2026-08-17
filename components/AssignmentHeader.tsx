@@ -95,10 +95,10 @@ export function AssignmentHeader({
           </div>
 
           <div className="d-flex flex-wrap flex-items-start mt-3 mt-md-0">
-            {/* `style="width: 43ch"` on the live site's own field: an
-                invitation URL has to be readable without selecting it */}
-            <div className="d-inline-block mr-2" style={{ width: '43ch', maxWidth: '100%' }}>
-              <InvitationLink url={invitationUrl} disabled={!invitationsEnabled} />
+            {/* 43ch is the live site's own width, and it is what makes a short
+                invitation link readable whole without selecting it */}
+            <div className="d-inline-block mr-2">
+              <InvitationLink url={invitationUrl} disabled={!invitationsEnabled} width="43ch" />
             </div>
 
             <details className="dropdown details-reset details-overlay d-inline-block">

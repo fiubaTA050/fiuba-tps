@@ -50,6 +50,13 @@
       "when": 1786817813628,
       "tag": "0006_boring_bloodstorm",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786928806671,
+      "tag": "0007_rare_white_queen",
+      "breakpoints": true
     }
   ]
 }

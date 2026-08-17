@@ -14,7 +14,7 @@ import { rosterSummary } from '@/lib/data/rosters'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import type { RepositorySnapshot } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
-import { baseUrl } from '@/lib/url'
+import { baseUrl, invitationUrl } from '@/lib/url'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,7 +49,7 @@ export default async function GroupAssignmentPage(
   const justCreated = searchParams.created === '1'
   const justUpdated = searchParams.updated === '1'
 
-  const invitationUrl = `${await baseUrl()}/group-assignment-invitations/${assignment.invitationKey}`
+  const inviteUrl = invitationUrl(await baseUrl(), 'group-assignment', assignment)
   const invitationsEnabled = assignment.invitationsEnabled && !classroom.archivedAt
 
   const repoIds = acceptances.teams
@@ -103,7 +103,7 @@ export default async function GroupAssignmentPage(
           starterCodeRepoId={assignment.starterCodeRepoId}
           starterCode={starterCode}
           editHref={`/classrooms/${classroom.slug}/group-assignments/${assignment.slug}/edit`}
-          invitationUrl={invitationUrl}
+          invitationUrl={inviteUrl}
           invitationsEnabled={invitationsEnabled}
           disabledReason={
             invitationsEnabled

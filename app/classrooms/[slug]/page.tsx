@@ -9,7 +9,7 @@ import { listAssignments } from '@/lib/data/assignments'
 import { listGroupAssignments } from '@/lib/data/group-assignments'
 import { findClassroom } from '@/lib/data/organizations'
 import { isUsableSession } from '@/lib/session'
-import { baseUrl } from '@/lib/url'
+import { baseUrl, invitationUrl } from '@/lib/url'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,7 +55,7 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
       key: `individual-${assignment.id}`,
       title: assignment.title,
       href: `/classrooms/${classroom.slug}/assignments/${assignment.slug}`,
-      invitationUrl: `${origin}/assignment-invitations/${assignment.invitationKey}`,
+      invitationUrl: invitationUrl(origin, 'assignment', assignment),
       invitationsEnabled: assignment.invitationsEnabled,
       publicRepo: assignment.publicRepo,
       group: false,
@@ -65,7 +65,7 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
       key: `group-${assignment.id}`,
       title: assignment.title,
       href: `/classrooms/${classroom.slug}/group-assignments/${assignment.slug}`,
-      invitationUrl: `${origin}/group-assignment-invitations/${assignment.invitationKey}`,
+      invitationUrl: invitationUrl(origin, 'group-assignment', assignment),
       invitationsEnabled: assignment.invitationsEnabled,
       publicRepo: assignment.publicRepo,
       group: true,

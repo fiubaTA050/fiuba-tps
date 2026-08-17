@@ -20,3 +20,38 @@ export async function baseUrl(): Promise<string> {
 
   return `${protocol}://${host}`
 }
+
+/** Which of the two invitation flows a link belongs to */
+export type InvitationKind = 'assignment' | 'group-assignment'
+
+/** The short path of each, from the original's routes.rb:31-32 */
+const SHORT_PATH: Record<InvitationKind, string> = {
+  assignment: 'a',
+  'group-assignment': 'g',
+}
+
+/**
+ * Port of `InvitationHelper#invitation_url`, this time including the branch
+ * the first pass left out.
+ *
+ * The teacher copies the short form — `<host>/a/iS5bOvnY` — because it is what
+ * gets dictated out loud, pasted into a slide and typed by hand off a
+ * projector. The long key stays the canonical one: `/a/:short_key` only looks
+ * the invitation up and redirects to it, exactly as `ShortUrlController` does,
+ * so every link already handed out keeps working.
+ *
+ * Falls back to the long form when there is no short key, which is the case
+ * for every invitation created before this existed —
+ * `InvitationHelper#invitation_key` has the same fallback.
+ */
+export function invitationUrl(
+  origin: string,
+  kind: InvitationKind,
+  invitation: { invitationKey: string; invitationShortKey: string | null },
+): string {
+  if (invitation.invitationShortKey) {
+    return `${origin}/${SHORT_PATH[kind]}/${invitation.invitationShortKey}`
+  }
+
+  return `${origin}/${kind}-invitations/${invitation.invitationKey}`
+}

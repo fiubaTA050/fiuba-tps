@@ -256,3 +256,20 @@ export async function resolveStarterCode(
 export function invitationKey(): string {
   return randomBytes(16).toString('hex')
 }
+
+/**
+ * The short key behind `/a/<key>` and `/g/<key>`. Port of the ShortKey
+ * concern's `SecureRandom.urlsafe_base64(6)`: six random bytes, eight
+ * url-safe base64 characters.
+ *
+ * The original follows it with `.sub("+", "=")`, which never fires —
+ * `urlsafe_base64` emits `-` and `_`, never `+` — so it is not ported.
+ *
+ * Eight characters of base64 is 48 bits, and the unique index is what actually
+ * enforces it. No retry on collision: at a birthday bound of N²/2⁴⁹ even ten
+ * thousand invitations sit under one in five million, and the transaction
+ * already rolls back and reports on a unique violation.
+ */
+export function invitationShortKey(): string {
+  return randomBytes(6).toString('base64url')
+}

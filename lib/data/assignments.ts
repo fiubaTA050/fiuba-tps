@@ -7,6 +7,7 @@ import { assignmentInvitations, assignments, groupAssignments } from '@/db/schem
 import {
   findSlugClash,
   invitationKey,
+  invitationShortKey,
   resolveStarterCode,
   slugClashMessage,
   validateTitleAndSlug,
@@ -45,6 +46,8 @@ export type AssignmentListItem = {
   studentsAreRepoAdmins: boolean
   /** The key of the invitation URL. AssignmentInvitation#to_param */
   invitationKey: string
+  /** Null on invitations created before short keys existed */
+  invitationShortKey: string | null
   /** Assignment#starter_code? is `starterCodeRepoId !== null` */
   starterCodeRepoId: number | null
 }
@@ -81,6 +84,7 @@ export async function listAssignments(
       invitationsEnabled: assignments.invitationsEnabled,
       studentsAreRepoAdmins: assignments.studentsAreRepoAdmins,
       invitationKey: assignmentInvitations.key,
+      invitationShortKey: assignmentInvitations.shortKey,
       starterCodeRepoId: assignments.starterCodeRepoId,
     })
     .from(assignments)
@@ -152,6 +156,7 @@ export async function findAssignment(
       invitationsEnabled: assignments.invitationsEnabled,
       studentsAreRepoAdmins: assignments.studentsAreRepoAdmins,
       invitationKey: assignmentInvitations.key,
+      invitationShortKey: assignmentInvitations.shortKey,
       starterCodeRepoId: assignments.starterCodeRepoId,
     })
     .from(assignments)
@@ -264,6 +269,7 @@ export async function createAssignment(
       await tx.insert(assignmentInvitations).values({
         assignmentId: row.id,
         key: invitationKey(),
+        shortKey: invitationShortKey(),
       })
     })
   } catch (error) {

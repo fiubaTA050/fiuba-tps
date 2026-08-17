@@ -95,6 +95,29 @@ export async function findInvitation(
 }
 
 /**
+ * The long key behind a `/a/<short_key>` link, for `ShortUrlController`.
+ *
+ * No session, unlike everything around it: the original skips
+ * `authenticate_user!` on this route because the student follows the short
+ * link before signing in. It leaks nothing that the long link does not — it
+ * answers with a key that is itself the credential, and only for a short key
+ * somebody was already given.
+ *
+ * Soft-deleted invitations do not resolve, so a deleted assignment's short
+ * link 404s like its long one (DA-9).
+ */
+export async function findKeyByShortKey(shortKey: string): Promise<string | null> {
+  const [row] = await db
+    .select({ key: assignmentInvitations.key })
+    .from(assignmentInvitations)
+    .where(
+      and(eq(assignmentInvitations.shortKey, shortKey), isNull(assignmentInvitations.deletedAt)),
+    )
+
+  return row?.key ?? null
+}
+
+/**
  * The same read, keeping the ids the writers need. Private: `id` is the
  * database's, and no screen has any business holding it — the key is what
  * identifies an invitation everywhere outside this module, exactly as

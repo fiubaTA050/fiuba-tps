@@ -11,7 +11,20 @@ import { useEffect, useState } from 'react'
  * it is what lets a teacher on a browser that refuses clipboard access still
  * select the URL by hand.
  */
-export function InvitationLink({ url, disabled = false }: { url: string; disabled?: boolean }) {
+export function InvitationLink({
+  url,
+  disabled = false,
+  width,
+}: {
+  url: string
+  disabled?: boolean
+  /**
+   * Sizes the field itself, the way the live site does — `width: 43ch` inline
+   * on the input, capped at `70vw` by `.js-copy-invitation-link`. Left unset
+   * where the link shares a row with other things and has to flex.
+   */
+  width?: string
+}) {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -35,6 +48,7 @@ export function InvitationLink({ url, disabled = false }: { url: string; disable
       <input
         type="text"
         className={`form-control input-sm text-mono ${disabled ? 'color-fg-muted' : ''}`}
+        style={width ? { width, maxWidth: '70vw' } : undefined}
         value={url}
         readOnly
         aria-label="Link de invitación"

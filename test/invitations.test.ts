@@ -46,6 +46,7 @@ const {
   acceptInvitation,
   currentStatus,
   findInvitation,
+  findKeyByShortKey,
   joinRoster,
   listAssignmentAcceptances,
   listUnlinkedRosterEntries,
@@ -150,6 +151,77 @@ beforeEach(async () => {
   ;({ db } = await createTestDatabase())
   nextUid = 1
   nextGithubId = 1000
+})
+
+/** Port of ShortUrlController#assignment_invitation and of the ShortKey concern */
+describe('findKeyByShortKey', () => {
+  it('resolves a short key to the long one', async () => {
+    const teacher = await classroomTeacher()
+    const { assignment } = await classroomWithAssignment(teacher)
+
+    const [invitation] = await db
+      .update(assignmentInvitations)
+      .set({ shortKey: 'iS5bOvnY' })
+      .where(eq(assignmentInvitations.assignmentId, assignment.id))
+      .returning({ key: assignmentInvitations.key })
+
+    expect(await findKeyByShortKey('iS5bOvnY')).toBe(invitation.key)
+  })
+
+  // `not_found unless invitation`
+  it('returns null for a short key that matches nothing', async () => {
+    expect(await findKeyByShortKey('no-existe')).toBeNull()
+  })
+
+  /**
+   * DA-9: deleting an assignment soft-deletes its invitation, and the long
+   * link already 404s on the same condition. The short one has to agree.
+   */
+  it('does not resolve the short key of a deleted assignment', async () => {
+    const teacher = await classroomTeacher()
+    const { classroom, assignment } = await classroomWithAssignment(teacher)
+
+    await db
+      .update(assignmentInvitations)
+      .set({ shortKey: 'borrado1' })
+      .where(eq(assignmentInvitations.assignmentId, assignment.id))
+
+    await deleteAssignment(teacher, classroom.slug, 'tp0')
+
+    expect(await findKeyByShortKey('borrado1')).toBeNull()
+  })
+
+  // The unique index, which is what the original left to a racy validation
+  it('refuses two invitations with the same short key', async () => {
+    const teacher = await classroomTeacher()
+    const first = await classroomWithAssignment(teacher)
+    const second = await classroomWithAssignment(teacher)
+
+    await db
+      .update(assignmentInvitations)
+      .set({ shortKey: 'repetida' })
+      .where(eq(assignmentInvitations.assignmentId, first.assignment.id))
+
+    await expect(
+      db
+        .update(assignmentInvitations)
+        .set({ shortKey: 'repetida' })
+        .where(eq(assignmentInvitations.assignmentId, second.assignment.id)),
+    ).rejects.toThrow()
+  })
+
+  // `validates :short_key, uniqueness: true, allow_nil: true` — the nil half
+  it('allows any number of invitations with no short key', async () => {
+    const teacher = await classroomTeacher()
+    await classroomWithAssignment(teacher)
+    await classroomWithAssignment(teacher)
+
+    const rows = await db
+      .select({ shortKey: assignmentInvitations.shortKey })
+      .from(assignmentInvitations)
+
+    expect(rows.filter((row) => row.shortKey === null).length).toBeGreaterThan(1)
+  })
 })
 
 describe('findInvitation', () => {

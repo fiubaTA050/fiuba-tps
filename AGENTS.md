@@ -66,6 +66,15 @@ reference code without mental translation. The confusing one:
   deadline extension need deadlines, which are not ported either. The commit
   data for the whole cohort comes from one GraphQL query
   (`listRepositorySnapshots`), never one REST call per repository.
+- **The invitation link a teacher copies is the short one**, `<host>/a/<key>`
+  and `<host>/g/<key>`, ported from the original's ShortKey concern,
+  `ShortUrlController` and `routes.rb:31-32`. The long key stays canonical: the
+  short route only looks the invitation up and redirects, so links already
+  handed out keep working, and an invitation with no short key — every one
+  created before this existed — falls back to the long form, exactly as
+  `InvitationHelper#invitation_key` does. One divergence: `short_key` is unique
+  **in the database**, where the original leaves it to a
+  `validates :short_key, uniqueness: true` that races.
 - **The dashboard's filters run in the browser**, where the live site puts them
   in the URL — its "Clear current search query, filters, and sorts" is a plain
   link back to the assignment path, because Rails re-renders from the database.

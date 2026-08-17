@@ -9,7 +9,7 @@ import { listAssignmentAcceptances } from '@/lib/data/invitations'
 import { findClassroom } from '@/lib/data/organizations'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
-import { baseUrl } from '@/lib/url'
+import { baseUrl, invitationUrl } from '@/lib/url'
 
 import { AcceptanceList } from './AcceptanceList'
 
@@ -50,7 +50,7 @@ export default async function AssignmentPage(
   const justUpdated = searchParams.updated === '1'
 
   // InvitationHelper#invitation_url, without the short_key branch
-  const invitationUrl = `${await baseUrl()}/assignment-invitations/${assignment.invitationKey}`
+  const inviteUrl = invitationUrl(await baseUrl(), 'assignment', assignment)
 
   // AssignmentInvitation#enabled?
   const invitationsEnabled = assignment.invitationsEnabled && !classroom.archivedAt
@@ -111,7 +111,7 @@ export default async function AssignmentPage(
           starterCodeRepoId={assignment.starterCodeRepoId}
           starterCode={starterCode}
           editHref={`/classrooms/${classroom.slug}/assignments/${assignment.slug}/edit`}
-          invitationUrl={invitationUrl}
+          invitationUrl={inviteUrl}
           invitationsEnabled={invitationsEnabled}
           disabledReason={
             invitationsEnabled
