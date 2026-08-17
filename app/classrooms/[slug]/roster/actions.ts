@@ -12,6 +12,7 @@ import {
   deleteEntry,
   deleteRoster,
   renameEntry,
+  unlinkAccountFromEntry,
 } from '@/lib/data/rosters'
 import { positiveInteger } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
@@ -87,6 +88,32 @@ export async function addStudentsAction(
     notice: result.created === 1 ? 'Alumno agregado.' : `Se agregaron ${result.created} alumnos.`,
     submission,
   }
+}
+
+/**
+ * Port of RostersController#unlink.
+ *
+ * The other half, `#link`, is raised from the assignment dashboard and lives
+ * next to it — see that route's actions.ts.
+ */
+export async function unlinkAccountAction(
+  _previous: RosterActionState,
+  formData: FormData,
+): Promise<RosterActionState> {
+  const session = await auth()
+  if (!isUsableSession(session)) redirect('/')
+
+  const classroomSlug = String(formData.get('classroom_slug') ?? '')
+  const entryId = positiveInteger(formData.get('entry_id'))
+
+  if (entryId === null) return { error: 'No encontramos a ese alumno en el roster.', notice: null }
+
+  const result = await unlinkAccountFromEntry(session, classroomSlug, entryId)
+
+  if (!result.success) return { error: result.error, notice: null }
+
+  revalidatePath(`/classrooms/${classroomSlug}/roster`)
+  return EMPTY_STATE
 }
 
 /** Port of RostersController#edit_entry */

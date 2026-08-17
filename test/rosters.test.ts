@@ -2,7 +2,19 @@ import { eq } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { organizations, organizationsUsers, rosterEntries, rosters, users } from '@/db/schema'
+import {
+  assignmentInvitations,
+  assignments,
+  groupings,
+  groups,
+  groupsUsers,
+  inviteStatuses,
+  organizations,
+  organizationsUsers,
+  rosterEntries,
+  rosters,
+  users,
+} from '@/db/schema'
 
 import { createTestDatabase } from './helpers/db'
 
@@ -12,8 +24,10 @@ import { createTestDatabase } from './helpers/db'
  * spec/controllers/orgs/rosters_controller_spec.rb (#create, #add_students,
  * #edit_entry, #delete_entry, #remove_organization, the CSV of #show).
  *
- * The original's #link, #unlink and the LMS/Google import cases have no
- * counterpart: none of that is ported, see lib/data/rosters.ts.
+ * #link and #unlink are ported too, and their cases below start from the
+ * original's — `creates link`, `does not create a link` for a user id that is
+ * not an unlinked one, and the two of #unlink. The LMS/Google import cases have
+ * no counterpart: none of that is ported, see lib/data/rosters.ts.
  */
 
 let db: Awaited<ReturnType<typeof createTestDatabase>>['db']
@@ -31,10 +45,13 @@ const {
   deleteEntry,
   deleteRoster,
   findRoster,
+  linkAccountToEntry,
+  listUnlinkedEntries,
   parseIdentifiers,
   renameEntry,
   rosterCsv,
   rosterSummary,
+  unlinkAccountFromEntry,
 } = await import('@/lib/data/rosters')
 
 let nextUid = 1
@@ -522,5 +539,326 @@ describe('rosterCsv', () => {
     const classroom = await classroomWithRoster(owner, '101')
 
     expect(await rosterCsv(stranger, classroom.slug)).toBeNull()
+  })
+})
+
+/**
+ * A student who accepted an assignment of this classroom — the original's
+ * "unlinked user" once they hold no roster identifier. Keyed off
+ * `invite_statuses` rather than `assignment_repos`, which is the divergence
+ * `unlinkedUserIdsOf` documents.
+ */
+async function acceptedStudent(
+  teacher: Session,
+  classroomId: number,
+  login: string,
+): Promise<number> {
+  const uid = nextUid++
+
+  const [student] = await db
+    .insert(users)
+    .values({ uid, githubLogin: login })
+    .returning({ id: users.id })
+
+  const [assignment] = await db
+    .insert(assignments)
+    .values({
+      organizationId: classroomId,
+      creatorId: Number(teacher.user.id),
+      title: `TP${uid}`,
+      slug: `tp${uid}`,
+    })
+    .returning({ id: assignments.id })
+
+  const [invitation] = await db
+    .insert(assignmentInvitations)
+    .values({ assignmentId: assignment.id, key: `key-${uid}` })
+    .returning({ id: assignmentInvitations.id })
+
+  await db
+    .insert(inviteStatuses)
+    .values({ assignmentInvitationId: invitation.id, userId: student.id, status: 'accepted' })
+
+  return student.id
+}
+
+/** A GitHub account that has nothing to do with the classroom */
+async function outsider(login: string): Promise<number> {
+  const [row] = await db
+    .insert(users)
+    .values({ uid: nextUid++, githubLogin: login })
+    .returning({ id: users.id })
+
+  return row.id
+}
+
+/** The `id` of an entry by identifier, for the cases that need one */
+async function entryId(session: Session, slug: string, identifier: string): Promise<number> {
+  const roster = await findRoster(session, slug)
+  return roster!.entries.find((entry) => entry.identifier === identifier)!.id
+}
+
+describe('linkAccountToEntry', () => {
+  // "creates link"
+  it('links an account that accepted an assignment of the classroom', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '101\n102')
+    const student = await acceptedStudent(session, classroom.id, 'alumna')
+
+    const result = await linkAccountToEntry(
+      session,
+      classroom.slug,
+      await entryId(session, classroom.slug, '101'),
+      student,
+    )
+
+    expect(result).toEqual({ success: true })
+
+    const roster = await findRoster(session, classroom.slug)
+    expect(roster?.entries.find((entry) => entry.identifier === '101')?.githubLogin).toBe('alumna')
+  })
+
+  /**
+   * The original's `user/link does not exist` case, which posts `user_id: 3`.
+   * This is the whole of `raise unless unlinked_user_ids.include?(user_id)`:
+   * without it a teacher could point an entry at any user id in the database.
+   */
+  it('refuses an account that never took part in the classroom', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '101')
+    const stranger = await outsider('desconocida')
+
+    const result = await linkAccountToEntry(
+      session,
+      classroom.slug,
+      await entryId(session, classroom.slug, '101'),
+      stranger,
+    )
+
+    expect(result.success).toBe(false)
+
+    const roster = await findRoster(session, classroom.slug)
+    expect(roster?.entries[0].githubLogin).toBeNull()
+  })
+
+  // Participation is the classroom's, not the assignment's: unlinked_user_ids
+  // is built from every assignment of the organization
+  it('links an account that accepted a different assignment of the same classroom', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '101')
+    const student = await acceptedStudent(session, classroom.id, 'alumna')
+    await acceptedStudent(session, classroom.id, 'otro')
+
+    const result = await linkAccountToEntry(
+      session,
+      classroom.slug,
+      await entryId(session, classroom.slug, '101'),
+      student,
+    )
+
+    expect(result).toEqual({ success: true })
+  })
+
+  // The group half of unlinked_user_ids, which the original read off
+  // repo_accesses and this port reads off groups_users
+  it('links an account that is only on a team', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '101')
+
+    const [student] = await db
+      .insert(users)
+      .values({ uid: nextUid++, githubLogin: 'agrupada' })
+      .returning({ id: users.id })
+
+    const [grouping] = await db
+      .insert(groupings)
+      .values({ organizationId: classroom.id, title: 'Equipos', slug: 'equipos' })
+      .returning({ id: groupings.id })
+
+    const [group] = await db
+      .insert(groups)
+      .values({
+        groupingId: grouping.id,
+        organizationId: classroom.id,
+        title: 'Equipo 1',
+        slug: 'equipo-1',
+      })
+      .returning({ id: groups.id })
+
+    await db
+      .insert(groupsUsers)
+      .values({ groupId: group.id, groupingId: grouping.id, userId: student.id })
+
+    const result = await linkAccountToEntry(
+      session,
+      classroom.slug,
+      await entryId(session, classroom.slug, '101'),
+      student.id,
+    )
+
+    expect(result).toEqual({ success: true })
+  })
+
+  // Not the original's: its #link overwrites whatever the entry held
+  it('refuses an entry that is already linked', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '101')
+    const first = await acceptedStudent(session, classroom.id, 'primera')
+    const second = await acceptedStudent(session, classroom.id, 'segunda')
+    const entry = await entryId(session, classroom.slug, '101')
+
+    expect(await linkAccountToEntry(session, classroom.slug, entry, first)).toEqual({
+      success: true,
+    })
+
+    const result = await linkAccountToEntry(session, classroom.slug, entry, second)
+
+    expect(result.success).toBe(false)
+
+    const roster = await findRoster(session, classroom.slug)
+    expect(roster?.entries[0].githubLogin).toBe('primera')
+  })
+
+  // An account already on the roster is out of unlinked_user_ids by definition
+  it('refuses an account that already holds another identifier', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '101\n102')
+    const student = await acceptedStudent(session, classroom.id, 'alumna')
+
+    await linkAccountToEntry(
+      session,
+      classroom.slug,
+      await entryId(session, classroom.slug, '101'),
+      student,
+    )
+
+    const result = await linkAccountToEntry(
+      session,
+      classroom.slug,
+      await entryId(session, classroom.slug, '102'),
+      student,
+    )
+
+    expect(result.success).toBe(false)
+
+    const roster = await findRoster(session, classroom.slug)
+    expect(roster?.entries.find((entry) => entry.identifier === '102')?.githubLogin).toBeNull()
+  })
+
+  it('refuses an entry that belongs to another classroom’s roster', async () => {
+    const session = await classroomTeacher()
+    const mine = await classroomWithRoster(session, '101')
+    const other = await classroomWithRoster(session, '201')
+    const student = await acceptedStudent(session, mine.id, 'alumna')
+
+    const result = await linkAccountToEntry(
+      session,
+      mine.slug,
+      await entryId(session, other.slug, '201'),
+      student,
+    )
+
+    expect(result).toEqual({ success: false, error: 'No encontramos a ese alumno en el roster.' })
+  })
+
+  // DA-4: the boundary is organizations_users, as in every other function here
+  it('refuses a teacher who is not in the classroom', async () => {
+    const owner = await classroomTeacher('owner')
+    const stranger = await classroomTeacher('stranger')
+    const classroom = await classroomWithRoster(owner, '101')
+    const student = await acceptedStudent(owner, classroom.id, 'alumna')
+    const entry = await entryId(owner, classroom.slug, '101')
+
+    const result = await linkAccountToEntry(stranger, classroom.slug, entry, student)
+
+    expect(result).toEqual({ success: false, error: 'Este classroom no tiene un roster.' })
+
+    const roster = await findRoster(owner, classroom.slug)
+    expect(roster?.entries[0].githubLogin).toBeNull()
+  })
+})
+
+describe('unlinkAccountFromEntry', () => {
+  // "unlinks entry and user"
+  it('unlinks a linked entry', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '101')
+    const student = await acceptedStudent(session, classroom.id, 'alumna')
+    const entry = await entryId(session, classroom.slug, '101')
+
+    await linkAccountToEntry(session, classroom.slug, entry, student)
+
+    expect(await unlinkAccountFromEntry(session, classroom.slug, entry)).toEqual({ success: true })
+
+    const roster = await findRoster(session, classroom.slug)
+    expect(roster?.entries[0].githubLogin).toBeNull()
+  })
+
+  // The original's `with an unlinked entry` case, which expects the same flash
+  it('succeeds on an entry that was not linked', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '101')
+
+    const result = await unlinkAccountFromEntry(
+      session,
+      classroom.slug,
+      await entryId(session, classroom.slug, '101'),
+    )
+
+    expect(result).toEqual({ success: true })
+  })
+
+  it('refuses an entry that belongs to another classroom’s roster', async () => {
+    const session = await classroomTeacher()
+    const mine = await classroomWithRoster(session, '101')
+    const other = await classroomWithRoster(session, '201')
+    const student = await acceptedStudent(session, other.id, 'alumna')
+    const entry = await entryId(session, other.slug, '201')
+
+    await linkAccountToEntry(session, other.slug, entry, student)
+
+    expect(await unlinkAccountFromEntry(session, mine.slug, entry)).toEqual({
+      success: false,
+      error: 'No encontramos a ese alumno en el roster.',
+    })
+
+    const roster = await findRoster(session, other.slug)
+    expect(roster?.entries[0].githubLogin).toBe('alumna')
+  })
+})
+
+/** Port of Roster#unlinked_entries, from the teacher's side */
+describe('listUnlinkedEntries', () => {
+  it('lists only the identifiers nobody claimed, by identifier', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '103\n101\n102')
+    const student = await acceptedStudent(session, classroom.id, 'alumna')
+
+    await linkAccountToEntry(
+      session,
+      classroom.slug,
+      await entryId(session, classroom.slug, '102'),
+      student,
+    )
+
+    expect((await listUnlinkedEntries(session, classroom.slug)).map((e) => e.identifier)).toEqual([
+      '101',
+      '103',
+    ])
+  })
+
+  it('is empty for a classroom that is not the teacher’s', async () => {
+    const owner = await classroomTeacher('owner')
+    const stranger = await classroomTeacher('stranger')
+    const classroom = await classroomWithRoster(owner, '101')
+
+    expect(await listUnlinkedEntries(stranger, classroom.slug)).toEqual([])
+  })
+
+  it('is empty for a classroom with no roster', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    expect(await listUnlinkedEntries(session, classroom.slug)).toEqual([])
   })
 })

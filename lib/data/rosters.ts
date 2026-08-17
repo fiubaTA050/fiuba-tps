@@ -1,9 +1,22 @@
 import 'server-only'
 
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
-import { organizations, organizationsUsers, rosterEntries, rosters, users } from '@/db/schema'
+import {
+  assignmentInvitations,
+  assignments,
+  groups,
+  groupsUsers,
+  inviteStatuses,
+  organizations,
+  organizationsUsers,
+  rosterEntries,
+  rosters,
+  users,
+} from '@/db/schema'
+import { unlinkedEntriesOf } from '@/lib/data/invitations'
+import { isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
 
 /**
@@ -15,10 +28,12 @@ import { db } from '@/lib/db'
  *
  * What is not ported: the Google Classroom and LTI imports (`import_from_lms`,
  * `sync_google_classroom`), which are the reason most of the original's
- * controller is as long as it is, and the teacher-side `link`/`unlink`.
- * Linking an entry to a GitHub account is the student's own doing on the
- * `join_roster` screen while accepting an assignment, which lives in
- * lib/data/invitations.ts — nothing here writes `roster_entries.user_id`.
+ * controller is as long as it is.
+ *
+ * `roster_entries.user_id` is written from two places, as in the original: the
+ * student claims their own identifier on the `join_roster` screen while
+ * accepting an assignment (lib/data/invitations.ts), and the teacher repairs
+ * the ones nobody claimed with `#link` / `#unlink` below.
  *
  * Like the original, none of this is blocked on an archived classroom: the
  * roster is just a list, nothing here touches GitHub.
@@ -325,6 +340,188 @@ export async function deleteEntry(
   }
 
   return { success: true }
+}
+
+/**
+ * The roster identifiers nobody has claimed, for the teacher's "Link to
+ * student" dialog — `current_roster.unlinked_entries` in the original's
+ * `_unlinked_user.html.erb:22`.
+ *
+ * The query itself is `Roster#unlinked_entries`, already ported in
+ * lib/data/invitations.ts for the student's own `join_roster` screen. What this
+ * adds is the boundary: there it is reached with an invitation key, here with
+ * the teacher's membership of the classroom.
+ */
+export async function listUnlinkedEntries(
+  session: Session,
+  classroomSlug: string,
+): Promise<{ id: number; identifier: string }[]> {
+  const roster = await findRosterRow(session, classroomSlug)
+  if (!roster) return []
+
+  return unlinkedEntriesOf(roster.id)
+}
+
+/**
+ * Port of RostersController#link, which the original reaches from two places
+ * that write the same column from opposite sides: `_link_to_student_modal`
+ * (a GitHub account, pick an identifier) and `_link_to_github_account_modal`
+ * (an identifier, pick an account). Only the first is ported, on the
+ * assignment dashboard — see the note in AcceptanceList.
+ *
+ * The original's guard is `raise unless unlinked_user_ids.include?(user_id)`,
+ * and it is the whole authorization on the account side: without it a teacher
+ * could point one of their entries at any user id in the database. Kept, with
+ * the same rescue-into-a-message shape.
+ *
+ * Two checks the original does not have, both for the same reason as in
+ * `linkRosterEntry`: an entry that is already linked is refused rather than
+ * silently taken over, and the `WHERE user_id IS NULL` makes the read above
+ * decisive when two teachers submit at once.
+ */
+export async function linkAccountToEntry(
+  session: Session,
+  classroomSlug: string,
+  entryId: number,
+  userId: number,
+): Promise<RosterResult> {
+  const classroom = await findClassroomRow(session, classroomSlug)
+  if (!classroom?.rosterId) return { success: false, error: 'Este classroom no tiene un roster.' }
+
+  // ensure_current_roster_entry, scoped to this roster
+  const [entry] = await db
+    .select({
+      id: rosterEntries.id,
+      identifier: rosterEntries.identifier,
+      userId: rosterEntries.userId,
+    })
+    .from(rosterEntries)
+    .where(and(eq(rosterEntries.id, entryId), eq(rosterEntries.rosterId, classroom.rosterId)))
+
+  if (!entry) return { success: false, error: 'No encontramos a ese alumno en el roster.' }
+  if (entry.userId !== null) return { success: false, error: alreadyLinkedMessage(entry.identifier) }
+
+  const unlinked = await unlinkedUserIdsOf(classroom.id, classroom.rosterId)
+
+  if (!unlinked.has(userId)) {
+    return {
+      success: false,
+      error: 'Esa cuenta de GitHub no participa de este classroom, o ya está vinculada.',
+    }
+  }
+
+  try {
+    const updated = await db
+      .update(rosterEntries)
+      .set({ userId, updatedAt: new Date() })
+      .where(and(eq(rosterEntries.id, entry.id), isNull(rosterEntries.userId)))
+      .returning({ id: rosterEntries.id })
+
+    if (updated.length === 0) {
+      return { success: false, error: alreadyLinkedMessage(entry.identifier) }
+    }
+
+    return { success: true }
+  } catch (error) {
+    // index_roster_entries_on_roster_id_and_user_id: that account already holds
+    // another identifier of this roster, claimed while this dialog was open
+    if (isUniqueViolation(error)) {
+      return { success: false, error: 'Esa cuenta ya está vinculada a otro alumno del roster.' }
+    }
+
+    throw error
+  }
+}
+
+/**
+ * Port of RostersController#unlink:
+ *
+ *   current_roster_entry.update_attributes!(user_id: nil)
+ *
+ * The original succeeds on an entry that was not linked to begin with — its
+ * spec has a `with an unlinked entry` case that expects the same flash — and so
+ * does this, for the same reason: the teacher asked for a state, and the state
+ * is what they get.
+ */
+export async function unlinkAccountFromEntry(
+  session: Session,
+  classroomSlug: string,
+  entryId: number,
+): Promise<RosterResult> {
+  const roster = await findRosterRow(session, classroomSlug)
+  if (!roster) return { success: false, error: 'Este classroom no tiene un roster.' }
+
+  const updated = await db
+    .update(rosterEntries)
+    .set({ userId: null, updatedAt: new Date() })
+    .where(and(eq(rosterEntries.id, entryId), eq(rosterEntries.rosterId, roster.id)))
+    .returning({ id: rosterEntries.id })
+
+  if (updated.length === 0) {
+    return { success: false, error: 'No encontramos a ese alumno en el roster.' }
+  }
+
+  return { success: true }
+}
+
+/**
+ * Port of RostersController#unlinked_user_ids: everyone who took part in the
+ * classroom and holds no identifier on its roster.
+ *
+ * Note that it is the whole classroom, not one assignment —
+ * `AssignmentsController#set_unlinked_users` is the per-assignment one, and it
+ * only decides which rows are *shown*. This is the one `#link` authorizes with,
+ * so a teacher looking at one assignment can still link a student who accepted
+ * a different one.
+ *
+ * Two divergences, both forced by what this port stores:
+ *
+ *  - Participation in an individual assignment is `invite_statuses`, not
+ *    `assignment_repos`. That is the split the whole dashboard rests on: a
+ *    student who accepted and whose repository does not exist yet is already
+ *    linkable, where the original had to wait for the repo row.
+ *  - The group half is `groups_users`, because `repo_accesses` does not exist
+ *    here (see AGENTS.md on group assignments).
+ */
+async function unlinkedUserIdsOf(classroomId: number, rosterId: number): Promise<Set<number>> {
+  const accepted = await db
+    .selectDistinct({ userId: inviteStatuses.userId })
+    .from(inviteStatuses)
+    .innerJoin(
+      assignmentInvitations,
+      eq(assignmentInvitations.id, inviteStatuses.assignmentInvitationId),
+    )
+    .innerJoin(
+      assignments,
+      and(eq(assignments.id, assignmentInvitations.assignmentId), isNull(assignments.deletedAt)),
+    )
+    .where(
+      and(
+        eq(assignments.organizationId, classroomId),
+        sql`${inviteStatuses.status} <> 'unaccepted'`,
+      ),
+    )
+
+  const onTeams = await db
+    .selectDistinct({ userId: groupsUsers.userId })
+    .from(groupsUsers)
+    .innerJoin(groups, eq(groups.id, groupsUsers.groupId))
+    .where(eq(groups.organizationId, classroomId))
+
+  const linked = await db
+    .select({ userId: rosterEntries.userId })
+    .from(rosterEntries)
+    .where(and(eq(rosterEntries.rosterId, rosterId), isNotNull(rosterEntries.userId)))
+
+  const onRoster = new Set(linked.map((row) => row.userId))
+
+  return new Set(
+    [...accepted, ...onTeams].map((row) => row.userId).filter((id) => !onRoster.has(id)),
+  )
+}
+
+function alreadyLinkedMessage(identifier: string): string {
+  return `"${identifier}" ya está vinculado a una cuenta de GitHub.`
 }
 
 /**

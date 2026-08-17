@@ -33,6 +33,11 @@ export type RepoRow = {
   unlinkedIdentifier: boolean
   /** Accepted without claiming an identifier — the live filter's "GitHub accounts" */
   unlinkedAccount: boolean
+  /**
+   * Which account "Link to student" would link. Set only on an unlinked-account
+   * row: it is the `user_id` the original's `_link_to_student_modal` posts.
+   */
+  userId?: number
 }
 
 /**

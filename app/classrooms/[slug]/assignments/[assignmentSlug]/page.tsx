@@ -7,6 +7,7 @@ import { StatTiles } from '@/components/StatTiles'
 import { findAssignment } from '@/lib/data/assignments'
 import { listAssignmentAcceptances } from '@/lib/data/invitations'
 import { findClassroom } from '@/lib/data/organizations'
+import { listUnlinkedEntries } from '@/lib/data/rosters'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
 import { baseUrl, invitationUrl } from '@/lib/url'
@@ -36,10 +37,14 @@ export default async function AssignmentPage(
 
   const { slug, assignmentSlug } = await props.params
 
-  const [classroom, assignment, acceptances] = await Promise.all([
+  const [classroom, assignment, acceptances, unlinkedEntries] = await Promise.all([
     findClassroom(session, slug),
     findAssignment(session, slug, assignmentSlug),
     listAssignmentAcceptances(session, slug, assignmentSlug),
+    // What the "Link to student" dialog offers. Fetched with the rest rather
+    // than when the dialog opens, the way the live site does it: the list is
+    // small, and the page is force-dynamic so it is as fresh as the rows.
+    listUnlinkedEntries(session, slug),
   ])
 
   if (!classroom || !assignment || !acceptances) notFound()
@@ -165,6 +170,9 @@ export default async function AssignmentPage(
           acceptances={acceptances}
           assignmentTitle={assignment.title}
           snapshots={snapshots}
+          classroomSlug={classroom.slug}
+          assignmentSlug={assignment.slug}
+          unlinkedEntries={unlinkedEntries}
         />
       </div>
     </>

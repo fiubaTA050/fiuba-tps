@@ -5,7 +5,7 @@ import { useActionState, useState } from 'react'
 
 import type { RosterEntryItem } from '@/lib/data/rosters'
 
-import { deleteEntryAction, renameEntryAction } from './actions'
+import { deleteEntryAction, renameEntryAction, unlinkAccountAction } from './actions'
 import { EMPTY_STATE } from './state'
 
 /**
@@ -15,10 +15,17 @@ import { EMPTY_STATE } from './state'
  *     <div class="d-flex">           avatar + identifier + @login
  *     <div class="d-flex flex-justify-end">   unlink · pencil · trash
  *
- * `Unlink GitHub account` is not among the actions: nothing links an entry
- * yet, see lib/data/rosters.ts. The rename happens inline instead of in a
- * modal, and the delete confirmation is a `confirm()` — which is what Rails'
- * `data-confirm` did before the original moved to remodal.
+ * `Unlink GitHub account` is here, on a linked entry, exactly as in
+ * `_roster_entry.html.erb:35`. Its counterpart on an unlinked one — the
+ * original's `Link to GitHub account`, which opens
+ * `_link_to_github_account_modal` — is not: the same vinculación is done from
+ * the assignment dashboard, from the account's side, which is where the teacher
+ * meets the problem. See components/LinkToStudentDialog.
+ *
+ * The rename happens inline instead of in a modal, and the delete confirmation
+ * is a `confirm()` — which is what Rails' `data-confirm` did before the
+ * original moved to remodal. Unlinking is not confirmed, as there: it is one
+ * click to undo from the dashboard.
  */
 export function RosterEntryRow({
   entry,
@@ -38,10 +45,11 @@ export function RosterEntryRow({
 
   const [renameState, renameAction, renaming] = useActionState(renameEntryAction, EMPTY_STATE)
   const [deleteState, deleteAction, deleting] = useActionState(deleteEntryAction, EMPTY_STATE)
+  const [unlinkState, unlinkAction, unlinking] = useActionState(unlinkAccountAction, EMPTY_STATE)
 
   // The rename message belongs to the open editor: cancelling out of it takes
   // the message with it, instead of leaving it under a row it no longer describes
-  const error = (editing ? renameState.error : null) ?? deleteState.error
+  const error = (editing ? renameState.error : null) ?? deleteState.error ?? unlinkState.error
 
   if (editing) {
     return (
@@ -110,6 +118,17 @@ export function RosterEntryRow({
         </div>
 
         <div className="d-flex flex-items-center">
+          {/* `submit_tag 'Unlink GitHub account'`, only on a linked entry */}
+          {entry.githubLogin && (
+            <form action={unlinkAction}>
+              <input type="hidden" name="classroom_slug" value={classroomSlug} />
+              <input type="hidden" name="entry_id" value={entry.id} />
+              <button type="submit" className="btn btn-sm mr-2" disabled={unlinking}>
+                Desvincular
+              </button>
+            </form>
+          )}
+
           <button
             type="button"
             className="btn-octicon"

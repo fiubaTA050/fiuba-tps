@@ -12,9 +12,11 @@ import {
   XCircleFillIcon,
   XIcon,
 } from '@primer/octicons-react'
-import { useMemo, useState } from 'react'
+import { type ComponentProps, useMemo, useState } from 'react'
 
 import { hasSubmitted, type RepoRow, type SubmissionTone } from '@/lib/assignment-rows'
+
+import { LinkToStudentDialog } from './LinkToStudentDialog'
 
 /**
  * The list of repositories on an assignment dashboard, with the filter bar the
@@ -72,7 +74,25 @@ const TONE_CLASS: Record<SubmissionTone, string> = {
   neutral: 'color-bg-subtle color-fg-muted',
 }
 
-export function AssignmentRepoList({ title, rows }: { title: string; rows: RepoRow[] }) {
+/**
+ * What an unlinked-account row needs to offer "Link to student". Absent on the
+ * group dashboard, which has no unlinked accounts of its own yet, and on a
+ * classroom with no roster, where there is nothing to link to.
+ */
+export type LinkToStudent = Omit<
+  ComponentProps<typeof LinkToStudentDialog>,
+  'userId' | 'login'
+>
+
+export function AssignmentRepoList({
+  title,
+  rows,
+  linkToStudent,
+}: {
+  title: string
+  rows: RepoRow[]
+  linkToStudent?: LinkToStudent
+}) {
   const [query, setQuery] = useState('')
   const [submission, setSubmission] = useState<Set<SubmissionFilter>>(new Set())
   const [accepted, setAccepted] = useState<Set<AcceptedFilter>>(new Set())
@@ -287,7 +307,7 @@ export function AssignmentRepoList({ title, rows }: { title: string; rows: RepoR
           ) : (
             <div className="assignment-repo-list pb-2">
               {filtered.map((row) => (
-                <RepoListItem key={row.key} row={row} />
+                <RepoListItem key={row.key} row={row} linkToStudent={linkToStudent} />
               ))}
             </div>
           )}
@@ -424,7 +444,13 @@ function CheckboxMenu<T extends string>({
   )
 }
 
-function RepoListItem({ row }: { row: RepoRow }) {
+function RepoListItem({
+  row,
+  linkToStudent,
+}: {
+  row: RepoRow
+  linkToStudent?: LinkToStudent
+}) {
   const { snapshot } = row
 
   return (
@@ -464,6 +490,16 @@ function RepoListItem({ row }: { row: RepoRow }) {
                     'Sin vincular'
                   )}
                 </p>
+              )}
+
+              {/* Where the handle would go, because on these rows the handle is
+                  already the title: `_unlinked_user.html.erb:17` */}
+              {row.unlinkedAccount && linkToStudent && row.userId !== undefined && (
+                <LinkToStudentDialog
+                  {...linkToStudent}
+                  userId={row.userId}
+                  login={row.githubLogin}
+                />
               )}
 
               {row.visual === 'none' && row.members?.length === 0 && (

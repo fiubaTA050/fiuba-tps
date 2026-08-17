@@ -3,6 +3,8 @@ import { submissionLabel, type RepoRow } from '@/lib/assignment-rows'
 import type { AssignmentAcceptances } from '@/lib/data/invitations'
 import type { RepositorySnapshot } from '@/lib/github/repositories'
 
+import { linkAccountAction } from './actions'
+
 /**
  * Who accepted the assignment, where their repository is and how far along it
  * is. Port of the roster list of `assignments/show.html.erb` and the three
@@ -22,10 +24,17 @@ export function AcceptanceList({
   acceptances,
   assignmentTitle,
   snapshots,
+  classroomSlug,
+  assignmentSlug,
+  unlinkedEntries,
 }: {
   acceptances: AssignmentAcceptances
   assignmentTitle: string
   snapshots: Map<number, RepositorySnapshot>
+  classroomSlug: string
+  assignmentSlug: string
+  /** The identifiers "Link to student" offers — empty when there is no roster */
+  unlinkedEntries: { id: number; identifier: string }[]
 }) {
   const { identifierName, entries, unlinkedAccounts, acceptedCount } = acceptances
 
@@ -81,13 +90,30 @@ export function AcceptanceList({
         accepted: true,
         unlinkedIdentifier: false,
         unlinkedAccount: true,
+        userId: account.userId,
       }
     }),
   ]
 
   return (
     <>
-      <AssignmentRepoList title={identifierName ?? 'Aceptaron el assignment'} rows={rows} />
+      <AssignmentRepoList
+        title={identifierName ?? 'Aceptaron el assignment'}
+        rows={rows}
+        // No roster, nothing to link to — `set_unlinked_users` returns early on
+        // the same condition
+        linkToStudent={
+          identifierName === null
+            ? undefined
+            : {
+                classroomSlug,
+                assignmentSlug,
+                identifierName,
+                entries: unlinkedEntries,
+                action: linkAccountAction,
+              }
+        }
+      />
 
       {identifierName !== null && unlinkedAccounts.length > 0 && (
         <p className="color-fg-muted f6 mt-2">
