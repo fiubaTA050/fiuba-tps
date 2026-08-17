@@ -57,7 +57,7 @@ export function InvitationLink({
         <button
           type="button"
           onClick={copy}
-          className="btn btn-sm"
+          className="btn btn-sm clipboard-input--button"
           aria-label={copied ? 'Copiado' : 'Copiar al portapapeles'}
         >
           {copied ? <CheckIcon className="color-fg-success" /> : <CopyIcon />}

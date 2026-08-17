@@ -57,6 +57,13 @@
       "when": 1786928806671,
       "tag": "0007_rare_white_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786929559889,
+      "tag": "0008_backfill_invitation_short_keys",
+      "breakpoints": true
     }
   ]
 }

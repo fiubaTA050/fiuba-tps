@@ -859,6 +859,19 @@
 }
 
 /*
+ * The copy button of the invitation field, named after the live site's own
+ * class. There it is a `Button--small`, which pads to
+ * --control-small-paddingInline-condensed; `.btn-sm` pads to the 12px a button
+ * with a label needs, which left ours 8px wider than the reference around a
+ * lone octicon. Everything else — the 28px height, the squared left corner —
+ * already comes from `.btn-sm` and `.input-group`.
+ */
+.clipboard-input--button {
+  min-width: var(--control-small-size);
+  padding-inline: var(--control-small-paddingInline-condensed);
+}
+
+/*
  * The panel a filter menu drops: `Overlay` + `ActionList`, the two
  * @primer/view-components the live filter bar is built out of. Same source and
  * same reasoning as the blocks above — copied from a saved copy of the page,
