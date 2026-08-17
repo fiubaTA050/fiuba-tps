@@ -500,21 +500,6 @@
   text-align: left;
 }
 
-/*
- * The filter menus put a muted description under each option, and on the blue
- * hover that colour is unreadable. Primer solves the same problem the same way
- * for its links — `.Link--muted:hover [class*=color-fg] { color: inherit }`.
- *
- * `white-space` because those options wrap onto two lines, which the v10 rule
- * above forbids: it was written for one-line menu items.
- */
-.dropdown-item:hover [class*='color-fg'] {
-  color: inherit !important;
-}
-
-.dropdown-item.d-block {
-  white-space: normal;
-}
 
 .dropdown-divider {
   height: 1px;
@@ -824,6 +809,12 @@
   pointer-events: none;
 }
 
+/* Without this the octicon keeps `vertical-align: text-bottom` and sits a
+   couple of pixels below the middle of the field */
+.FormControl-input-wrap .FormControl-input-leadingVisualWrap .FormControl-input-leadingVisual {
+  display: block;
+}
+
 .FormControl-input-wrap .FormControl-input-trailingAction {
   position: absolute;
   top: var(--base-size-4);
@@ -863,26 +854,182 @@
   border-bottom-left-radius: 0;
 }
 
-/* The submissions bar of the stat tiles. Not the `.progress-bar` above: that
-   one is the original's own, on the student's setup screen. */
+/*
+ * The panel a filter menu drops: `Overlay` + `ActionList`, the two
+ * @primer/view-components the live filter bar is built out of. Same source and
+ * same reasoning as the blocks above — copied from a saved copy of the page,
+ * trimmed to the variants this port actually renders (no trailing visuals, no
+ * sub-groups, no danger items, no inline descriptions).
+ *
+ * It replaces `.dropdown-menu` on these three menus. That one is the
+ * original's own primer-dropdown, a 160px panel with a caret; the live site
+ * has neither, and the difference is very visible next to the reference.
+ *
+ * Three tokens v22 does not define, resolved to the values the live CSS gives
+ * them: --borderRadius-large 0.75rem, --control-medium-lineBoxHeight 1.25rem,
+ * and --actionListContent-paddingBlock, which is --control-medium-paddingBlock.
+ */
 
-.Progress {
+/*
+ * Where the live site anchors its `popover`: under the button, left-aligned.
+ *
+ * `max-content` because the live `.Overlay` sizes itself with
+ * `width: min(var(--overlay-width), 100vw - 2rem)` and `Overlay--size-auto`
+ * leaves `--overlay-width` unset, so the panel ends up as wide as its longest
+ * line. Without this the grid inside happily shrinks to `min-width` and breaks
+ * every description across two lines.
+ */
+.ActionMenu-anchor {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  width: max-content;
+  max-width: min(24rem, calc(100vw - 2rem));
+  padding-top: var(--base-size-4);
+}
+
+.ActionMenu-anchor--right {
+  right: 0;
+  left: auto;
+}
+
+.Overlay {
   display: flex;
-  height: 8px;
-  overflow: hidden;
-  background-color: var(--bgColor-neutral-muted);
-  border-radius: 6px;
-  outline: 1px solid transparent;
+  flex-direction: column;
+  min-width: 192px;
+  padding: 0;
+  color: var(--fgColor-default);
+  white-space: normal;
+  background-color: var(--overlay-bgColor);
+  border: 0;
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-floating-small);
 }
 
-.Progress--small {
-  height: 5px;
+.Overlay--size-auto {
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
 }
 
-.Progress-item {
-  outline: 2px solid transparent;
+.Overlay-body {
+  flex-grow: 1;
+  overflow-y: auto;
+  font-size: var(--text-body-size-medium);
 }
 
-.Progress-item + .Progress-item {
-  margin-left: 2px;
+.Overlay-body--paddingNone {
+  padding: 0;
 }
+
+.ActionListWrap {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.ActionListWrap--inset {
+  padding: var(--base-size-8);
+}
+
+.ActionListItem {
+  position: relative;
+  list-style: none;
+  background-color: var(--control-transparent-bgColor-rest);
+  border-radius: var(--borderRadius-medium);
+}
+
+.ActionListItem:hover {
+  cursor: pointer;
+  background-color: var(--control-transparent-bgColor-hover);
+}
+
+.ActionListContent {
+  position: relative;
+  display: grid;
+  grid-template-areas: 'leadingAction leadingVisual label';
+  grid-template-columns: min-content min-content minmax(0, auto);
+  align-items: start;
+  width: 100%;
+  padding-block: var(--control-medium-paddingBlock, 6px);
+  padding-inline: var(--control-medium-paddingInline-condensed);
+  color: var(--control-fgColor-rest);
+  text-align: left;
+  background-color: initial;
+  border: none;
+  border-radius: var(--borderRadius-medium);
+}
+
+.ActionListContent > :not(:last-child) {
+  margin-right: var(--control-medium-gap);
+}
+
+.ActionListContent:hover {
+  text-decoration: none;
+}
+
+.ActionListItem-visual {
+  display: flex;
+  align-items: center;
+  min-height: 1.25rem;
+  color: var(--fgColor-muted);
+  pointer-events: none;
+  fill: var(--fgColor-muted);
+}
+
+.ActionListItem-action--leading {
+  grid-area: leadingAction;
+}
+
+.ActionListItem-visual--leading {
+  grid-area: leadingVisual;
+}
+
+/* With a description under the label the visuals align to the first line
+   instead of the middle of the whole item */
+.ActionListContent--blockDescription .ActionListItem-visual {
+  place-self: start;
+}
+
+.ActionListItem-descriptionWrap {
+  display: flex;
+  flex-direction: column;
+  grid-area: label;
+  gap: var(--base-size-4);
+}
+
+.ActionListItem-label {
+  position: relative;
+  grid-area: label;
+  font-size: var(--text-body-size-medium);
+  line-height: var(--text-body-lineHeight-medium);
+  color: var(--fgColor-default);
+}
+
+.ActionListItem-description {
+  font-size: var(--text-body-size-small);
+  line-height: var(--text-body-lineHeight-small);
+  color: var(--fgColor-muted);
+}
+
+/* The checkmark holds its column whether or not the item is selected, so the
+   labels do not shift as boxes are ticked */
+.ActionListContent[aria-checked='true'] .ActionListItem-singleSelectCheckmark {
+  visibility: visible;
+}
+
+.ActionListContent[aria-checked='false'] .ActionListItem-singleSelectCheckmark {
+  visibility: hidden;
+}
+
+.ActionList-sectionDivider:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  padding-block: var(--base-size-8);
+  padding-inline: var(--control-medium-paddingBlock, 6px);
+  font-size: var(--text-body-size-small);
+  font-weight: var(--base-text-weight-semibold);
+  line-height: var(--text-body-lineHeight-small);
+  color: var(--fgColor-muted);
+}
+

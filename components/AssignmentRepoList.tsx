@@ -2,6 +2,7 @@
 
 import {
   CheckIcon,
+  DotFillIcon,
   GitCommitIcon,
   MarkGithubIcon,
   PersonIcon,
@@ -52,6 +53,15 @@ const SORT_LABEL: Record<Sort, string> = {
   newest: 'Más reciente',
   oldest: 'Más antiguo',
 }
+
+/**
+ * The dots the live submission menu puts beside each option, with its own
+ * inline colours: the subtle green of "Submitted" and the subtle red of "Not
+ * submitted". They are hardcoded there too, and they are the same two shades
+ * the `IssueLabel` of a row lands on.
+ */
+const DOT_SUBMITTED = '#DAFBE1'
+const DOT_NOT_SUBMITTED = '#FFEBE9'
 
 const TONE_CLASS: Record<SubmissionTone, string> = {
   success: 'color-bg-success',
@@ -132,11 +142,17 @@ export function AssignmentRepoList({ title, rows }: { title: string; rows: RepoR
             heading="Filtrar por entrega:"
             grouped
             options={[
-              { value: 'submitted', label: 'Entregado', description: 'Tienen commits propios' },
+              {
+                value: 'submitted',
+                label: 'Entregado',
+                description: 'Subieron algún commit propio',
+                dot: DOT_SUBMITTED,
+              },
               {
                 value: 'not_submitted',
                 label: 'Sin entregar',
                 description: 'Todavía no subieron nada',
+                dot: DOT_NOT_SUBMITTED,
               },
             ]}
             selected={submission}
@@ -158,35 +174,29 @@ export function AssignmentRepoList({ title, rows }: { title: string; rows: RepoR
                 onChange={(event) => setQuery(event.target.value)}
               />
 
-              {query !== '' && (
-                <button
-                  type="button"
-                  className="FormControl-input-trailingAction"
-                  aria-label="Limpiar la búsqueda"
-                  onClick={() => setQuery('')}
-                >
-                  <XCircleFillIcon />
-                </button>
-              )}
+              {/* Always rendered, as on the live site, which shows it on an
+                  empty field too */}
+              <button
+                type="button"
+                className="FormControl-input-trailingAction"
+                aria-label="Limpiar la búsqueda"
+                onClick={() => setQuery('')}
+              >
+                <XCircleFillIcon />
+              </button>
             </div>
           </div>
         </div>
 
         <div className="d-flex flex-wrap mb-2 mb-lg-0">
+          {/* No dots and no descriptions: on the live site only the submission
+              menu carries them */}
           <CheckboxMenu
             label="Filtrar por cuentas sin vincular"
             heading="Filtrar por vínculo:"
             options={[
-              {
-                value: 'identifiers',
-                label: 'Identificadores',
-                description: 'Nadie reclamó ese identificador',
-              },
-              {
-                value: 'accounts',
-                label: 'Cuentas de GitHub',
-                description: 'Aceptaron sin elegir su identificador',
-              },
+              { value: 'identifiers', label: 'Identificadores' },
+              { value: 'accounts', label: 'Cuentas de GitHub' },
             ]}
             selected={unlinked}
             onToggle={(value) => setUnlinked(toggle(unlinked, value))}
@@ -196,12 +206,8 @@ export function AssignmentRepoList({ title, rows }: { title: string; rows: RepoR
             label="Filtrar por aceptación"
             heading="Filtrar por aceptación:"
             options={[
-              { value: 'accepted', label: 'Aceptaron', description: 'Aceptaron el assignment' },
-              {
-                value: 'unaccepted',
-                label: 'No aceptaron',
-                description: 'Todavía no lo aceptaron',
-              },
+              { value: 'accepted', label: 'Aceptaron' },
+              { value: 'unaccepted', label: 'No aceptaron' },
             ]}
             selected={accepted}
             onToggle={(value) => setAccepted(toggle(accepted, value))}
@@ -213,26 +219,36 @@ export function AssignmentRepoList({ title, rows }: { title: string; rows: RepoR
               <TriangleDownIcon className="ml-1" />
             </summary>
 
-            <div role="menu" className="dropdown-menu dropdown-menu-sw mt-1" style={{ width: 200 }}>
-              {(Object.keys(SORT_LABEL) as Sort[]).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={sort === option}
-                  className="dropdown-item btn-link"
-                  onClick={(event) => {
-                    setSort(option)
-                    event.currentTarget.closest('details')?.removeAttribute('open')
-                  }}
-                >
-                  <CheckIcon
-                    className={`mr-2 ${sort === option ? '' : 'v-hidden'}`}
-                    aria-hidden="true"
-                  />
-                  {SORT_LABEL[option]}
-                </button>
-              ))}
+            <div className="ActionMenu-anchor ActionMenu-anchor--right">
+              <div className="Overlay Overlay--size-auto">
+                <div className="Overlay-body Overlay-body--paddingNone">
+                  <ul role="menu" className="ActionListWrap ActionListWrap--inset">
+                    <li className="ActionList-sectionDivider" role="presentation">
+                      <div className="ActionList-sectionDivider-title">Ordenar por:</div>
+                    </li>
+
+                    {(Object.keys(SORT_LABEL) as Sort[]).map((option) => (
+                      <li key={option} role="none" className="ActionListItem">
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={sort === option}
+                          className="ActionListContent ActionListContent--visual16"
+                          onClick={(event) => {
+                            setSort(option)
+                            event.currentTarget.closest('details')?.removeAttribute('open')
+                          }}
+                        >
+                          <span className="ActionListItem-visual ActionListItem-action--leading">
+                            <CheckIcon className="ActionListItem-singleSelectCheckmark" />
+                          </span>
+                          <span className="ActionListItem-label">{SORT_LABEL[option]}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
             </div>
           </details>
         </div>
@@ -308,10 +324,17 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
 }
 
 /**
- * One of the live site's `action-menu`s with `menuitemcheckbox` items. Built on
- * the `<details>` dropdown the port already ships, because the live markup is
- * a `@primer/view-components` web component the port deliberately does not
- * depend on (see the CSS note in app/globals.css).
+ * One of the live site's `action-menu`s: an `Overlay` holding an `ActionList`
+ * of `menuitemcheckbox` items, each a checkmark column that only shows when
+ * the item is on, an optional coloured dot, the label, and an optional
+ * description under it.
+ *
+ * The markup is the live site's, the behaviour is a plain `<details>`: its
+ * `action-menu` is a `@primer/view-components` web component, and the port
+ * depends on none of that package (see the CSS note in app/globals.css).
+ *
+ * Only the submission menu carries dots and descriptions on the live site; the
+ * others are label-and-checkmark, and so are ours.
  */
 function CheckboxMenu<T extends string>({
   label,
@@ -320,14 +343,16 @@ function CheckboxMenu<T extends string>({
   selected,
   onToggle,
   grouped = false,
+  alignRight = false,
 }: {
   label: string
   heading: string
-  options: { value: T; label: string; description: string }[]
+  options: { value: T; label: string; description?: string; dot?: string }[]
   selected: Set<T>
   onToggle: (value: T) => void
   /** Sits inside the BtnGroup, joined to the search field on its right */
   grouped?: boolean
+  alignRight?: boolean
 }) {
   return (
     <details
@@ -345,23 +370,55 @@ function CheckboxMenu<T extends string>({
         <TriangleDownIcon className="ml-1" />
       </summary>
 
-      <div role="menu" className="dropdown-menu mt-1" style={{ width: 260 }}>
-        <div className="dropdown-header px-3 py-1 color-fg-muted text-small">{heading}</div>
+      <div className={`ActionMenu-anchor ${alignRight ? 'ActionMenu-anchor--right' : ''}`}>
+        <div className="Overlay Overlay--size-auto">
+          <div className="Overlay-body Overlay-body--paddingNone">
+            <ul role="menu" className="ActionListWrap ActionListWrap--inset">
+              <li className="ActionList-sectionDivider" role="presentation">
+                <div className="ActionList-sectionDivider-title">{heading}</div>
+              </li>
 
-        {options.map((option) => (
-          <label key={option.value} className="dropdown-item d-block">
-            <input
-              type="checkbox"
-              className="mr-2"
-              checked={selected.has(option.value)}
-              onChange={() => onToggle(option.value)}
-            />
-            {option.label}
-            <span className="d-block color-fg-muted text-small" style={{ marginLeft: '1.4rem' }}>
-              {option.description}
-            </span>
-          </label>
-        ))}
+              {options.map((option) => (
+                <li key={option.value} role="none" className="ActionListItem">
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={selected.has(option.value)}
+                    onClick={() => onToggle(option.value)}
+                    className={`ActionListContent ActionListContent--visual16 ${
+                      option.description ? 'ActionListContent--blockDescription' : ''
+                    }`}
+                  >
+                    <span className="ActionListItem-visual ActionListItem-action--leading">
+                      <CheckIcon className="ActionListItem-singleSelectCheckmark" />
+                    </span>
+
+                    {option.dot && (
+                      <span className="ActionListItem-visual ActionListItem-visual--leading">
+                        {/* The colour goes on a wrapper, not the octicon:
+                            `.ActionListItem-visual` sets `fill` to the muted
+                            foreground, which an svg inherits over its own
+                            currentColor */}
+                        <span style={{ color: option.dot, fill: option.dot }}>
+                          <DotFillIcon size={24} />
+                        </span>
+                      </span>
+                    )}
+
+                    {option.description ? (
+                      <span className="ActionListItem-descriptionWrap">
+                        <span className="ActionListItem-label">{option.label}</span>
+                        <span className="ActionListItem-description">{option.description}</span>
+                      </span>
+                    ) : (
+                      <span className="ActionListItem-label">{option.label}</span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </div>
     </details>
   )
