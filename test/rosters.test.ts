@@ -46,6 +46,7 @@ const {
   deleteRoster,
   findRoster,
   linkAccountToEntry,
+  listUnlinkedAccounts,
   listUnlinkedEntries,
   parseIdentifiers,
   renameEntry,
@@ -860,5 +861,89 @@ describe('listUnlinkedEntries', () => {
     const classroom = await classroomOrg(session)
 
     expect(await listUnlinkedEntries(session, classroom.slug)).toEqual([])
+  })
+})
+
+/**
+ * Port of the `#show` half of `spec/controllers/orgs/rosters_controller_spec.rb`
+ * that fills `@current_unlinked_users`, the "Unlinked GitHub accounts" tab.
+ */
+describe('listUnlinkedAccounts', () => {
+  it('lists the accounts of the classroom that hold no identifier', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '101\n102')
+    const linked = await acceptedStudent(session, classroom.id, 'vinculada')
+    await acceptedStudent(session, classroom.id, 'suelta')
+
+    await linkAccountToEntry(
+      session,
+      classroom.slug,
+      await entryId(session, classroom.slug, '101'),
+      linked,
+    )
+
+    expect((await listUnlinkedAccounts(session, classroom.slug)).map((a) => a.githubLogin)).toEqual(
+      ['suelta'],
+    )
+  })
+
+  // The group half, which the original read off repo_accesses
+  it('lists an account that is only on a team', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomWithRoster(session, '101')
+
+    const [student] = await db
+      .insert(users)
+      .values({ uid: nextUid++, githubLogin: 'agrupada' })
+      .returning({ id: users.id })
+
+    const [grouping] = await db
+      .insert(groupings)
+      .values({ organizationId: classroom.id, title: 'Equipos', slug: 'equipos' })
+      .returning({ id: groupings.id })
+
+    const [group] = await db
+      .insert(groups)
+      .values({
+        groupingId: grouping.id,
+        organizationId: classroom.id,
+        title: 'Equipo 1',
+        slug: 'equipo-1',
+      })
+      .returning({ id: groups.id })
+
+    await db
+      .insert(groupsUsers)
+      .values({ groupId: group.id, groupingId: grouping.id, userId: student.id })
+
+    expect((await listUnlinkedAccounts(session, classroom.slug)).map((a) => a.id)).toEqual([
+      student.id,
+    ])
+  })
+
+  it('leaves out an account of another classroom', async () => {
+    const session = await classroomTeacher()
+    const mine = await classroomWithRoster(session, '101')
+    const other = await classroomWithRoster(session, '201')
+    await acceptedStudent(session, other.id, 'ajena')
+
+    expect(await listUnlinkedAccounts(session, mine.slug)).toEqual([])
+  })
+
+  // DA-4: the boundary is organizations_users, as everywhere else here
+  it('is empty for a classroom that is not the teacher’s', async () => {
+    const owner = await classroomTeacher('owner')
+    const stranger = await classroomTeacher('stranger')
+    const classroom = await classroomWithRoster(owner, '101')
+    await acceptedStudent(owner, classroom.id, 'suelta')
+
+    expect(await listUnlinkedAccounts(stranger, classroom.slug)).toEqual([])
+  })
+
+  it('is empty for a classroom with no roster', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    expect(await listUnlinkedAccounts(session, classroom.slug)).toEqual([])
   })
 })

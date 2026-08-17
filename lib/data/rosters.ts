@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
@@ -362,12 +362,47 @@ export async function listUnlinkedEntries(
   return unlinkedEntriesOf(roster.id)
 }
 
+/** One GitHub account of the classroom that holds no identifier on the roster */
+export type UnlinkedAccount = {
+  /** `users.id`, which is what #link is authorized against */
+  id: number
+  /** null if GitHub lost the account — the NullGitHubUser case */
+  githubLogin: string | null
+}
+
+/**
+ * Port of `RostersController#show`'s `@current_unlinked_users`, which fills the
+ * "Unlinked GitHub accounts" tab of the roster page.
+ *
+ * `.order(:id)` is the original's, and it is worth keeping over sorting by
+ * login: it puts the accounts in the order they first reached the classroom, so
+ * the one that just accepted is at the bottom where the teacher left off. The
+ * original paginated; this does not, for the same reason `findRoster` does not.
+ */
+export async function listUnlinkedAccounts(
+  session: Session,
+  classroomSlug: string,
+): Promise<UnlinkedAccount[]> {
+  const classroom = await findClassroomRow(session, classroomSlug)
+  if (!classroom?.rosterId) return []
+
+  const ids = await unlinkedUserIdsOf(classroom.id, classroom.rosterId)
+  if (ids.size === 0) return []
+
+  return db
+    .select({ id: users.id, githubLogin: users.githubLogin })
+    .from(users)
+    .where(inArray(users.id, [...ids]))
+    .orderBy(asc(users.id))
+}
+
 /**
  * Port of RostersController#link, which the original reaches from two places
  * that write the same column from opposite sides: `_link_to_student_modal`
  * (a GitHub account, pick an identifier) and `_link_to_github_account_modal`
- * (an identifier, pick an account). Only the first is ported, on the
- * assignment dashboard — see the note in AcceptanceList.
+ * (an identifier, pick an account). Only the first is ported, from the two
+ * screens that list the accounts: the roster's "Cuentas de GitHub sin vincular"
+ * tab and the assignment dashboard — see the note in AcceptanceList.
  *
  * The original's guard is `raise unless unlinked_user_ids.include?(user_id)`,
  * and it is the whole authorization on the account side: without it a teacher

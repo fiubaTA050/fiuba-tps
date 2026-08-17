@@ -11,16 +11,19 @@ import { useActionState, useRef } from 'react'
  * holds, each one a form that posts to RostersController#link with this
  * account's user id.
  *
- * Two divergences from the original's partial:
+ * It is raised from the two screens that list those accounts: the roster's
+ * "Cuentas de GitHub sin vincular" tab, where the original put it, and the
+ * assignment dashboard, where this port also folds them into the list behind
+ * the "Sin vincular · Cuentas de GitHub" filter — the live
+ * classroom.github.com does the same. Hence `assignmentSlug`, which only the
+ * second one has, and `triggerClassName`: on the roster tab the trigger is the
+ * live site's `Button--secondary`, on the dashboard a link inside a meta line.
  *
- *  - It lives on the assignment dashboard rather than on the roster's "Unlinked
- *    GitHub accounts" tab, because that tab is not ported: this port folds those
- *    accounts into the dashboard list itself, behind the "Sin vincular ·
- *    Cuentas de GitHub" filter. The live classroom.github.com does the same.
- *  - The list is rendered with the entries, not fetched when the dialog opens.
- *    The live site populates its `<ul>` by JS on open; here the page is already
- *    server-rendered and `force-dynamic`, so the list is as fresh as the row
- *    the button sits on and costs no second endpoint to guard.
+ * One divergence from the original's partial: the list is rendered with the
+ * entries, not fetched when the dialog opens. The live site populates its `<ul>`
+ * by JS on open; here the page is already server-rendered and `force-dynamic`,
+ * so the list is as fresh as the row the button sits on and costs no second
+ * endpoint to guard.
  *
  * The frame is the native `<dialog>` of AddStudentsDialog, for the reasons
  * recorded there.
@@ -33,12 +36,14 @@ export function LinkToStudentDialog({
   identifierName,
   entries,
   action,
+  triggerClassName = 'btn-link Link Link--muted text-small mr-3',
 }: {
   userId: number
   /** The account being linked, for the labels — null if GitHub lost the login */
   login: string | null
   classroomSlug: string
-  assignmentSlug: string
+  /** Absent on the roster page, whose action revalidates the roster alone */
+  assignmentSlug?: string
   /** The roster's column name, "Padrón" by default */
   identifierName: string
   entries: { id: number; identifier: string }[]
@@ -46,6 +51,7 @@ export function LinkToStudentDialog({
     state: { error: string | null; notice: string | null },
     formData: FormData,
   ) => Promise<{ error: string | null; notice: string | null }>
+  triggerClassName?: string
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [state, formAction, pending] = useActionState(action, { error: null, notice: null })
@@ -55,11 +61,9 @@ export function LinkToStudentDialog({
 
   return (
     <>
-      {/* The live site's `Button--link Button--medium`, which is a button that
-          reads as a link inside the row's meta line */}
       <button
         type="button"
-        className="btn-link Link Link--muted text-small mr-3"
+        className={triggerClassName}
         onClick={() => dialog.current?.showModal()}
       >
         Vincular con un alumno
@@ -101,7 +105,9 @@ export function LinkToStudentDialog({
                     <li key={entry.id} className="ActionListItem">
                       <form action={formAction}>
                         <input type="hidden" name="classroom_slug" value={classroomSlug} />
-                        <input type="hidden" name="assignment_slug" value={assignmentSlug} />
+                        {assignmentSlug && (
+                          <input type="hidden" name="assignment_slug" value={assignmentSlug} />
+                        )}
                         <input type="hidden" name="user_id" value={userId} />
                         <input type="hidden" name="entry_id" value={entry.id} />
                         <button

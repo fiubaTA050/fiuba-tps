@@ -4,26 +4,26 @@ import { notFound, redirect } from 'next/navigation'
 import { auth } from '@/auth'
 import { ClassroomShell } from '@/components/ClassroomShell'
 import { findClassroom } from '@/lib/data/organizations'
-import { findRoster } from '@/lib/data/rosters'
+import { findRoster, listUnlinkedAccounts, listUnlinkedEntries } from '@/lib/data/rosters'
 import { isUsableSession } from '@/lib/session'
 
 import { AddStudentsDialog } from './AddStudentsDialog'
 import { DeleteRosterForm } from './DeleteRosterForm'
 import { RosterEntryRow } from './RosterEntryRow'
+import { RosterTabs } from './RosterTabs'
+import { UnlinkedAccountRow } from './UnlinkedAccountRow'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * Port of rosters#show, laid out like the live classroom.github.com: one Box
- * titled "Classroom Roster" with the two actions in its header, the students
+ * titled "Classroom Roster" with the two actions in its header, the two tabs —
+ * the students and the GitHub accounts nobody claimed an identifier with —
  * under a tabnav, and the danger zone in its own bordered Box.
  *
- * Two things of the live page are missing. The pagination, because a cátedra
- * roster is a few hundred rows and paginating costs the teacher their
- * browser's find-in-page. And the "Unlinked GitHub accounts" tab: those
- * students exist now — they skipped `join_roster` — but they are unlinked
- * *per assignment*, so the assignment page is where the teacher sees them,
- * next to who accepted. See AcceptanceList.
+ * One thing of the live page is missing: the pagination, because a cátedra
+ * roster is a few hundred rows and paginating costs the teacher their browser's
+ * find-in-page.
  */
 export default async function RosterPage(props: PageProps<'/classrooms/[slug]/roster'>) {
   const session = await auth()
@@ -31,9 +31,11 @@ export default async function RosterPage(props: PageProps<'/classrooms/[slug]/ro
 
   const { slug } = await props.params
 
-  const [classroom, roster] = await Promise.all([
+  const [classroom, roster, accounts, unlinkedEntries] = await Promise.all([
     findClassroom(session, slug),
     findRoster(session, slug),
+    listUnlinkedAccounts(session, slug),
+    listUnlinkedEntries(session, slug),
   ])
 
   if (!classroom) notFound()
@@ -75,27 +77,30 @@ export default async function RosterPage(props: PageProps<'/classrooms/[slug]/ro
           </div>
 
           <div className="Box-body">
-            <div className="tabnav">
-              <ul className="tabnav-tabs list-style-none">
-                {/* One tab, and not a real tablist: the second one arrives with
-                    the linking flow. It carries the count, which is where the
-                    live page puts it */}
-                <li className="d-inline-flex">
-                  <span className="tabnav-tab selected">
-                    Todos los alumnos
-                    <span title={String(roster.entries.length)} className="Counter ml-2">
-                      {roster.entries.length}
-                    </span>
-                  </span>
-                </li>
-              </ul>
-            </div>
-
-            <div className="px-2">
-              {roster.entries.map((entry) => (
+            <RosterTabs
+              studentsCount={roster.entries.length}
+              students={roster.entries.map((entry) => (
                 <RosterEntryRow key={entry.id} entry={entry} classroomSlug={classroom.slug} />
               ))}
-            </div>
+              accountsCount={accounts.length}
+              accounts={
+                accounts.length === 0 ? (
+                  <p className="color-fg-muted py-2 mb-0">
+                    Todas las cuentas que participan del classroom están vinculadas.
+                  </p>
+                ) : (
+                  accounts.map((account) => (
+                    <UnlinkedAccountRow
+                      key={account.id}
+                      account={account}
+                      classroomSlug={classroom.slug}
+                      identifierName={roster.identifierName}
+                      entries={unlinkedEntries}
+                    />
+                  ))
+                )
+              }
+            />
           </div>
         </div>
 

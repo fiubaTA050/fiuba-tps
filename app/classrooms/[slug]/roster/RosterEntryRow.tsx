@@ -16,11 +16,11 @@ import { EMPTY_STATE } from './state'
  *     <div class="d-flex flex-justify-end">   unlink · pencil · trash
  *
  * `Unlink GitHub account` is here, on a linked entry, exactly as in
- * `_roster_entry.html.erb:35`. Its counterpart on an unlinked one — the
- * original's `Link to GitHub account`, which opens
+ * `_roster_entry.html.erb:35`, and red as on the live site. Its counterpart on
+ * an unlinked one — the original's `Link to GitHub account`, which opens
  * `_link_to_github_account_modal` — is not: the same vinculación is done from
- * the assignment dashboard, from the account's side, which is where the teacher
- * meets the problem. See components/LinkToStudentDialog.
+ * the account's side, on the "Cuentas de GitHub sin vincular" tab and on the
+ * assignment dashboard. See components/LinkToStudentDialog.
  *
  * The rename happens inline instead of in a modal, and the delete confirmation
  * is a `confirm()` — which is what Rails' `data-confirm` did before the
@@ -123,7 +123,7 @@ export function RosterEntryRow({
             <form action={unlinkAction}>
               <input type="hidden" name="classroom_slug" value={classroomSlug} />
               <input type="hidden" name="entry_id" value={entry.id} />
-              <button type="submit" className="btn btn-sm mr-2" disabled={unlinking}>
+              <button type="submit" className="btn btn-danger" disabled={unlinking}>
                 Desvincular
               </button>
             </form>
@@ -131,7 +131,7 @@ export function RosterEntryRow({
 
           <button
             type="button"
-            className="btn-octicon"
+            className="btn-octicon ml-2"
             aria-label={`Editar ${entry.identifier}`}
             onClick={() => setEditingIdentifier(entry.identifier)}
           >
@@ -143,7 +143,9 @@ export function RosterEntryRow({
             <input type="hidden" name="entry_id" value={entry.id} />
             <button
               type="submit"
-              className="btn-octicon btn-octicon-danger"
+              // `.btn-octicon-danger` only turns red on hover; the live site's
+              // trash is red at rest, which is the one warning this row carries
+              className="btn-octicon btn-octicon-danger color-fg-danger ml-2"
               aria-label={`Borrar ${entry.identifier}`}
               disabled={deleting}
               onClick={(event) => {

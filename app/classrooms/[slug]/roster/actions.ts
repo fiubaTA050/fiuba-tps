@@ -11,6 +11,7 @@ import {
   createRoster,
   deleteEntry,
   deleteRoster,
+  linkAccountToEntry,
   renameEntry,
   unlinkAccountFromEntry,
 } from '@/lib/data/rosters'
@@ -91,11 +92,38 @@ export async function addStudentsAction(
 }
 
 /**
- * Port of RostersController#unlink.
- *
- * The other half, `#link`, is raised from the assignment dashboard and lives
- * next to it — see that route's actions.ts.
+ * Port of RostersController#link, raised from the "Cuentas de GitHub sin
+ * vincular" tab. The assignment dashboard raises the same controller action
+ * and has its own copy, because its revalidation needs the assignment slug
+ * this route knows nothing about.
  */
+export async function linkAccountAction(
+  _previous: RosterActionState,
+  formData: FormData,
+): Promise<RosterActionState> {
+  const session = await auth()
+  if (!isUsableSession(session)) redirect('/')
+
+  const classroomSlug = String(formData.get('classroom_slug') ?? '')
+  const entryId = positiveInteger(formData.get('entry_id'))
+  const userId = positiveInteger(formData.get('user_id'))
+
+  // The original raises ActiveRecordError on both and rescues into one message
+  if (entryId === null || userId === null) {
+    return { error: 'No pudimos vincular esa cuenta. Probá de nuevo.', notice: null }
+  }
+
+  const result = await linkAccountToEntry(session, classroomSlug, entryId, userId)
+
+  if (!result.success) return { error: result.error, notice: null }
+
+  // The page is force-dynamic, so this is what moves the account out of the
+  // tab and onto its identifier's row without the teacher reloading
+  revalidatePath(`/classrooms/${classroomSlug}/roster`)
+  return EMPTY_STATE
+}
+
+/** Port of RostersController#unlink */
 export async function unlinkAccountAction(
   _previous: RosterActionState,
   formData: FormData,
