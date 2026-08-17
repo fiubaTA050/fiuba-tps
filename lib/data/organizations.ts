@@ -3,7 +3,7 @@ import 'server-only'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
-import { organizations, organizationsUsers } from '@/db/schema'
+import { assignments, groupAssignments, organizations, organizationsUsers } from '@/db/schema'
 import { isUniqueViolation } from '@/lib/data/postgres'
 import { organizationSlug } from '@/lib/data/slug'
 import { db } from '@/lib/db'
@@ -36,6 +36,23 @@ export type ClassroomListItem = {
   organization: GitHubOrganization | null
 }
 
+/** One line of the assignment list a classroom card shows */
+export type ClassroomCardAssignment = {
+  key: string
+  title: string
+  slug: string
+  /** Which of the two tables it came from: they have separate URLs and icons */
+  group: boolean
+}
+
+/** A classroom as the index renders it: the card also lists its assignments */
+export type ClassroomCard = ClassroomListItem & {
+  assignments: ClassroomCardAssignment[]
+}
+
+/** `all_assignments.sort_by(&:created_at).reverse.take(5)` of the card partial */
+const CARD_ASSIGNMENTS = 5
+
 /**
  * Port of OrganizationsController#index, including the
  * `add_current_user_to_organizations` before_action: if the teacher is an
@@ -43,7 +60,7 @@ export type ClassroomListItem = {
  * get associated automatically. That is what lets a teaching assistant who
  * was just made an admin see the classrooms without anyone inviting them.
  */
-export async function listClassrooms(session: Session): Promise<ClassroomListItem[]> {
+export async function listClassrooms(session: Session): Promise<ClassroomCard[]> {
   const githubOrganizations = await listUserOrganizations(session)
   const adminOrganizations = githubOrganizations.filter((organization) => organization.admin)
 
@@ -70,6 +87,7 @@ export async function listClassrooms(session: Session): Promise<ClassroomListIte
     .orderBy(desc(organizations.createdAt))
 
   const byGithubId = new Map(githubOrganizations.map((org) => [org.githubId, org]))
+  const cardAssignments = await listCardAssignments(rows.map((row) => row.id))
 
   return rows.map((row) => ({
     id: row.id,
@@ -77,7 +95,79 @@ export async function listClassrooms(session: Session): Promise<ClassroomListIte
     slug: row.slug,
     archivedAt: row.archivedAt,
     organization: byGithubId.get(row.githubId) ?? null,
+    assignments: cardAssignments.get(row.id) ?? [],
   }))
+}
+
+/**
+ * The `organization.all_assignments` of _organization_card_layout.html.erb, for
+ * every card at once.
+ *
+ * Two queries for the whole page instead of the original's `includes(:assignments,
+ * :group_assignments)` — the same idea, and the id lists are small enough that
+ * the trim to five happens here rather than in SQL.
+ */
+async function listCardAssignments(
+  organizationIds: number[],
+): Promise<Map<number, ClassroomCardAssignment[]>> {
+  const byOrganization = new Map<number, (ClassroomCardAssignment & { createdAt: Date })[]>()
+  if (organizationIds.length === 0) return byOrganization
+
+  const [individual, group] = await Promise.all([
+    db
+      .select({
+        id: assignments.id,
+        organizationId: assignments.organizationId,
+        title: assignments.title,
+        slug: assignments.slug,
+        createdAt: assignments.createdAt,
+      })
+      .from(assignments)
+      .where(
+        and(
+          inArray(assignments.organizationId, organizationIds),
+          isNull(assignments.deletedAt),
+        ),
+      ),
+    db
+      .select({
+        id: groupAssignments.id,
+        organizationId: groupAssignments.organizationId,
+        title: groupAssignments.title,
+        slug: groupAssignments.slug,
+        createdAt: groupAssignments.createdAt,
+      })
+      .from(groupAssignments)
+      .where(
+        and(
+          inArray(groupAssignments.organizationId, organizationIds),
+          isNull(groupAssignments.deletedAt),
+        ),
+      ),
+  ])
+
+  for (const row of individual) {
+    push(byOrganization, row.organizationId, { ...row, key: `individual-${row.id}`, group: false })
+  }
+  for (const row of group) {
+    push(byOrganization, row.organizationId, { ...row, key: `group-${row.id}`, group: true })
+  }
+
+  return new Map(
+    [...byOrganization].map(([organizationId, rows]) => [
+      organizationId,
+      rows
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .slice(0, CARD_ASSIGNMENTS)
+        .map(({ key, title, slug, group }) => ({ key, title, slug, group })),
+    ]),
+  )
+}
+
+function push<T>(target: Map<number, T[]>, key: number, value: T) {
+  const existing = target.get(key)
+  if (existing) existing.push(value)
+  else target.set(key, [value])
 }
 
 async function linkUserToExistingClassrooms(session: Session, admin: GitHubOrganization[]) {
@@ -193,6 +283,31 @@ export async function findTeachingClassroom(
     )
 
   return row ?? null
+}
+
+/**
+ * Port of Organization::Editor#update_archive_setting, reached from the kebab
+ * menu of the classroom card exactly as in the original.
+ *
+ * Archiving is a flag and nothing else: no repository, no invitation and no
+ * membership is touched. What it buys is that every writer already refuses to
+ * run on an archived classroom — creating assignments, accepting invitations,
+ * building repositories — so a past term stops moving without being deleted.
+ */
+export async function setClassroomArchived(
+  session: Session,
+  slug: string,
+  archived: boolean,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const classroom = await findTeachingClassroom(session, slug)
+  if (!classroom) return { success: false, error: 'No encontramos ese classroom.' }
+
+  await db
+    .update(organizations)
+    .set({ archivedAt: archived ? new Date() : null, updatedAt: new Date() })
+    .where(eq(organizations.id, classroom.id))
+
+  return { success: true }
 }
 
 /**

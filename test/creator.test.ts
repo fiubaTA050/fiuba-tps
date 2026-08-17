@@ -2,7 +2,14 @@ import { eq, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { organizations, organizationsUsers, users } from '@/db/schema'
+import {
+  assignments,
+  groupAssignments,
+  groupings,
+  organizations,
+  organizationsUsers,
+  users,
+} from '@/db/schema'
 
 import { createTestDatabase } from './helpers/db'
 
@@ -42,7 +49,7 @@ vi.mock('@/lib/github/organizations', () => ({
   findOrganizationByInstallation: (...args: unknown[]) => findOrganizationByInstallation(...args),
 }))
 
-const { createClassroom, findClassroom, listClassrooms } = await import(
+const { createClassroom, findClassroom, listClassrooms, setClassroomArchived } = await import(
   '@/lib/data/organizations',
 )
 
@@ -329,6 +336,169 @@ describe('listClassrooms', () => {
     await db.update(organizations).set({ deletedAt: new Date() })
 
     expect(await listClassrooms(session)).toHaveLength(0)
+  })
+})
+
+/**
+ * `organization.all_assignments.sort_by(&:created_at).reverse.take(5)` of
+ * _organization_card_layout.html.erb, which is what a card lists.
+ */
+describe('listClassrooms — the assignments on a card', () => {
+  /** Both kinds, one per call, `createdAt` explicit so the order is testable */
+  async function addAssignment(
+    organizationId: number,
+    creatorId: number,
+    title: string,
+    options: { group?: boolean; createdAt?: Date; deleted?: boolean } = {},
+  ) {
+    const slug = title.toLowerCase().replaceAll(' ', '-')
+    const row = {
+      organizationId,
+      creatorId,
+      title,
+      slug,
+      createdAt: options.createdAt ?? new Date(),
+      deletedAt: options.deleted ? new Date() : null,
+    }
+
+    if (!options.group) {
+      await db.insert(assignments).values(row)
+      return
+    }
+
+    const [grouping] = await db
+      .insert(groupings)
+      .values({ organizationId, title: `Equipos de ${title}`, slug: `equipos-${slug}` })
+      .returning({ id: groupings.id })
+
+    await db.insert(groupAssignments).values({ ...row, groupingId: grouping.id })
+  }
+
+  async function classroomWith(session: Session, title: string) {
+    const created = await createClassroom(session, {
+      githubId: ORG.githubId,
+      installationId: ORG.installationId,
+      title,
+    })
+    if (!created.success) throw new Error(created.error)
+
+    const [row] = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.slug, created.slug))
+
+    return row.id
+  }
+
+  it('lists both kinds, newest first, and marks which is which', async () => {
+    const session = await classroomTeacher()
+    const id = await classroomWith(session, 'Algoritmos')
+    const creatorId = Number(session.user.id)
+
+    await addAssignment(id, creatorId, 'TP1', { createdAt: new Date('2026-03-01') })
+    await addAssignment(id, creatorId, 'TP2', { group: true, createdAt: new Date('2026-04-01') })
+
+    const [classroom] = await listClassrooms(session)
+
+    expect(classroom.assignments.map((assignment) => assignment.title)).toEqual(['TP2', 'TP1'])
+    expect(classroom.assignments.map((assignment) => assignment.group)).toEqual([true, false])
+  })
+
+  it('takes only the five most recent', async () => {
+    const session = await classroomTeacher()
+    const id = await classroomWith(session, 'Algoritmos')
+    const creatorId = Number(session.user.id)
+
+    for (let day = 1; day <= 7; day++) {
+      await addAssignment(id, creatorId, `TP${day}`, {
+        createdAt: new Date(`2026-03-0${day}`),
+      })
+    }
+
+    const [classroom] = await listClassrooms(session)
+
+    expect(classroom.assignments.map((assignment) => assignment.title)).toEqual([
+      'TP7',
+      'TP6',
+      'TP5',
+      'TP4',
+      'TP3',
+    ])
+  })
+
+  it('excludes soft-deleted assignments and never mixes two classrooms', async () => {
+    const session = await classroomTeacher()
+    const creatorId = Number(session.user.id)
+    const algoritmos = await classroomWith(session, 'Algoritmos')
+    const distribuidos = await classroomWith(session, 'Distribuidos')
+
+    await addAssignment(algoritmos, creatorId, 'TP1')
+    await addAssignment(algoritmos, creatorId, 'TP borrado', { deleted: true })
+    await addAssignment(distribuidos, creatorId, 'TP1 de la otra', { group: true })
+
+    const byTitle = new Map(
+      (await listClassrooms(session)).map((classroom) => [classroom.title, classroom.assignments]),
+    )
+
+    expect(byTitle.get('Algoritmos')?.map((assignment) => assignment.title)).toEqual(['TP1'])
+    expect(byTitle.get('Distribuidos')?.map((assignment) => assignment.title)).toEqual([
+      'TP1 de la otra',
+    ])
+  })
+})
+
+/** Port of spec/models/organization/editor_spec.rb, "updating archive setting" */
+describe('setClassroomArchived', () => {
+  async function classroom(session: Session) {
+    const created = await createClassroom(session, {
+      githubId: ORG.githubId,
+      installationId: ORG.installationId,
+      title: 'Algoritmos',
+    })
+    if (!created.success) throw new Error(created.error)
+    return created.slug
+  }
+
+  async function archivedAt(slug: string) {
+    const [row] = await db
+      .select({ archivedAt: organizations.archivedAt })
+      .from(organizations)
+      .where(eq(organizations.slug, slug))
+
+    return row.archivedAt
+  }
+
+  it('can archive a classroom', async () => {
+    const session = await classroomTeacher()
+    const slug = await classroom(session)
+
+    expect(await setClassroomArchived(session, slug, true)).toEqual({ success: true })
+    expect(await archivedAt(slug)).toBeInstanceOf(Date)
+  })
+
+  it('can unarchive a classroom', async () => {
+    const session = await classroomTeacher()
+    const slug = await classroom(session)
+
+    await setClassroomArchived(session, slug, true)
+    await setClassroomArchived(session, slug, false)
+
+    expect(await archivedAt(slug)).toBeNull()
+  })
+
+  // DA-4: the data layer is the authorization boundary, so a teacher of
+  // another classroom cannot archive this one
+  it('refuses a classroom the session user does not teach', async () => {
+    const owner = await classroomTeacher()
+    const slug = await classroom(owner)
+
+    const stranger = await classroomTeacher()
+    listUserOrganizations.mockResolvedValue([{ ...ORG, admin: false }])
+
+    const result = await setClassroomArchived(stranger, slug, true)
+
+    expect(result.success).toBe(false)
+    expect(await archivedAt(slug)).toBeNull()
   })
 })
 

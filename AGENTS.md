@@ -91,6 +91,19 @@ reference code without mental translation. The confusing one:
   in the URL would re-run that query on every keystroke. Of the live filters,
   "Passing/Failing" (autograding) and the "On-time/Late" halves of the
   submission one (deadlines) have nothing behind them and are dropped.
+- **The classroom index is the original's card grid**, `_organization_filters`
+  over `_organization_card_layout`, which is still what the live site renders —
+  a two-column grid of cards, each with a coloured band, a kebab menu, the
+  title over the GitHub org login and up to five assignments. Two divergences.
+  The band was a GeoPattern seeded on the classroom id, green when active and
+  grey when archived; the live site replaced it with a flat band in those two
+  colours and this follows it, so no pattern-generation library is needed. And
+  its filters run in the browser for the same reason the dashboard's do: the
+  page is `force-dynamic` and every render costs `GET /user/installations` plus
+  a call per org, where the original re-rendered from the database
+  (`organizations#search`). The kebab is what archives a classroom — every
+  writer already refuses to run on an archived one, and this is the only screen
+  that sets the flag.
 - **"Entregado" is one commit of the student's own**, and the count on the
   dashboard is net of the commit the repository was created with. Neither rule
   is the original's. Its `SharedAssignmentRepoView#submission_succeeded?` is

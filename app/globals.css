@@ -1064,3 +1064,15 @@
   color: var(--fgColor-muted);
 }
 
+
+/*
+ * The tint the live site gives the icon of a group assignment on a classroom
+ * card, copied verbatim from its stylesheet. An individual assignment uses
+ * Primer's own `.color-bg-accent`, as in the original's card partial; the group
+ * one had no counterpart there — the original drew both in the same blue and
+ * told them apart by the octicon alone.
+ */
+.assignment-icon-group {
+  color: #f3f3f3;
+  background-color: #555;
+}
