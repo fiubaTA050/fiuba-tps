@@ -3,17 +3,34 @@
 Port de [GitHub Classroom](https://github.com/github-education-resources/classroom) (Rails, MIT)
 a Next.js sobre Vercel, para la cátedra TA050. GitHub Classroom se retira el 28/08/2026.
 
-Estado: implementado el flujo de **crear un classroom**. El resto del port
-(assignments, rosters, invitaciones) todavía no.
+Estado: portados el flujo del docente y el del alumno de punta a punta. Los
+repos de los alumnos se crean contra GitHub de verdad.
 
-## El flujo implementado
+## Lo que hay
 
-1. Entrar y **iniciar sesión con GitHub** — `app/page.tsx`
-2. **Nuevo classroom** — `app/classrooms/page.tsx`
-3. **Elegir la organización** de la lista, o **Instalar en otra organización** →
+**Docente**
+
+1. **Iniciar sesión con GitHub** — `app/page.tsx`
+2. **Crear un classroom**: elegir la organización, o instalar la App en otra →
    GitHub → volver — `app/classrooms/new/`, `app/github/setup/route.ts`
-4. **Escribir el nombre** del classroom
-5. **Crear classroom** → redirige a `/classrooms/<slug>`
+3. **Listado de classrooms** en grilla de tarjetas, con archivado —
+   `app/classrooms/page.tsx`
+4. **Assignments individuales y grupales**, con starter code y autocomplete de
+   repos — `app/classrooms/[slug]/assignments/`, `.../group-assignments/`
+5. **Editar y borrar** un assignment — ver `docs/edicion-y-borrado-de-assignments.md`
+6. **Roster** de alumnos por padrón, con vinculación de las cuentas de GitHub
+   sueltas — `app/classrooms/[slug]/roster/`
+7. **Equipos** de un assignment grupal — `app/classrooms/[slug]/groupings/`
+8. **Dashboard** de cada assignment: repositorio, último commit y cantidad de
+   commits por alumno o equipo, con filtros y orden —
+   `app/classrooms/[slug]/assignments/[assignmentSlug]/`
+
+**Alumno**
+
+1. Abre el **link de invitación**, corto (`/a/<key>`, `/g/<key>`) o largo
+2. Se **vincula con su padrón** del roster
+3. Acepta y **su repositorio se crea dentro de ese mismo request**, sin cola —
+   ver `docs/creacion-de-repos.md`
 
 ## Correspondencia con el original
 
@@ -24,6 +41,13 @@ Estado: implementado el flujo de **crear un classroom**. El resto del port
 | `lib/data/organizations.ts` → `listClassrooms` | `organizations_controller.rb#index` |
 | `lib/data/slug.ts` | `app/models/concerns/sluggable.rb` |
 | `lib/github/organizations.ts` → `isOrganizationAdmin` | `github_organization.rb#admin?` |
+| `lib/data/assignments.ts` | `assignments_controller.rb` |
+| `lib/data/group-assignments.ts` | `group_assignments_controller.rb` |
+| `lib/data/rosters.ts` | `rosters_controller.rb` |
+| `lib/data/invitations.ts` | `assignment_invitations_controller.rb` + `InvitationsControllerMethods` |
+| `lib/data/group-invitations.ts` | `group_assignment_invitations_controller.rb` |
+| `lib/data/groups.ts` | `groups_controller.rb` + `grouping.rb` |
+| `app/a/[shortKey]/`, `app/g/[shortKey]/` | `short_url_controller.rb` + `routes.rb:31-32` |
 | `app/classrooms/new/NewClassroomForm.tsx` | `views/organizations/new.html.erb` + `setup.html.erb` |
 | `components/SiteHeader.tsx` | `views/shared/_header.html.erb` |
 
@@ -42,28 +66,44 @@ no la organización de GitHub. Las URLs también coinciden (`/classrooms`,
   El tenant es la instalación de la App, no un webhook de org.
 - **El nombre se pide antes de crear.** El original autogeneraba
   `<org>-classroom-1` y lo dejaba cambiar en una pantalla de setup posterior.
-- La lista de orgs del paso 3 sale de `GET /user/installations`, así que sólo
-  muestra orgs donde la App ya está instalada.
+- La lista de orgs sale de `GET /user/installations`, así que sólo muestra orgs
+  donde la App ya está instalada.
+- **Sólo las orgs habilitadas pueden crear classrooms** (`GITHUB_ALLOWED_ORG_IDS`).
+  El original no tenía nada parecido: era el servicio público de GitHub.
+
+`AGENTS.md` lleva la lista completa y el porqué de cada una.
 
 ## Setup
 
 ### 1. La GitHub App
 
-Se crea en una **cuenta u organización aparte** (p. ej. `fiuba-classroom`), no
-dentro de la org de la materia: una App privada sólo puede instalarse donde vive.
-Marcala como **pública**.
+La App de este deploy es **FIUBA TPs** (slug `fiuba-tps`), la posee la
+organización `fiubaTA050` y es **pública**. Pública no es opcional: una App
+privada sólo puede instalarse en la cuenta que la posee, y ésta también tiene
+que instalarse en `fiubaTA050-labs`, que es donde viven los repos de la materia.
 
-- **Callback URL:** `https://<host>/api/auth/callback/github`
-- **Setup URL:** `https://<host>/github/setup`, con *Redirect on update* activado
-- **Request user authorization (OAuth) during installation:** activado
-- **Webhook:** se puede desactivar por ahora
+- **Callback URL:** admite hasta 10. Están cargadas la de producción
+  (`https://fiuba-tps.vercel.app/api/auth/callback/github`) y la de desarrollo
+  (`http://localhost:3000/api/auth/callback/github`). El orden no importa,
+  porque Auth.js manda `redirect_uri` explícito.
+- **Setup URL:** `https://<host>/github/setup`, con *Redirect on update*
+  activado. Es un **campo único**: producción y localhost no pueden convivir, y
+  va el de producción, porque instalar la App es algo que los docentes hacen
+  sobre el sitio real. Con la opción de abajo desactivada, este campo *es* el
+  redirect posterior a la instalación — si apunta a localhost, instalar desde
+  producción deja al docente en una página que no existe.
+- **Request user authorization (OAuth) during installation:** **desactivado**, y
+  tiene que quedar así. Con la opción activada, instalar manda al docente por el
+  callback de OAuth sin la cookie de PKCE: Auth.js falla y cae en
+  `/?error=Configuration`.
+- **Webhook:** inactivo. Todavía no se consume ningún evento.
 
-Permisos:
+Permisos, tal como los tiene hoy:
 
 | Ámbito | Permiso | Para qué |
 |---|---|---|
-| Repository → Administration | write | crear repos (todavía no se usa) |
-| Repository → Contents | read & write | idem |
+| Repository → Administration | write | crear el repo del alumno y darle acceso |
+| Repository → Contents | read & write | generarlo desde el starter code |
 | Repository → Metadata | read | obligatorio |
 | Organization → Members | read | `isOrganizationAdmin` |
 | Organization → Administration | **write** | `setDefaultRepositoryPermissionToNone` |
@@ -104,12 +144,12 @@ la creación.
 npm test
 ```
 
+15 archivos, 330 casos. Corren contra un Postgres real embebido (PGlite) al que
+se le aplica la migración generada, así los índices únicos parciales y el
+rollback de las transacciones se ejercitan de verdad en vez de contra un mock.
 `test/creator.test.ts` es el port de `spec/models/organization/creator_spec.rb`.
-Corre contra un Postgres real embebido (PGlite) al que se le aplica la
-migración generada, así los índices únicos parciales y el rollback de la
-transacción se ejercitan de verdad en vez de contra un mock.
 
-Specs reutilizados del original:
+Algunos de los specs reutilizados del original:
 
 | Test | Spec original |
 |---|---|
@@ -128,6 +168,8 @@ usan.
 
 ## Pendiente
 
-- Assignments desde repo template, rosters, invitaciones (Inngest)
+- **CI**: no hay workflows; `npm test` y `npm run build` se corren a mano.
+- **Bajar las llamadas a la API de GitHub** al renderizar el listado de
+  classrooms, que hoy cuesta varias por organización.
 - **Antes del 28/08/2026:** correr el Classroom Export Utility sobre
   `fiubaTA050-labs`. Ese export no se puede regenerar después.
