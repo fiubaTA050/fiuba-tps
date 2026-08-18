@@ -175,8 +175,13 @@ reference code without mental translation. The confusing one:
   holds the org `github_id`s, ids and never logins (DA-2), and it is
   **required**: a deploy that forgets it refuses to create rather than opening
   the door. The boundary is `isAllowedOrganization` inside `createClassroom` —
-  the only path that creates one; `/classrooms/new` filters the org list with
-  `allowedOrganizations` so it never offers what it would refuse on submit.
+  the only path that creates one. `/classrooms/new` still lists **every**
+  organization the App is installed on and greys out the ones it would refuse,
+  with the reason as the tooltip: that is what the original does with the ones
+  the teacher is not an owner of (`_disabled_organization_select.html.erb`),
+  and a card the teacher can see and understand beats one that is silently
+  missing. The allowlist reason wins over "not an owner" when both apply,
+  being the one the teacher cannot fix in GitHub.
   The control cannot live on login: students must be able to sign in without
   belonging to any org. Reading is unaffected — the data layer already filters
   by `organizations_users`, and classrooms already created keep working.

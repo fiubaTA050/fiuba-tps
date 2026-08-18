@@ -2,15 +2,32 @@ import { LightBulbIcon } from '@primer/octicons-react'
 import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
-import { allowedOrganizations } from '@/lib/data/organizations'
+import { isAllowedOrganization } from '@/lib/data/organizations'
 import { appInstallationUrl } from '@/lib/github/client'
 import { listUserOrganizations } from '@/lib/github/organizations'
 import { PageContainer } from '@/components/PageContainer'
 import { isUsableSession } from '@/lib/session'
 
-import { NewClassroomForm } from './NewClassroomForm'
+import { NewClassroomForm, type SelectableOrganization } from './NewClassroomForm'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * Why an organization cannot be picked, as the disabled card's tooltip, or
+ * null when it can.
+ *
+ * The allowlist goes first: it is a fact about this deployment and nothing the
+ * teacher can act on in GitHub, whereas not being an owner is something the
+ * org's owners can fix. Naming the one that would still block them after they
+ * fixed the other is what keeps the message from sending them in a circle.
+ */
+function disabledReason(organization: { githubId: number; admin: boolean }): string | null {
+  if (!isAllowedOrganization(organization.githubId)) {
+    return 'Esta organización no está habilitada para crear classrooms'
+  }
+  if (!organization.admin) return 'No sos owner de esta organización'
+  return null
+}
 
 /** Port of organizations#new */
 export default async function NewClassroomPage() {
@@ -18,11 +35,15 @@ export default async function NewClassroomPage() {
   if (!isUsableSession(session)) redirect('/')
 
   const installed = await listUserOrganizations(session)
-
-  // The allowlist is enforced in `createClassroom`; filtering here only keeps
-  // the screen from offering an organization it would refuse on submit.
-  const organizations = allowedOrganizations(installed)
   const installUrl = appInstallationUrl('/classrooms/new')
+
+  // Every organization the App is installed on is listed; the allowlist only
+  // decides which ones are pickable. The policy is resolved here so the client
+  // component never re-implements it.
+  const organizations: SelectableOrganization[] = installed.map((organization) => ({
+    ...organization,
+    disabledReason: disabledReason(organization),
+  }))
 
   return (
     <PageContainer>
@@ -30,7 +51,7 @@ export default async function NewClassroomPage() {
         <h1 className="Subhead-heading">Nuevo classroom</h1>
       </div>
 
-      {installed.length === 0 ? (
+      {organizations.length === 0 ? (
         // Port of the "no_organizations" blankslate. The original asked the
         // teacher to authorize the OAuth App; here the App must be installed.
         <div className="blankslate blankslate-large blankslate-spacious">
@@ -43,17 +64,6 @@ export default async function NewClassroomPage() {
             Instalar en una organización
           </a>
         </div>
-      ) : organizations.length === 0 ? (
-        // Installed, but on nothing this deployment runs. No install button:
-        // installing again changes nothing, and offering it would send the
-        // teacher in a circle.
-        <div className="blankslate blankslate-large blankslate-spacious">
-          <h3 className="mb-2">Tu organización no está habilitada</h3>
-          <p className="color-fg-muted mb-4">
-            Esta instancia atiende sólo a las organizaciones de la cátedra. Si la tuya debería
-            estar, pedile a quien administra el deploy que la agregue.
-          </p>
-        </div>
       ) : (
         <NewClassroomForm organizations={organizations} installUrl={installUrl} />
       )}
@@ -62,7 +72,7 @@ export default async function NewClassroomPage() {
         <LightBulbIcon className="mr-1" />
         ¿No ves tu organización? Instalá la App ahí con{' '}
         <a href={installUrl}>Instalar en otra organización</a>. Sólo aparecen las organizaciones
-        habilitadas por la cátedra donde la App ya está instalada.
+        donde la App ya está instalada.
       </div>
     </PageContainer>
   )

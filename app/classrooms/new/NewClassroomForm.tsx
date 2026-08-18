@@ -8,6 +8,18 @@ import type { GitHubOrganization } from '@/lib/github/organizations'
 import { createClassroomAction, type CreateClassroomState } from './actions'
 
 /**
+ * An organization as this screen shows it: every one the App is installed on,
+ * carrying why it cannot be picked when it cannot.
+ *
+ * The reason is resolved on the server (`page.tsx`) — the allowlist lives in
+ * an env var, and the role comes from GitHub. Neither belongs in the browser.
+ */
+export type SelectableOrganization = GitHubOrganization & {
+  /** null when the teacher can pick it; otherwise the disabled card's tooltip */
+  disabledReason: string | null
+}
+
+/**
  * Steps 3 to 5: pick the organization, name it, create it.
  *
  * Port of organizations/new.html.erb (the org grid) merged with
@@ -27,13 +39,13 @@ export function NewClassroomForm({
   organizations,
   installUrl,
 }: {
-  organizations: GitHubOrganization[]
+  organizations: SelectableOrganization[]
   installUrl: string
 }) {
-  const [selected, setSelected] = useState<GitHubOrganization | null>(
-    organizations.filter((organization) => organization.admin).length === 1
-      ? (organizations.find((organization) => organization.admin) ?? null)
-      : null,
+  const selectable = organizations.filter((organization) => !organization.disabledReason)
+
+  const [selected, setSelected] = useState<SelectableOrganization | null>(
+    selectable.length === 1 ? selectable[0] : null,
   )
 
   const [state, formAction, pending] = useActionState<CreateClassroomState, FormData>(
@@ -46,6 +58,17 @@ export function NewClassroomForm({
       {state.error && (
         <div className="flash flash-error mb-4">
           <span>{state.error}</span>
+        </div>
+      )}
+
+      {/* The tooltips already say why, but only on hover, and with nothing
+          pickable the screen would otherwise look broken rather than closed */}
+      {selectable.length === 0 && (
+        <div className="flash flash-warn mb-4">
+          <span>
+            Ninguna de tus organizaciones puede crear classrooms acá. Pasá el mouse por cada una
+            para ver por qué.
+          </span>
         </div>
       )}
 
@@ -131,7 +154,7 @@ function OrganizationCard({
   selected,
   onSelect,
 }: {
-  organization: GitHubOrganization
+  organization: SelectableOrganization
   selected: boolean
   onSelect: () => void
 }) {
@@ -146,11 +169,11 @@ function OrganizationCard({
     />
   )
 
-  if (!organization.admin) {
+  if (organization.disabledReason) {
     return (
       <div
         className="d-block width-full height-full text-center border rounded-2 box-shadow-medium color-bg-subtle p-3 tooltipped tooltipped-s"
-        aria-label="No sos owner de esta organización"
+        aria-label={organization.disabledReason}
       >
         <span className="color-fg-muted">
           {avatar}

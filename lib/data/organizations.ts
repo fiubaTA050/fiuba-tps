@@ -354,17 +354,15 @@ async function reresolveInstallation(
  * This is a single-course deployment on our own database, so the organization
  * must also be one we run. See AGENTS.md.
  *
- * Enforced in `createClassroom`, which is the only path that creates one; the
- * new-classroom screen uses `allowedOrganizations` so it never offers an
- * organization the teacher would only be refused on submit.
+ * Enforced in `createClassroom`, which is the only path that creates one. The
+ * new-classroom screen asks the same question to disable the organizations it
+ * would refuse, rather than hiding them: that is what the original does with
+ * the ones the teacher is not an owner of
+ * (`_disabled_organization_select.html.erb`), and a card greyed out with the
+ * reason tells the teacher more than an organization that is simply missing.
  */
-function isAllowedOrganization(githubId: number): boolean {
+export function isAllowedOrganization(githubId: number): boolean {
   return env.allowedOrganizationIds.includes(githubId)
-}
-
-/** The organizations of `listUserOrganizations` that may host a classroom */
-export function allowedOrganizations<T extends { githubId: number }>(organizations: T[]): T[] {
-  return organizations.filter((organization) => isAllowedOrganization(organization.githubId))
 }
 
 /**
