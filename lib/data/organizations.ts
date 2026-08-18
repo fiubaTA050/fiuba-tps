@@ -7,6 +7,7 @@ import { assignments, groupAssignments, organizations, organizationsUsers } from
 import { isUniqueViolation } from '@/lib/data/postgres'
 import { organizationSlug } from '@/lib/data/slug'
 import { db } from '@/lib/db'
+import { env } from '@/lib/env'
 import {
   findOrganizationByInstallation,
   listUserOrganizations,
@@ -347,6 +348,26 @@ async function reresolveInstallation(
 }
 
 /**
+ * Deliberate divergence: the original had no allowlist and could not have one
+ * — it was GitHub's public service, where being an admin of the organization
+ * was the whole authorization model (`Organization::Creator#ensure_users_are_authorized!`).
+ * This is a single-course deployment on our own database, so the organization
+ * must also be one we run. See AGENTS.md.
+ *
+ * Enforced in `createClassroom`, which is the only path that creates one; the
+ * new-classroom screen uses `allowedOrganizations` so it never offers an
+ * organization the teacher would only be refused on submit.
+ */
+function isAllowedOrganization(githubId: number): boolean {
+  return env.allowedOrganizationIds.includes(githubId)
+}
+
+/** The organizations of `listUserOrganizations` that may host a classroom */
+export function allowedOrganizations<T extends { githubId: number }>(organizations: T[]): T[] {
+  return organizations.filter((organization) => isAllowedOrganization(organization.githubId))
+}
+
+/**
  * Port of Organization::Creator#perform.
  *
  * The original's order:
@@ -400,6 +421,17 @@ export async function createClassroom(
     return {
       success: false,
       error: `@${session.user.githubLogin} no es admin de la organización @${organization.login}.`,
+    }
+  }
+
+  // The allowlist, after the role check so an outsider learns nothing about
+  // which organizations we run that they could not already see themselves.
+  if (!isAllowedOrganization(organization.githubId)) {
+    return {
+      success: false,
+      error:
+        `La organización @${organization.login} no está habilitada para crear classrooms. ` +
+        'Si es de la cátedra, pedile a quien administra el deploy que la agregue.',
     }
   }
 

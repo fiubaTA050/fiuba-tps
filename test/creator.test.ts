@@ -78,6 +78,9 @@ async function organizationCount(): Promise<number> {
 beforeEach(async () => {
   ;({ db } = await createTestDatabase())
   nextUid = 1
+  // The allowlist is a required env var (lib/env.ts) and its getter reads
+  // process.env at call time, so setting it here is enough — no mock needed.
+  process.env.GITHUB_ALLOWED_ORG_IDS = String(ORG.githubId)
   listUserOrganizations.mockResolvedValue([ORG])
   setDefaultRepositoryPermissionToNone.mockResolvedValue(undefined)
   // clearAllMocks only clears calls, not implementations, so every mock needs
@@ -86,6 +89,7 @@ beforeEach(async () => {
 })
 
 afterEach(() => {
+  delete process.env.GITHUB_ALLOWED_ORG_IDS
   vi.clearAllMocks()
 })
 
@@ -176,6 +180,69 @@ describe('createClassroom — unsuccessful creation', () => {
     expect(await organizationCount()).toBe(0)
   })
 
+  /**
+   * No original spec: the allowlist is a deliberate divergence, the original
+   * being GitHub's public service. See AGENTS.md.
+   */
+  it('fails when the organization is not on the allowlist', async () => {
+    process.env.GITHUB_ALLOWED_ORG_IDS = '999999'
+    const session = await classroomTeacher()
+
+    const result = await createClassroom(session, {
+      githubId: ORG.githubId,
+      installationId: ORG.installationId,
+      title: 'Algoritmos',
+    })
+
+    expect(result.success).toBe(false)
+    expect(await organizationCount()).toBe(0)
+  })
+
+  it('creates when the organization is one of several on the allowlist', async () => {
+    process.env.GITHUB_ALLOWED_ORG_IDS = ` 111, ${ORG.githubId} ,222 `
+    const session = await classroomTeacher()
+
+    const result = await createClassroom(session, {
+      githubId: ORG.githubId,
+      installationId: ORG.installationId,
+      title: 'Algoritmos',
+    })
+
+    expect(result.success).toBe(true)
+    expect(await organizationCount()).toBe(1)
+  })
+
+  // Fails closed and loudly: a deploy that forgot the variable must not create
+  it('throws when the allowlist is not configured', async () => {
+    delete process.env.GITHUB_ALLOWED_ORG_IDS
+    const session = await classroomTeacher()
+
+    await expect(
+      createClassroom(session, {
+        githubId: ORG.githubId,
+        installationId: ORG.installationId,
+        title: 'Algoritmos',
+      }),
+    ).rejects.toThrow(/GITHUB_ALLOWED_ORG_IDS/)
+
+    expect(await organizationCount()).toBe(0)
+  })
+
+  it('throws when the allowlist has a malformed id', async () => {
+    process.env.GITHUB_ALLOWED_ORG_IDS = `${ORG.githubId},fiubaTA050-labs`
+    const session = await classroomTeacher()
+
+    await expect(
+      createClassroom(session, {
+        githubId: ORG.githubId,
+        installationId: ORG.installationId,
+        title: 'Algoritmos',
+      }),
+    ).rejects.toThrow(/GITHUB_ALLOWED_ORG_IDS/)
+
+    expect(await organizationCount()).toBe(0)
+  })
+
   // "deletes the organization if the repository permissions cannot be set to none"
   it('deletes the classroom if the repository permissions cannot be set to none', async () => {
     setDefaultRepositoryPermissionToNone.mockRejectedValue(
@@ -237,6 +304,9 @@ describe('createClassroom — unsuccessful creation', () => {
 
   it('allows the same title in a different organization', async () => {
     const other = { ...ORG, githubId: 8765, login: 'otra-catedra', installationId: 100 }
+    // Both organizations are ours here: the case under test is the uniqueness
+    // scope, not the allowlist
+    process.env.GITHUB_ALLOWED_ORG_IDS = `${ORG.githubId},${other.githubId}`
     listUserOrganizations.mockResolvedValue([ORG, other])
     const session = await classroomTeacher()
 

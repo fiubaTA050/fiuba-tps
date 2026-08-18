@@ -91,6 +91,13 @@ npm install
 npm run dev
 ```
 
+`GITHUB_ALLOWED_ORG_IDS` es la lista de orgs habilitadas para crear classrooms,
+por id numérico y separadas por coma. Es obligatoria: sin ella no se puede
+crear ninguno. El id se saca con `gh api /orgs/<login> --jq .id`. En Vercel va
+en las env vars del proyecto, y cambiarla **requiere redeploy** para que tome
+efecto. Los classrooms ya creados no se ven afectados: el chequeo está sólo en
+la creación.
+
 ## Tests
 
 ```bash

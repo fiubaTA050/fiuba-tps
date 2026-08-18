@@ -50,4 +50,39 @@ export const env = {
   get githubClientSecret() {
     return required('GITHUB_CLIENT_SECRET')
   },
+
+  /**
+   * GitHub ids of the organizations allowed to host classrooms, comma
+   * separated. Ids and never logins: an org gets renamed, its id does not (DA-2).
+   *
+   * Required on purpose. A deployment that forgets it must refuse to create
+   * classrooms rather than open the door, and `required` already fails closed
+   * with a message that names the variable.
+   */
+  get allowedOrganizationIds(): number[] {
+    const entries = required('GITHUB_ALLOWED_ORG_IDS')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+
+    // A value of "," or " " passes `required` but allows nobody
+    if (entries.length === 0) {
+      throw new Error('GITHUB_ALLOWED_ORG_IDS no tiene ningún id. Ver .env.example')
+    }
+
+    return entries.map((entry) => {
+      const id = Number(entry)
+
+      // Dropping a malformed entry would silently lock the teachers out of
+      // their own organization, which reads as a bug in the app rather than a
+      // typo in the configuration. Refuse instead.
+      if (!Number.isInteger(id) || id <= 0) {
+        throw new Error(
+          `GITHUB_ALLOWED_ORG_IDS tiene un id inválido: "${entry}". Ver .env.example`,
+        )
+      }
+
+      return id
+    })
+  },
 }

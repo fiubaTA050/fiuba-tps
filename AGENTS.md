@@ -163,6 +163,25 @@ reference code without mental translation. The confusing one:
   already `where deleted_at is null`, so the title and the prefix are freed by
   that alone, and every read the student reaches inner-joins on the same
   condition, so the invitation link 404s with no extra work.
+- **Only allowlisted GitHub organizations can create classrooms.** The
+  original had no equivalent and could not: it was GitHub's public service,
+  where `Organization::Creator#ensure_users_are_authorized!` and
+  `organizations_controller.rb:131` only ever ask "are you an admin of this
+  org". This is a single-cátedra deployment on the cátedra's own Supabase, and
+  the GitHub App has to stay **public** — a private App only installs on the
+  account that owns it, and it lives in a separate account so the org of the
+  materia can install it — so without this a stranger installs the App on their
+  own org and creates classrooms in our database. `GITHUB_ALLOWED_ORG_IDS`
+  holds the org `github_id`s, ids and never logins (DA-2), and it is
+  **required**: a deploy that forgets it refuses to create rather than opening
+  the door. The boundary is `isAllowedOrganization` inside `createClassroom` —
+  the only path that creates one; `/classrooms/new` filters the org list with
+  `allowedOrganizations` so it never offers what it would refuse on submit.
+  The control cannot live on login: students must be able to sign in without
+  belonging to any org. Reading is unaffected — the data layer already filters
+  by `organizations_users`, and classrooms already created keep working.
+  `users.site_admin` exists in the schema, unused, if a master key is ever
+  wanted.
 - **Editing propagates nothing to the repositories already created**, not even
   the visibility. `Assignment::Editor#update_attribute_for_all_assignment_repos`
   has a single `when "public_repo"` that enqueues
