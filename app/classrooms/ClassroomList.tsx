@@ -56,7 +56,10 @@ const SORT_LABEL: Record<Sort, string> = {
 
 export function ClassroomList({ classrooms }: { classrooms: ClassroomCard[] }) {
   const [query, setQuery] = useState('')
-  const [view, setView] = useState<View>('all')
+  // Divergence: the original defaults to "all" (`Organization.view_modes`);
+  // a cátedra accumulates archived classrooms term after term and wants the
+  // current ones first
+  const [view, setView] = useState<View>('active')
   const [sort, setSort] = useState<Sort>('newest')
 
   const shown = useMemo(() => {
