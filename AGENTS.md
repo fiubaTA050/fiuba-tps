@@ -215,6 +215,13 @@ reference code without mental translation. The confusing one:
   `docs/edicion-y-borrado-de-assignments.md`**, which records why closing
   submissions belongs in the edit screen and not in a toggle, and what must
   *not* propagate to existing repositories.
+- **Importing an export of the live GitHub Classroom follows
+  `docs/importar-el-export-de-github-classroom.md`**. The export is a dump of
+  the public Classroom API, so what it cannot answer — the App installation,
+  the teachers, the GitHub user ids, the roster, the team names, the long
+  invitation key — is what that document is about. `lib/data/import.ts` is the
+  one function in that directory with no session: read the header before
+  copying its shape for anything that serves a request.
 
 ## Tests
 
@@ -235,6 +242,7 @@ original spec name in a comment.
 | `npm run build` | production build |
 | `npm run db:generate` | generate a migration after editing `db/schema.ts` |
 | `npm run db:migrate` | apply migrations |
+| `npm run import:classroom -- <dir> --dry-run` | read an export of GitHub Classroom without writing |
 
 Credentials live in `.env.local`; `.env.example` lists what is needed and the
 README explains how to create the GitHub App.
