@@ -534,22 +534,47 @@
 
 .site-header {
   color: #ccc;
-  background-color: #2f3232;
+
+  /* --color-scale-gray-9 on the live site; v22 dropped the scale variables */
+  background-color: #24292f;
+  padding-top: 16px;
+  padding-bottom: 11px;
 }
 
-.site-nav a:not(.dropdown-item) {
+/* The band is full-bleed on the live site: `.full-width` is not a class its
+   stylesheet defines, the div is simply a block with `p-responsive` gutters */
+.full-width {
+  width: 100%;
+}
+
+/* The seal is black line art on transparent; the header is dark */
+.site-logo {
+  filter: invert(1);
+}
+
+/* The live rule is `a` only — the sign-in control is a form button here, so it
+   gets the same treatment instead of Primer's blue link on a dark band */
+.site-nav a:not(.ActionListContent),
+.site-nav .btn-link {
   color: rgb(255 255 255 / 50%);
 }
 
-.site-nav a:hover:not(.dropdown-item) {
+.site-nav a:hover:not(.ActionListContent),
+.site-nav .btn-link:hover {
   color: #fff;
   text-decoration: none;
 }
 
+/* The live wordmark is an SVG 32px tall next to the mark: ~24px, semibold */
 .site-title {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 600;
   color: #fff;
+}
+
+.site-title:hover {
+  color: #fff;
+  text-decoration: none;
 }
 
 /* primer/marketing v10 utility, not shipped by @primer/css */
@@ -1039,6 +1064,8 @@
 
 .ActionListItem-description {
   font-size: var(--text-body-size-small);
+  /* The "Sesión iniciada como:" divider is semibold; the login under it is not */
+  font-weight: var(--base-text-weight-normal);
   line-height: var(--text-body-lineHeight-small);
   color: var(--fgColor-muted);
 }
@@ -1051,6 +1078,18 @@
 
 .ActionListContent[aria-checked='false'] .ActionListItem-singleSelectCheckmark {
   visibility: hidden;
+}
+
+.ActionList-sectionDivider:empty {
+  display: block;
+  height: var(--borderWidth-thin);
+  padding: 0;
+  margin-block-start: calc(var(--base-size-8) - var(--borderWidth-thin));
+  margin-block-end: var(--base-size-8);
+  margin-inline: calc(var(--base-size-8) * -1);
+  list-style: none;
+  background: var(--borderColor-muted);
+  border: 0;
 }
 
 .ActionList-sectionDivider:not(:empty) {
