@@ -21,9 +21,11 @@ export const dynamic = 'force-dynamic'
  * the students and the GitHub accounts nobody claimed an identifier with —
  * under a tabnav, and the danger zone in its own bordered Box.
  *
- * One thing of the live page is missing: the pagination, because a cátedra
- * roster is a few hundred rows and paginating costs the teacher their browser's
- * find-in-page.
+ * Both tabs paginate, as they do on the live site and in the original — 20
+ * rows to a page, each tab with its own page number. The whole roster is
+ * server-rendered and `RosterTabs` hands out a page of it, so the paging costs
+ * no request; what it does cost is the browser's find-in-page over the rows
+ * that are not on the page.
  */
 export default async function RosterPage(props: PageProps<'/classrooms/[slug]/roster'>) {
   const session = await auth()
@@ -83,23 +85,15 @@ export default async function RosterPage(props: PageProps<'/classrooms/[slug]/ro
                 <RosterEntryRow key={entry.id} entry={entry} classroomSlug={classroom.slug} />
               ))}
               accountsCount={accounts.length}
-              accounts={
-                accounts.length === 0 ? (
-                  <p className="color-fg-muted py-2 mb-0">
-                    Todas las cuentas que participan del classroom están vinculadas.
-                  </p>
-                ) : (
-                  accounts.map((account) => (
-                    <UnlinkedAccountRow
-                      key={account.id}
-                      account={account}
-                      classroomSlug={classroom.slug}
-                      identifierName={roster.identifierName}
-                      entries={unlinkedEntries}
-                    />
-                  ))
-                )
-              }
+              accounts={accounts.map((account) => (
+                <UnlinkedAccountRow
+                  key={account.id}
+                  account={account}
+                  classroomSlug={classroom.slug}
+                  identifierName={roster.identifierName}
+                  entries={unlinkedEntries}
+                />
+              ))}
             />
           </div>
         </div>

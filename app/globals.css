@@ -1115,3 +1115,49 @@
   color: #f3f3f3;
   background-color: #555;
 }
+
+
+/*
+ * Primer styles the paginator as `.pagination a, .pagination span, .pagination
+ * em`, the elements Kaminari renders. Here the page numbers are `<button>`s,
+ * because pagination happens in the browser (components/Pagination), so the
+ * same declarations are repeated for them — including the responsive collapse
+ * that leaves only the ends of the window on a narrow screen.
+ */
+.pagination button {
+  min-width: 32px;
+  padding: 5px 10px;
+  font: inherit;
+  line-height: 20px;
+  color: var(--fgColor-default);
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+  user-select: none;
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition: border-color 0.2s cubic-bezier(0.3, 0, 0.5, 1);
+}
+
+.pagination button:hover,
+.pagination button:focus {
+  border-color: var(--borderColor-default);
+  transition-duration: 0.1s;
+}
+
+.pagination button:active {
+  border-color: var(--borderColor-muted);
+  transition: none;
+}
+
+.pagination > button {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .pagination > button {
+    display: inline-block;
+  }
+}

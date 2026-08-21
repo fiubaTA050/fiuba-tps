@@ -12,11 +12,12 @@ import {
   XCircleFillIcon,
   XIcon,
 } from '@primer/octicons-react'
-import { type ComponentProps, useMemo, useState } from 'react'
+import { type ComponentProps, useMemo, useRef, useState } from 'react'
 
 import { hasSubmitted, type RepoRow, type SubmissionTone } from '@/lib/assignment-rows'
 
 import { LinkToStudentDialog } from './LinkToStudentDialog'
+import { Pagination } from './Pagination'
 
 /**
  * The list of repositories on an assignment dashboard, with the filter bar the
@@ -38,7 +39,18 @@ import { LinkToStudentDialog } from './LinkToStudentDialog'
  * Two of the live filters have nothing behind them: "Passing/Failing" is
  * autograding, and the "On-time/Late" halves of the submission filter need
  * deadlines. Neither is ported.
+ *
+ * **Pagination is client-side for the same reason**, over the rows the filters
+ * left. The live site puts it in the URL, as Kaminari does — see
+ * components/Pagination for the markup and the window it draws.
  */
+
+/**
+ * Rows per page, measured on a saved copy of the live dashboard: 30 items and
+ * a second page. Kaminari's `default_per_page` in the archived original is 20;
+ * the deployment the cátedra uses every day shows 30.
+ */
+const PER_PAGE = 30
 
 /** The live "Filter by submission", minus its two deadline options */
 type SubmissionFilter = 'submitted' | 'not_submitted'
@@ -98,6 +110,8 @@ export function AssignmentRepoList({
   const [accepted, setAccepted] = useState<Set<AcceptedFilter>>(new Set())
   const [unlinked, setUnlinked] = useState<Set<UnlinkedFilter>>(new Set())
   const [sort, setSort] = useState<Sort>('az')
+  const [page, setPage] = useState(1)
+  const listTop = useRef<HTMLDivElement>(null)
 
   const filtered = useMemo(() => {
     // "the student's GitHub handle, their identifier, or the team's name"
@@ -136,6 +150,25 @@ export function AssignmentRepoList({
 
     return [...kept].sort(compareBy(sort))
   }, [rows, query, submission, accepted, unlinked, sort])
+
+  // Back to the first page whenever the list underneath changes — a filter, a
+  // sort or a search. `filtered` is a memo, so its identity is that change.
+  const [lastFiltered, setLastFiltered] = useState(filtered)
+  if (lastFiltered !== filtered) {
+    setLastFiltered(filtered)
+    setPage(1)
+  }
+
+  const pageCount = Math.ceil(filtered.length / PER_PAGE)
+  const visible = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE)
+
+  function goToPage(next: number) {
+    setPage(next)
+    // The live site navigates, so the browser lands at the top of the new
+    // page; here the rows are replaced under a paginator that sits below the
+    // fold, and without this the teacher would be left staring at its end
+    listTop.current?.scrollIntoView({ block: 'start' })
+  }
 
   const dirty =
     query !== '' || submission.size > 0 || accepted.size > 0 || unlinked.size > 0 || sort !== 'az'
@@ -287,7 +320,7 @@ export function AssignmentRepoList({
       )}
 
       {/* `<div class="mt-3">` around the list on the live site */}
-      <div className="Box Box--condensed mt-3">
+      <div className="Box Box--condensed mt-3" ref={listTop}>
         <div className="Box-header">
           <div className="d-table col-12">
             <div className="Box-title col-6 d-table-cell">{title}</div>
@@ -306,13 +339,16 @@ export function AssignmentRepoList({
             </p>
           ) : (
             <div className="assignment-repo-list pb-2">
-              {filtered.map((row) => (
+              {visible.map((row) => (
                 <RepoListItem key={row.key} row={row} linkToStudent={linkToStudent} />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Outside the Box, where the live site puts it */}
+      <Pagination page={page} pageCount={pageCount} onChange={goToPage} label={title} />
     </>
   )
 }

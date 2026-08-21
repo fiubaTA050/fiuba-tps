@@ -91,6 +91,23 @@ reference code without mental translation. The confusing one:
   in the URL would re-run that query on every keystroke. Of the live filters,
   "Passing/Failing" (autograding) and the "On-time/Late" halves of the
   submission one (deadlines) have nothing behind them and are dropped.
+- **Its pagination runs in the browser too**, over the rows the filters left.
+  The original paginates with Kaminari (`shared/_pagination` over the
+  `app/views/kaminari/` partials) and the live site still does, 30 rows to a
+  page — `components/Pagination` copies that markup, and the window it draws is
+  Kaminari's default `window: 4` with `outer_window: 0`. What it cannot copy is
+  the `?page=` link: the query behind the page is the same one a filter would
+  re-run. Two small divergences follow from that — the page numbers are
+  `<button>`s, so `app/globals.css` repeats Primer's `.pagination a` rules for
+  them, and the `<h2 class="sr-only">` the live site nests inside the `nav` is
+  an `aria-label` instead, because as its first child that heading pushes
+  "Previous" into the `:nth-child(2)` that Primer hides under 544px.
+  The roster's two tabs paginate through the same component, 20 rows to a page
+  — Kaminari's default, which only the assignment dashboard overrides — each
+  tab holding its own page number, as `roster_entries_page` and
+  `unlinked_users_page` do in `orgs/rosters/show.html.erb`. There the whole
+  roster is server-rendered and the browser hands out a page of it, so the cost
+  is not a request but the teacher's find-in-page over the rows off the page.
 - **The classroom index is the original's card grid**, `_organization_filters`
   over `_organization_card_layout`, which is still what the live site renders —
   a two-column grid of cards, each with a coloured band, a kebab menu, the
