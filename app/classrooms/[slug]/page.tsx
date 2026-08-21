@@ -1,11 +1,9 @@
 import {
   DotFillIcon,
-  LockIcon,
   PencilIcon,
   PeopleIcon,
   PersonIcon,
   PlusIcon,
-  RepoIcon,
   TrashIcon,
 } from '@primer/octicons-react'
 import Link from 'next/link'
@@ -30,7 +28,6 @@ type Listed = {
   editHref: string
   invitationUrl: string
   invitationsEnabled: boolean
-  publicRepo: boolean
   group: boolean
   /** The set of teams, for a group assignment */
   groupingTitle: string | null
@@ -68,7 +65,6 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
       editHref: `/classrooms/${classroom.slug}/assignments/${assignment.slug}/edit`,
       invitationUrl: invitationUrl(origin, 'assignment', assignment),
       invitationsEnabled: assignment.invitationsEnabled,
-      publicRepo: assignment.publicRepo,
       group: false,
       groupingTitle: null,
     })),
@@ -79,7 +75,6 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
       editHref: `/classrooms/${classroom.slug}/group-assignments/${assignment.slug}/edit`,
       invitationUrl: invitationUrl(origin, 'group-assignment', assignment),
       invitationsEnabled: assignment.invitationsEnabled,
-      publicRepo: assignment.publicRepo,
       group: true,
       groupingTitle: assignment.grouping.title,
     })),
@@ -165,7 +160,7 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
                         <span>{assignment.invitationsEnabled ? 'Activo' : 'Inactivo'}</span>
                       </div>
 
-                      <p className="color-fg-muted d-flex flex-items-center mb-0 pr-4">
+                      <p className="color-fg-muted d-flex flex-items-center mb-0">
                         {assignment.group ? (
                           <PeopleIcon className="mr-1" />
                         ) : (
@@ -174,18 +169,6 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
                         {assignment.group
                           ? `Assignment grupal de ${assignment.groupingTitle}`
                           : 'Assignment individual'}
-                      </p>
-
-                      {/* Not on the live row, kept from ours: which visibility
-                          the repos get is the other thing a teacher checks
-                          before handing the link out. */}
-                      <p className="color-fg-muted d-flex flex-items-center mb-0">
-                        {assignment.publicRepo ? (
-                          <RepoIcon className="mr-1" />
-                        ) : (
-                          <LockIcon className="mr-1" />
-                        )}
-                        {assignment.publicRepo ? 'Repos públicos' : 'Repos privados'}
                       </p>
                     </div>
                   </div>

@@ -60,12 +60,12 @@ reference code without mental translation. The confusing one:
 - **The assignment list inside the shell follows the live site too.** Its rows
   are not a `Box`: each is a full-width `border-top` row with the title, a
   `dot-fill` and Activo/Inactivo, the kind of assignment, a "Copiar link de
-  invitación" button and two icon-only buttons. Two divergences: the row also
-  says whether the repos are public or private, which the live row leaves out
-  and a teacher checks before handing the link out; and the trash links to the
-  edit screen's `#borrar` instead of opening a modal, because that is where
-  deleting lives here (`docs/edicion-y-borrado-de-assignments.md`), painted red
-  at rest where the live one is muted until hover.
+  invitación" button and two icon-only buttons. One divergence: the trash links
+  to the edit screen's `#borrar` instead of opening a modal, because that is
+  where deleting lives here (`docs/edicion-y-borrado-de-assignments.md`),
+  painted red at rest where the live one is muted until hover. The row said
+  whether the repos are public or private for a while; it was dropped, since
+  the live row leaves it out and the edit screen is where that is checked.
 - **The assignment dashboard follows the live site too**, for the same reason:
   header band, `StatTiles`, and one `.assignment-repo-list` row per student or
   team with its repository, last commit and commit count. Four things the live
