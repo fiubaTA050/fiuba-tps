@@ -82,7 +82,12 @@ export default async function RosterPage(props: PageProps<'/classrooms/[slug]/ro
             <RosterTabs
               studentsCount={roster.entries.length}
               students={roster.entries.map((entry) => (
-                <RosterEntryRow key={entry.id} entry={entry} classroomSlug={classroom.slug} />
+                <RosterEntryRow
+                  key={entry.id}
+                  entry={entry}
+                  classroomSlug={classroom.slug}
+                  unlinkedAccounts={accounts}
+                />
               ))}
               accountsCount={accounts.length}
               accounts={accounts.map((account) => (

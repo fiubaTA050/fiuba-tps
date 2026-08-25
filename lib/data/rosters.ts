@@ -400,9 +400,10 @@ export async function listUnlinkedAccounts(
  * Port of RostersController#link, which the original reaches from two places
  * that write the same column from opposite sides: `_link_to_student_modal`
  * (a GitHub account, pick an identifier) and `_link_to_github_account_modal`
- * (an identifier, pick an account). Only the first is ported, from the two
- * screens that list the accounts: the roster's "Cuentas de GitHub sin vincular"
- * tab and the assignment dashboard — see the note in AcceptanceList.
+ * (an identifier, pick an account). Both are ported: the first from the two
+ * screens that list the accounts — the roster's "Cuentas de GitHub sin
+ * vincular" tab and the assignment dashboard, see the note in AcceptanceList —
+ * and the second from the roster's own rows.
  *
  * The original's guard is `raise unless unlinked_user_ids.include?(user_id)`,
  * and it is the whole authorization on the account side: without it a teacher

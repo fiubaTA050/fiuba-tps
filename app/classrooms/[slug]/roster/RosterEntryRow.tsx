@@ -1,11 +1,12 @@
 'use client'
 
-import { CheckIcon, MarkGithubIcon, PencilIcon, TrashIcon } from '@primer/octicons-react'
+import { CheckIcon, PencilIcon, PersonIcon, TrashIcon } from '@primer/octicons-react'
 import { useActionState, useState } from 'react'
 
-import type { RosterEntryItem } from '@/lib/data/rosters'
+import type { RosterEntryItem, UnlinkedAccount } from '@/lib/data/rosters'
 
 import { deleteEntryAction, renameEntryAction, unlinkAccountAction } from './actions'
+import { LinkToGitHubAccountDialog } from './LinkToGitHubAccountDialog'
 import { EMPTY_STATE } from './state'
 
 /**
@@ -16,11 +17,12 @@ import { EMPTY_STATE } from './state'
  *     <div class="d-flex flex-justify-end">   unlink · pencil · trash
  *
  * `Unlink GitHub account` is here, on a linked entry, exactly as in
- * `_roster_entry.html.erb:35`, and red as on the live site. Its counterpart on
- * an unlinked one — the original's `Link to GitHub account`, which opens
- * `_link_to_github_account_modal` — is not: the same vinculación is done from
- * the account's side, on the "Cuentas de GitHub sin vincular" tab and on the
- * assignment dashboard. See components/LinkToStudentDialog.
+ * `_roster_entry.html.erb:35`, and red as on the live site; so is its
+ * counterpart on an unlinked one, `Link to GitHub account`
+ * (`_roster_entry.html.erb:40`), which opens LinkToGitHubAccountDialog. The
+ * same vinculación can still be done from the account's side, on the "Cuentas
+ * de GitHub sin vincular" tab and on the assignment dashboard — see
+ * components/LinkToStudentDialog.
  *
  * The rename happens inline instead of in a modal, and the delete confirmation
  * is a `confirm()` — which is what Rails' `data-confirm` did before the
@@ -30,9 +32,12 @@ import { EMPTY_STATE } from './state'
 export function RosterEntryRow({
   entry,
   classroomSlug,
+  unlinkedAccounts,
 }: {
   entry: RosterEntryItem
   classroomSlug: string
+  /** The accounts the dialog of an unlinked entry offers */
+  unlinkedAccounts: UnlinkedAccount[]
 }) {
   /**
    * Which identifier the inline editor is open for, rather than a boolean: a
@@ -88,22 +93,24 @@ export function RosterEntryRow({
     <div className="py-2">
       <div className="d-flex col-12 flex-justify-between flex-wrap flex-items-center">
         <div className="d-flex flex-items-center">
-          {entry.githubLogin ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={`https://github.com/${entry.githubLogin}.png?size=92`}
-              className="avatar avatar-user mr-3"
-              height={46}
-              width={46}
-              alt=""
-            />
-          ) : (
-            // The slot the avatar will take once the entry is linked, so the
-            // identifiers of a fresh roster do not sit against the edge
-            <span className="d-flex flex-items-center flex-justify-center color-fg-muted mr-3">
-              <MarkGithubIcon size={24} />
-            </span>
-          )}
+          {/* `.assignment-icon`, the circle the original and the live site
+              draw both states in: the avatar once the entry is linked, and a
+              `person` octicon while it is not, so a fresh roster reads as a
+              list of students rather than of missing avatars */}
+          <span className="assignment-icon assignment-icon-individual d-inline-flex flex-items-center flex-justify-center flex-shrink-0">
+            {entry.githubLogin ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`https://github.com/${entry.githubLogin}.png?size=92`}
+                className="avatar avatar-user flex-shrink-0"
+                height={46}
+                width={46}
+                alt=""
+              />
+            ) : (
+              <PersonIcon size={22} verticalAlign="middle" />
+            )}
+          </span>
 
           <div className="flex-column">
             <h3 className="h4">{entry.identifier}</h3>
@@ -118,8 +125,10 @@ export function RosterEntryRow({
         </div>
 
         <div className="d-flex flex-items-center">
-          {/* `submit_tag 'Unlink GitHub account'`, only on a linked entry */}
-          {entry.githubLogin && (
+          {/* `submit_tag 'Unlink GitHub account'` on a linked entry, the
+              `Link to GitHub account` of `_roster_entry.html.erb:40` on one
+              that is not — the same either-or the original renders */}
+          {entry.githubLogin ? (
             <form action={unlinkAction}>
               <input type="hidden" name="classroom_slug" value={classroomSlug} />
               <input type="hidden" name="entry_id" value={entry.id} />
@@ -127,6 +136,13 @@ export function RosterEntryRow({
                 Desvincular
               </button>
             </form>
+          ) : (
+            <LinkToGitHubAccountDialog
+              entryId={entry.id}
+              identifier={entry.identifier}
+              classroomSlug={classroomSlug}
+              accounts={unlinkedAccounts}
+            />
           )}
 
           <button

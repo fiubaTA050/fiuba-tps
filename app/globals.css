@@ -1105,6 +1105,32 @@
 
 
 /*
+ * The circle a student is drawn in on the roster, copied verbatim from the live
+ * stylesheet — `_roster_entry.html.erb:6` puts either the avatar or a `person`
+ * octicon inside it, and the live site still renders the same span. The
+ * `.octicon` rule stretches the glyph's box to the height of the circle; here
+ * the span centres it with flexbox instead, because @primer/octicons-react
+ * ships every svg with an inline `vertical-align: text-bottom` that the live
+ * markup does not have, and against a fixed 45px box that pushes the glyph out
+ * the top. Same divergence, and same reason, as the card icon in
+ * components/../ClassroomList.
+ */
+.assignment-icon {
+  display: inline-block;
+  width: 45px;
+  height: 45px;
+  margin-right: 0.7rem;
+  text-align: center;
+  border-radius: 50%;
+}
+
+.assignment-icon-individual {
+  color: #555;
+  background-color: rgba(216, 216, 216, 0.3);
+}
+
+
+/*
  * The tint the live site gives the icon of a group assignment on a classroom
  * card, copied verbatim from its stylesheet. An individual assignment uses
  * Primer's own `.color-bg-accent`, as in the original's card partial; the group
