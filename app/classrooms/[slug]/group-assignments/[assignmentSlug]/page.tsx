@@ -9,7 +9,7 @@ import { StatTiles } from '@/components/StatTiles'
 import { submissionLabel, type RepoRow, type SubmissionLabel } from '@/lib/assignment-rows'
 import { findGroupAssignment } from '@/lib/data/group-assignments'
 import { listGroupAssignmentAcceptances, type TeamAcceptance } from '@/lib/data/groups'
-import { findClassroom } from '@/lib/data/organizations'
+import { currentInstallationId, findClassroomInstallation } from '@/lib/data/organizations'
 import { rosterSummary } from '@/lib/data/rosters'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import type { RepositorySnapshot } from '@/lib/github/repositories'
@@ -35,9 +35,9 @@ export default async function GroupAssignmentPage(
   const { slug, assignmentSlug } = await props.params
 
   // The roster's size is the first tile's "alumnos en el roster"; it is an
-  // indexed count, and `findClassroom` is memoised per request
+  // indexed count
   const [classroom, assignment, acceptances, roster] = await Promise.all([
-    findClassroom(session, slug),
+    findClassroomInstallation(session, slug),
     findGroupAssignment(session, slug, assignmentSlug),
     listGroupAssignmentAcceptances(session, slug, assignmentSlug),
     rosterSummary(session, slug),
@@ -56,19 +56,35 @@ export default async function GroupAssignmentPage(
     .map((team) => team.repoId)
     .filter((id): id is number => id !== null)
 
-  const [starterCode, snapshots] = classroom.organization
-    ? await Promise.all([
-        assignment.starterCodeRepoId === null
-          ? null
-          : findRepositoryById(classroom.organization.installationId, assignment.starterCodeRepoId),
-        listRepositorySnapshots(
-          classroom.organization.installationId,
-          classroom.organization.login,
-          repoIds,
-          assignment.starterCodeRepoId === null ? 0 : 1,
-        ),
-      ])
-    : [null, new Map()]
+  // DA-2: only the ids are stored, everything shown about a repository is read
+  // from GitHub here.
+  const readGitHub = (installationId: number) =>
+    Promise.all([
+      assignment.starterCodeRepoId === null
+        ? null
+        : findRepositoryById(installationId, assignment.starterCodeRepoId),
+      listRepositorySnapshots(
+        installationId,
+        repoIds,
+        assignment.starterCodeRepoId === null ? 0 : 1,
+      ),
+    ])
+
+  // The reads go out against the stored installation at the same time as the
+  // check that it is still the right one, instead of queueing behind it: they
+  // need the installation and nothing else about the organization.
+  const [installationId, reads] = await Promise.all([
+    currentInstallationId(session, classroom),
+    readGitHub(classroom.installationId),
+  ])
+
+  // A reinstall issues a new installation id, so those reads went out against a
+  // dead one. Rare — and `currentInstallationId` has already written the new id
+  // back, so the next visit takes the fast path.
+  const [starterCode, snapshots] =
+    installationId !== null && installationId !== classroom.installationId
+      ? await readGitHub(installationId)
+      : reads
 
   const accepted = acceptances.teams.filter((team) => team.status !== 'unaccepted').length
   const submitted = repoIds.filter((id) => (snapshots.get(id)?.commitCount ?? 0) > 0).length

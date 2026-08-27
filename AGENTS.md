@@ -73,8 +73,15 @@ reference code without mental translation. The confusing one:
   propagates to existing repos, see below), autograding, Reuse assignment, and
   the `gh classroom clone` command. The live "Late" label and the per-team
   deadline extension need deadlines, which are not ported either. The commit
-  data for the whole cohort comes from one GraphQL query
-  (`listRepositorySnapshots`), never one REST call per repository.
+  data for the whole cohort comes from `listRepositorySnapshots`, which asks
+  GitHub for the repositories **by id** — GraphQL `nodes(ids:)` over node ids
+  derived from the stored `databaseId` — in parallel batches of five, never one
+  REST call per repository. It walked the organization's repositories instead
+  until 2026-08-27, on the belief that the numeric ids could not be turned into
+  node ids; that cost the commit history of all 127 repositories of
+  `fiubaTA050-labs` to read the 13 of one assignment, and was 90% of a 5.2 s
+  page. Measured after the change: 5.6 s → 0.55 s for those 13, with identical
+  output on all four dashboards.
 - **The invitation link a teacher copies is the short one**, `<host>/a/<key>`
   and `<host>/g/<key>`, ported from the original's ShortKey concern,
   `ShortUrlController` and `routes.rb:31-32`. The long key stays canonical: the

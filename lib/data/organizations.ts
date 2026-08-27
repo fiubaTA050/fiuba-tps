@@ -9,6 +9,7 @@ import { organizationSlug } from '@/lib/data/slug'
 import { db } from '@/lib/db'
 import { env } from '@/lib/env'
 import {
+  findInstallationAccount,
   findOrganizationByInstallation,
   listUserOrganizations,
   setDefaultRepositoryPermissionToNone,
@@ -243,6 +244,71 @@ export async function findClassroom(
     archivedAt: row.archivedAt,
     organization,
   }
+}
+
+/**
+ * The classroom a screen needs when it only reads through the installation and
+ * never names the organization — the two assignment dashboards.
+ *
+ * It is `findClassroom` without the GitHub round trips, so the reads that
+ * depend on the installation can start from the stored id instead of queueing
+ * behind them. `currentInstallationId` is the other half.
+ */
+export type ClassroomInstallation = {
+  id: number
+  title: string
+  slug: string
+  archivedAt: Date | null
+  /** The stable key: installation ids change, this does not */
+  githubId: number
+  /** Stored, and possibly stale — see `currentInstallationId` */
+  installationId: number
+}
+
+export async function findClassroomInstallation(
+  session: Session,
+  slug: string,
+): Promise<ClassroomInstallation | null> {
+  const [row] = await db
+    .select({
+      id: organizations.id,
+      title: organizations.title,
+      slug: organizations.slug,
+      archivedAt: organizations.archivedAt,
+      githubId: organizations.githubId,
+      installationId: organizations.installationId,
+    })
+    .from(organizations)
+    .innerJoin(organizationsUsers, eq(organizationsUsers.organizationId, organizations.id))
+    .where(
+      and(
+        eq(organizations.slug, slug),
+        eq(organizationsUsers.userId, Number(session.user.id)),
+        isNull(organizations.deletedAt),
+      ),
+    )
+
+  return row ?? null
+}
+
+/**
+ * The installation to read through: the stored one when it still exists, the
+ * re-resolved one after a reinstall, null when the organization is gone.
+ *
+ * `findInstallationAccount` and not `findOrganizationByInstallation` on
+ * purpose: the second one asks GitHub for the teacher's role as well, and the
+ * dashboards never render it — that is a whole round trip, measured at ~285 ms,
+ * for a flag nothing reads. Same reasoning as the invitation screens, in
+ * lib/github/organizations.ts.
+ */
+export async function currentInstallationId(
+  session: Session,
+  classroom: ClassroomInstallation,
+): Promise<number | null> {
+  if (await findInstallationAccount(classroom.installationId)) return classroom.installationId
+
+  const healed = await reresolveInstallation(session, classroom.id, classroom.githubId)
+  return healed?.installationId ?? null
 }
 
 /** The classroom row a teacher is allowed to act on, with nothing read from GitHub */

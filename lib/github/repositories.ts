@@ -337,29 +337,70 @@ export type RepositorySnapshot = {
   commitCount: number
 }
 
-/** Bounds the worst case on an org that has accumulated years of repositories */
-const SNAPSHOT_PAGES = 10
-const SNAPSHOT_PAGE_SIZE = 100
-
-type SnapshotPage = {
-  organization: {
-    repositories: {
-      pageInfo: { hasNextPage: boolean; endCursor: string | null }
-      nodes: {
-        databaseId: number | null
-        nameWithOwner: string
-        url: string
-        defaultBranchRef: {
-          target: { committedDate?: string; history?: { totalCount: number } } | null
-        } | null
-      }[]
-    }
-  } | null
-}
+/**
+ * GraphQL refuses more than 100 node ids in one `nodes(ids:)`, and small
+ * batches run in parallel on GitHub's side: measured on TA050, 80 repositories
+ * cost 5.5 s asked in one query and 0.6 s asked in batches of 5. The limit is
+ * not the field but the wait for one repository's commit history.
+ */
+const SNAPSHOT_BATCH = 5
 
 /**
- * The snapshots of a set of repositories, in one or two API calls rather than
- * one per repository.
+ * The GraphQL node id of a repository, derived from the numeric id we store.
+ *
+ * GitHub's next-gen ids are `R_` followed by base64url of msgpack `[0, id]` —
+ * measured against the API: repository 1064428436 is `R_kgDOP3HjlA`, which is
+ * what `Repository.id` returns for it today. Deriving it is what lets this ask
+ * for repositories by id without a name, a migration or a stored column.
+ */
+function repositoryNodeId(databaseId: number): string {
+  // msgpack: 0x92 = 2-element array, 0x00 = the Repository type tag, then the
+  // id as the narrowest unsigned int that holds it
+  if (databaseId <= 0xffffffff) {
+    const packed = Buffer.alloc(7)
+    packed[0] = 0x92
+    packed[1] = 0x00
+    packed[2] = 0xce // uint32
+    packed.writeUInt32BE(databaseId, 3)
+    return `R_${packed.toString('base64url')}`
+  }
+
+  // Not reachable yet — GitHub's repository ids are around 1.1e9 — but the
+  // encoding is the msgpack one and this is what it becomes past 2^32
+  const packed = Buffer.alloc(11)
+  packed[0] = 0x92
+  packed[1] = 0x00
+  packed[2] = 0xcf // uint64
+  packed.writeBigUInt64BE(BigInt(databaseId), 3)
+  return `R_${packed.toString('base64url')}`
+}
+
+type SnapshotNode = {
+  databaseId: number | null
+  nameWithOwner: string
+  url: string
+  defaultBranchRef: {
+    target: { committedDate?: string; history?: { totalCount: number } } | null
+  } | null
+} | null
+
+const SNAPSHOT_QUERY = `query($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on Repository {
+      databaseId
+      nameWithOwner
+      url
+      defaultBranchRef {
+        target {
+          ... on Commit { committedDate history { totalCount } }
+        }
+      }
+    }
+  }
+}`
+
+/**
+ * The snapshots of a set of repositories, asked for by id.
  *
  * The dashboard needs the name, the URL, the commit count and the date of the
  * last commit for every student of the assignment. Asked one repository at a
@@ -367,19 +408,26 @@ type SnapshotPage = {
  * TA050 — the shape the GitHub token caching note already flagged, and the
  * reason `docs/creacion-de-repos.md` cares about call counts at all.
  *
- * There is no way to ask for specific repositories by their numeric id: the
- * REST lookup is one call each, and GraphQL's `nodes(ids:)` wants the global
- * node ids, which are not what is stored. So this walks the organization's
- * repositories instead, newest push first, and stops as soon as every id it
- * was asked for has turned up — one page for a cohort that is currently
- * working, and bounded by SNAPSHOT_PAGES in the pathological case.
+ * This used to walk the organization's repositories page by page, newest push
+ * first, stopping once every wanted id had turned up, on the belief that
+ * `nodes(ids:)` was unusable because it wants global node ids and we store
+ * numeric ones. It is usable: the node id is derivable (`repositoryNodeId`).
+ * The walk was the whole cost of the screen — it paid for the commit history
+ * of all 127 repositories of `fiubaTA050-labs` to read 13 of them, 5.1 s per
+ * page, and a cohort whose repositories had not been pushed to recently needed
+ * two pages. Asking by id is 0.6 s for the same 13, and does not grow with the
+ * organization. It also fixes a quiet bug: the walk gave up after ten pages,
+ * so an old repository in a growing organization would eventually render as
+ * unreachable without anyone having deleted it.
  *
- * GraphQL and not REST because `GET /orgs/{org}/repos` carries neither the
+ * GraphQL and not REST because `GET /repositories/{id}` carries neither the
  * commit count nor the last commit date, and both are one field here.
  *
  * Ids that never turn up are simply absent from the map: the repository was
  * deleted or moved out of the org, which is the NullGitHubRepository case the
- * callers already render as unreachable.
+ * callers already render as unreachable. GitHub answers a batch holding one
+ * such id with an error *and* the data for the rest, which is why the catch
+ * reads `error.data` instead of dropping the batch.
  *
  * `baselineCommits` is what every repository of the assignment starts with,
  * subtracted so the count is the student's own work. **Deliberately not the
@@ -395,76 +443,63 @@ type SnapshotPage = {
  */
 export async function listRepositorySnapshots(
   installationId: number,
-  orgLogin: string,
   wanted: Iterable<number>,
   baselineCommits = 0,
 ): Promise<Map<number, RepositorySnapshot>> {
-  const pending = new Set(wanted)
+  const ids = [...new Set(wanted)]
   const snapshots = new Map<number, RepositorySnapshot>()
-  if (pending.size === 0) return snapshots
+  if (ids.length === 0) return snapshots
 
   const octokit = installationClient(installationId)
-  let cursor: string | null = null
 
-  for (let page = 0; page < SNAPSHOT_PAGES; page++) {
-    let data: SnapshotPage
-
-    try {
-      data = await octokit.graphql<SnapshotPage>(
-        `query($login: String!, $size: Int!, $cursor: String) {
-          organization(login: $login) {
-            repositories(
-              first: $size
-              after: $cursor
-              orderBy: { field: PUSHED_AT, direction: DESC }
-            ) {
-              pageInfo { hasNextPage endCursor }
-              nodes {
-                databaseId
-                nameWithOwner
-                url
-                defaultBranchRef {
-                  target {
-                    ... on Commit { committedDate history { totalCount } }
-                  }
-                }
-              }
-            }
-          }
-        }`,
-        { login: orgLogin, size: SNAPSHOT_PAGE_SIZE, cursor },
-      )
-    } catch {
-      // The org vanished, or the App lost access to it. Every row falls back to
-      // "unreachable", which is what a partial map already means.
-      return snapshots
-    }
-
-    const repositories = data.organization?.repositories
-    if (!repositories) return snapshots
-
-    for (const node of repositories.nodes) {
-      if (node.databaseId === null || !pending.delete(node.databaseId)) continue
-
-      const commit = node.defaultBranchRef?.target
-      // Clamped: a student who rewrites history can leave fewer commits than
-      // the repository was born with, and a negative count means nothing
-      const commitCount = Math.max(0, (commit?.history?.totalCount ?? 0) - baselineCommits)
-
-      snapshots.set(node.databaseId, {
-        id: node.databaseId,
-        fullName: node.nameWithOwner,
-        htmlUrl: node.url,
-        latestCommitAt: commit?.committedDate ? new Date(commit.committedDate) : null,
-        commitCount,
-      })
-    }
-
-    if (pending.size === 0 || !repositories.pageInfo.hasNextPage) break
-    cursor = repositories.pageInfo.endCursor
+  const batches: number[][] = []
+  for (let index = 0; index < ids.length; index += SNAPSHOT_BATCH) {
+    batches.push(ids.slice(index, index + SNAPSHOT_BATCH))
   }
 
+  await Promise.all(
+    batches.map(async (batch) => {
+      let nodes: SnapshotNode[]
+
+      try {
+        const data = await octokit.graphql<{ nodes: SnapshotNode[] }>(SNAPSHOT_QUERY, {
+          ids: batch.map(repositoryNodeId),
+        })
+        nodes = data.nodes
+      } catch (error) {
+        // A deleted repository makes the whole batch an error, but GitHub still
+        // returns every other node. Anything else — the org vanished, the App
+        // lost access — leaves the batch out, which the callers already read as
+        // unreachable.
+        nodes = partialNodes(error)
+      }
+
+      for (const node of nodes) {
+        if (!node?.databaseId) continue
+
+        const commit = node.defaultBranchRef?.target
+        // Clamped: a student who rewrites history can leave fewer commits than
+        // the repository was born with, and a negative count means nothing
+        const commitCount = Math.max(0, (commit?.history?.totalCount ?? 0) - baselineCommits)
+
+        snapshots.set(node.databaseId, {
+          id: node.databaseId,
+          fullName: node.nameWithOwner,
+          htmlUrl: node.url,
+          latestCommitAt: commit?.committedDate ? new Date(commit.committedDate) : null,
+          commitCount,
+        })
+      }
+    }),
+  )
+
   return snapshots
+}
+
+/** The nodes a GraphqlResponseError still carries alongside its errors */
+function partialNodes(error: unknown): SnapshotNode[] {
+  const nodes = (error as { data?: { nodes?: SnapshotNode[] } })?.data?.nodes
+  return Array.isArray(nodes) ? nodes : []
 }
 
 /**

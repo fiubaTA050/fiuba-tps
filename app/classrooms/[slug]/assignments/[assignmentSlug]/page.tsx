@@ -6,7 +6,7 @@ import { Breadcrumb } from '@/components/Breadcrumb'
 import { StatTiles } from '@/components/StatTiles'
 import { findAssignment } from '@/lib/data/assignments'
 import { listAssignmentAcceptances } from '@/lib/data/invitations'
-import { findClassroom } from '@/lib/data/organizations'
+import { currentInstallationId, findClassroomInstallation } from '@/lib/data/organizations'
 import { listUnlinkedEntries } from '@/lib/data/rosters'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
@@ -38,7 +38,7 @@ export default async function AssignmentPage(
   const { slug, assignmentSlug } = await props.params
 
   const [classroom, assignment, acceptances, unlinkedEntries] = await Promise.all([
-    findClassroom(session, slug),
+    findClassroomInstallation(session, slug),
     findAssignment(session, slug, assignmentSlug),
     listAssignmentAcceptances(session, slug, assignmentSlug),
     // What the "Link to student" dialog offers. Fetched with the rest rather
@@ -65,23 +65,36 @@ export default async function AssignmentPage(
     .filter((id): id is number => id !== null)
 
   // DA-2: only the ids are stored, everything shown about a repository is read
-  // from GitHub here. Both calls are skipped when the org is unreachable, which
-  // is the same NullGitHubRepository case the rows already render.
-  const [starterCode, snapshots] = classroom.organization
-    ? await Promise.all([
-        assignment.starterCodeRepoId === null
-          ? null
-          : findRepositoryById(classroom.organization.installationId, assignment.starterCodeRepoId),
-        listRepositorySnapshots(
-          classroom.organization.installationId,
-          classroom.organization.login,
-          repoIds,
-          // A repo generated from a template is born with one commit; one
-          // created empty, with none
-          assignment.starterCodeRepoId === null ? 0 : 1,
-        ),
-      ])
-    : [null, new Map()]
+  // from GitHub here.
+  const readGitHub = (installationId: number) =>
+    Promise.all([
+      assignment.starterCodeRepoId === null
+        ? null
+        : findRepositoryById(installationId, assignment.starterCodeRepoId),
+      listRepositorySnapshots(
+        installationId,
+        repoIds,
+        // A repo generated from a template is born with one commit; one
+        // created empty, with none
+        assignment.starterCodeRepoId === null ? 0 : 1,
+      ),
+    ])
+
+  // The reads go out against the stored installation at the same time as the
+  // check that it is still the right one, instead of queueing behind it: they
+  // need the installation and nothing else about the organization.
+  const [installationId, reads] = await Promise.all([
+    currentInstallationId(session, classroom),
+    readGitHub(classroom.installationId),
+  ])
+
+  // A reinstall issues a new installation id, so those reads went out against a
+  // dead one. Rare — and `currentInstallationId` has already written the new id
+  // back, so the next visit takes the fast path.
+  const [starterCode, snapshots] =
+    installationId !== null && installationId !== classroom.installationId
+      ? await readGitHub(installationId)
+      : reads
 
   const submitted = repoIds.filter((id) => (snapshots.get(id)?.commitCount ?? 0) > 0).length
   const students = acceptances.entries.length + acceptances.unlinkedAccounts.length
