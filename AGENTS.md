@@ -71,9 +71,11 @@ reference code without mental translation. The confusing one:
   team with its repository, last commit and commit count. Four things the live
   header carries are not ported and are not coming — Sync assignments (nothing
   propagates to existing repos, see below), autograding, Reuse assignment, and
-  the `gh classroom clone` command. The live "Late" label and the per-team
-  deadline extension need deadlines, which are not ported either. The commit
-  data for the whole cohort comes from `listRepositorySnapshots`, which asks
+  the `gh classroom clone` command. The live "Late" label is not on the
+  dashboard yet — the deadline it needs exists now (see entregas below), the
+  row that reads it does not — and the per-team deadline extension is not
+  ported. The commit data for the whole cohort comes from
+  `listRepositorySnapshots`, which asks
   GitHub for the repositories **by id** — GraphQL `nodes(ids:)` over node ids
   derived from the stored `databaseId` — in parallel batches of five, never one
   REST call per repository. It walked the organization's repositories instead
@@ -96,8 +98,9 @@ reference code without mental translation. The confusing one:
   link back to the assignment path, because Rails re-renders from the database.
   Here the page is `force-dynamic` and its rows cost a GitHub query, so a filter
   in the URL would re-run that query on every keystroke. Of the live filters,
-  "Passing/Failing" (autograding) and the "On-time/Late" halves of the
-  submission one (deadlines) have nothing behind them and are dropped.
+  "Passing/Failing" (autograding) has nothing behind it and is dropped; the
+  "On-time/Late" halves of the submission one now have a deadline to read and
+  are simply not built yet.
 - **Its pagination runs in the browser too**, over the rows the filters left.
   The original paginates with Kaminari (`shared/_pagination` over the
   `app/views/kaminari/` partials) and the live site still does, 30 rows to a
@@ -131,15 +134,43 @@ reference code without mental translation. The confusing one:
 - **"Entregado" is one commit of the student's own**, and the count on the
   dashboard is net of the commit the repository was created with. Neither rule
   is the original's. Its `SharedAssignmentRepoView#submission_succeeded?` is
-  `deadline&.passed? && submission_sha.present?` — no deadlines here, so that
-  label could never appear; the live site has since moved to a commit-based
+  `deadline&.passed? && submission_sha.present?`, a label that could only ever
+  appear after a deadline; the live site has since moved to a commit-based
   reading ("Submitted: students who've committed to repository") and this
-  follows it. Its `AssignmentRepoable#number_of_commits` subtracts the *starter
+  follows it. It is about to gain a third state: a student who **confirmed**
+  their entrega (see below) is a stronger fact than a student who pushed, and
+  the dashboard does not read it yet. Its `AssignmentRepoable#number_of_commits` subtracts the *starter
   code repository's* commit count, which is right only on its importer path:
   this port always calls `POST /repos/.../generate`, and GitHub squashes a
   template into a single "Initial commit" whatever its history — measured, a
   starter of 2 commits gives a student repo of 1, so the original's formula
   would give -1. The baseline is 1 with starter code and 0 without.
+- **The student declares their submission; nothing freezes it on a timer.**
+  The original has no submission of the student's own: `DeadlineJob` walks the
+  repositories when a deadline passes and stores whatever HEAD the worker finds
+  when it wakes up. Here the student names a ref of their repository — a
+  branch, a tag, a sha, `main~2` — and confirms, which resolves it and freezes
+  the SHA. *Not confirming is not submitting.* The inversion is deliberate and
+  measured: commit dates are forgeable, GraphQL cannot answer "the last commit
+  pushed before X", and `Commit.pushedDate` is gone, so what a repository held
+  at a past instant cannot be reconstructed afterwards. Consequences, all in
+  `docs/entregas.md`:
+  - **A deadline belongs to a `checkpoint`, not to the assignment.** TP2 is
+    2A to 2D over one repository. **A checkpoint *is* the entrega**: an
+    assignment with no checkpoints has nothing to hand in, which is the state
+    of every assignment until a teacher opens entregas. Nothing is autocreated
+    and nothing was backfilled.
+  - **A deadline closes nothing.** Late submissions are accepted and read as
+    `Tarde`; what closes entregas is the assignment going Inactive, which is
+    the lever that already existed. That is also the original's semantics.
+  - **`submissions` is append-only**, so a late re-submission cannot overwrite
+    the one that was on time. The current one is the last row; confirming the
+    same SHA twice is a no-op.
+  - **No submission cap, but a cooldown per (repo, checkpoint).** Nothing here
+    costs compute the way an autograder does, so a cap only strands a student
+    at 23:50 — but the installation's GitHub rate limit is shared with every
+    teacher's dashboard, and the SHA dedupe does not stop a script that commits
+    before each confirmation.
 - **Group assignments do not use GitHub Teams.** The original gives every group
   a GitHub team and grants the team push access to the repository, which forces
   every student into the organization as a member. Here each member is an
@@ -235,6 +266,9 @@ reference code without mental translation. The confusing one:
   `docs/creacion-de-repos.md`: it records the measurements, GitHub's secondary
   rate limits, why a queue is not needed at this size, and the exact condition
   that would make it needed.
+- **Entregas and deadlines follow `docs/entregas.md`**, which records why the
+  student declares the SHA instead of a job freezing it, what a checkpoint is,
+  and why late submissions are accepted rather than refused.
 - **Editing and deleting assignments follow
   `docs/edicion-y-borrado-de-assignments.md`**, which records why closing
   submissions belongs in the edit screen and not in a toggle, and what must

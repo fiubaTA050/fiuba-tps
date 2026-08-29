@@ -4,7 +4,9 @@ import { notFound, redirect } from 'next/navigation'
 import { auth } from '@/auth'
 import { Breadcrumb } from '@/components/Breadcrumb'
 import { findAssignment } from '@/lib/data/assignments'
+import { findAssignmentCheckpoint } from '@/lib/data/checkpoints'
 import { findClassroom } from '@/lib/data/organizations'
+import { toArgentinaDateTimeInput } from '@/lib/dates'
 import { findRepositoryById, listTemplateRepositories } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
 
@@ -25,9 +27,10 @@ export default async function EditAssignmentPage(
 
   const { slug, assignmentSlug } = await props.params
 
-  const [classroom, assignment] = await Promise.all([
+  const [classroom, assignment, checkpoint] = await Promise.all([
     findClassroom(session, slug),
     findAssignment(session, slug, assignmentSlug),
+    findAssignmentCheckpoint(session, slug, assignmentSlug),
   ])
 
   if (!classroom || !assignment) notFound()
@@ -84,6 +87,15 @@ export default async function EditAssignmentPage(
             assignment={assignment}
             templates={templates}
             starterCodeFullName={starterCode?.fullName ?? ''}
+            entrega={{
+              enabled: checkpoint !== null,
+              // Formatted here, in Argentine time, so the field never depends
+              // on the clock of the laptop that opens it
+              deadlineInput: checkpoint?.deadlineAt
+                ? toArgentinaDateTimeInput(checkpoint.deadlineAt)
+                : '',
+              submissionCount: checkpoint?.submissionCount ?? 0,
+            }}
           />
         )}
       </div>

@@ -64,6 +64,8 @@ export async function searchTemplateRepositories(
         // Search results carry it, so confirming a hit is a template costs no
         // extra request — the reason the filtering above is affordable at all.
         isTemplate: item.is_template ?? false,
+        // Only ever a starter code candidate, where the branch is not read
+        defaultBranch: item.default_branch,
       })),
       error: null,
     }

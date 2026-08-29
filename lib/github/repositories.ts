@@ -19,6 +19,8 @@ export type GitHubRepository = {
   htmlUrl: string
   private: boolean
   isTemplate: boolean
+  /** What the student's submission field is prefilled with */
+  defaultBranch: string
 }
 
 /** `owner/name`, the format the original's StarterCode concern validates */
@@ -34,6 +36,7 @@ function toRepository(data: {
   html_url: string
   private: boolean
   is_template?: boolean | null
+  default_branch?: string
 }): GitHubRepository {
   return {
     id: Number(data.id),
@@ -41,6 +44,9 @@ function toRepository(data: {
     htmlUrl: data.html_url,
     private: data.private,
     isTemplate: data.is_template ?? false,
+    // Every endpoint this maps returns it; the fallback is for the narrower
+    // response types Octokit declares. It only prefills an editable field.
+    defaultBranch: data.default_branch ?? 'main',
   }
 }
 
@@ -524,5 +530,144 @@ export async function isRepositoryEmpty(
     return Array.isArray(data) && data.length === 0
   } catch {
     return true
+  }
+}
+
+/** One commit of a student's repository, as their submission froze it */
+export type ResolvedCommit = {
+  sha: string
+  committedAt: Date
+  messageHeadline: string
+}
+
+export type ResolvedRef = {
+  /** Read here rather than stored, DA-2, and needed for the compare below */
+  fullName: string
+  defaultBranch: string
+  commit: ResolvedCommit
+}
+
+/**
+ * Resolves whatever the student typed to a commit of their repository.
+ *
+ * `object(expression:)` accepts everything git resolves **server-side**, all of
+ * it measured against the real API: a branch name, a lightweight or annotated
+ * tag, a full or abbreviated sha, revparse suffixes like `main~2`, and even
+ * `main@{1}`, which GitHub answers rather than treating as working-copy syntax.
+ * A ref that does not resolve comes back null and nothing is written.
+ *
+ * An annotated tag comes back as a `Tag` whose `target` is the commit, which is
+ * why unwrapping it is not optional — without it, handing in a tag fails. Not
+ * hypothetical: students in `fiubaTA050-labs` already tag their work `Entrega`.
+ *
+ * The repository is asked for **by id**, through the node id derived from the
+ * stored `databaseId`, for the reason `listRepositorySnapshots` does it: names
+ * get renamed, ids do not. It also folds what would be a `GET /repositories/:id`
+ * for the name and the default branch into this same call.
+ *
+ * Null when the ref does not resolve, when it resolves to something that is not
+ * a commit (a tree, a blob), or when the repository is unreachable. The caller
+ * writes nothing in that case.
+ *
+ * Known hole, accepted: GitHub resolves OIDs across the whole fork network, so
+ * a sha from a fork of the student's own repository validates. See
+ * docs/entregas.md.
+ */
+const RESOLVE_REF_QUERY = `query($id: ID!, $ref: String!) {
+  node(id: $id) {
+    ... on Repository {
+      nameWithOwner
+      defaultBranchRef { name }
+      object(expression: $ref) {
+        __typename
+        ... on Commit { oid committedDate messageHeadline }
+        ... on Tag {
+          target {
+            __typename
+            ... on Commit { oid committedDate messageHeadline }
+          }
+        }
+      }
+    }
+  }
+}`
+
+type CommitNode = {
+  __typename: string
+  oid?: string
+  committedDate?: string
+  messageHeadline?: string
+  target?: CommitNode | null
+} | null
+
+type RefNode = {
+  nameWithOwner: string
+  defaultBranchRef: { name: string } | null
+  object: CommitNode
+} | null
+
+export async function resolveRepositoryRef(
+  installationId: number,
+  repositoryId: number,
+  ref: string,
+): Promise<ResolvedRef | null> {
+  let node: RefNode
+  try {
+    const data = await installationClient(installationId).graphql<{ node: RefNode }>(
+      RESOLVE_REF_QUERY,
+      { id: repositoryNodeId(repositoryId), ref },
+    )
+    node = data.node
+  } catch {
+    return null
+  }
+
+  if (!node) return null
+
+  const object = node.object
+  const commit = object?.__typename === 'Tag' ? (object.target ?? null) : object
+  if (commit?.__typename !== 'Commit' || !commit.oid || !commit.committedDate) return null
+
+  return {
+    fullName: node.nameWithOwner,
+    defaultBranch: node.defaultBranchRef?.name ?? 'main',
+    commit: {
+      sha: commit.oid,
+      committedAt: new Date(commit.committedDate),
+      messageHeadline: commit.messageHeadline ?? '',
+    },
+  }
+}
+
+/**
+ * Whether the commit is reachable from the repository's default branch.
+ *
+ * Feeds a **warning, not a rejection**: handing in a tag that sits outside the
+ * default branch is legitimate, and the student is the one who chose the ref.
+ * One call per confirmation — not per row of a render — so it does not touch
+ * the rule in AGENTS.md about never making a call per repository.
+ *
+ * Null when GitHub cannot answer, which the caller shows as no warning at all
+ * rather than as a scary one it cannot back up.
+ */
+export async function isReachableFromDefaultBranch(
+  installationId: number,
+  fullName: string,
+  defaultBranch: string,
+  sha: string,
+): Promise<boolean | null> {
+  const [owner, repo] = fullName.split('/')
+
+  try {
+    const { data } = await installationClient(installationId).rest.repos.compareCommitsWithBasehead({
+      owner,
+      repo,
+      basehead: `${defaultBranch}...${sha}`,
+    })
+    // base...head: the commit is contained in the branch when head is the same
+    // as base or an ancestor of it. `ahead` and `diverged` are the ones outside.
+    return data.status === 'identical' || data.status === 'behind'
+  } catch {
+    return null
   }
 }

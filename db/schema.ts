@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm'
+import { desc, sql } from 'drizzle-orm'
 import {
   bigint,
   boolean,
@@ -186,9 +186,10 @@ export const organizationsUsers = pgTable(
  *    and the "source importer", and GitHub retired the Source Imports API the
  *    importer called, so only the template path is left and there is nothing
  *    to toggle. `use_template_repos?` is therefore just `starter_code?`.
- *  - Deadlines are not here either: the original's `deadlines` table only
- *    earns its keep together with the Sidekiq job that freezes submissions
- *    when it passes, and there is no job runner on Vercel.
+ *  - There is no deadline column. The original's `deadlines` table hangs one
+ *    date off the assignment; here a date belongs to a `checkpoint`, because
+ *    one assignment can have several entregas with a date each (TP2 is 2A to
+ *    2D over the same repository). See docs/entregas.md.
  *  - The uniqueness of `title` and `slug` within a classroom lives in the
  *    database. The original validated them in the model only, over a
  *    `default_scope` that already hid soft-deleted rows; partial indexes
@@ -290,8 +291,10 @@ export const assignmentInvitations = pgTable(
  *  - `repo_access_id`, which pointed at the one-person GitHub team the original
  *    used before organization permissions let it make students outside
  *    collaborators. Its own model calls the pairing legacy.
- *  - `submission_sha`, written only when a deadline freezes a submission, and
- *    deadlines are not ported.
+ *  - `submission_sha`, which its `DeadlineJob` froze with whatever HEAD the
+ *    worker found when it woke up. Here a submission is a row of its own in
+ *    `submissions`, append-only and written by the student — nothing freezes
+ *    anything on a timer. See docs/entregas.md.
  *  - `configuration_state`, which the original itself marks
  *    `# TODO: remove this enum (dead code)`.
  */
@@ -690,6 +693,105 @@ export const groupInviteStatuses = pgTable(
   ],
 )
 
+/**
+ * One entrega of an assignment: what a student hands in against.
+ *
+ * There is no equivalent in the original, whose `deadlines` table hangs a
+ * single date off the assignment. The case that forced this shape is TP2:
+ * four entregas — 2A, 2B, 2C, 2D — with a date each, over the same repository.
+ * An assignment with one date is not a special case, it is one checkpoint.
+ *
+ * **A checkpoint is the entrega, not an optional part of one**: an assignment
+ * with no checkpoints has nothing to hand in, which is a legal state meaning
+ * the teacher has not opened submissions yet. Nothing creates one implicitly,
+ * and no migration backfilled the assignments that already existed.
+ *
+ * `deadline_at` is nullable — an entrega whose date is not decided yet — which
+ * is why the order comes from `position` and not from the date. See
+ * docs/entregas.md.
+ */
+export const checkpoints = pgTable(
+  'checkpoints',
+  {
+    id: serial('id').primaryKey(),
+    assignmentId: integer('assignment_id')
+      .notNull()
+      .references(() => assignments.id, { onDelete: 'cascade' }),
+    /** "2A". Null is the single unnamed entrega of an assignment with no parts */
+    title: varchar('title', { length: 60 }),
+    /** Decides late/on-time. It closes nothing — see docs/entregas.md */
+    deadlineAt: timestamp('deadline_at', { withTimezone: true }),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('index_checkpoints_on_assignment_id').on(table.assignmentId),
+    uniqueIndex('index_checkpoints_on_assignment_id_and_title').on(table.assignmentId, table.title),
+    // Two NULLs do not collide in a unique index, so the unnamed entrega needs
+    // its own partial one — the shape of index_roster_entries_on_roster_id_and_user_id
+    uniqueIndex('index_checkpoints_on_assignment_id_unnamed')
+      .on(table.assignmentId)
+      .where(sql`${table.title} is null`),
+  ],
+)
+
+/**
+ * One confirmed submission: the student picked a ref of their repository and
+ * confirmed, which froze a SHA.
+ *
+ * **Append-only.** Re-submitting inserts another row, never an UPDATE, so
+ * there is no unique index over (repo, checkpoint): the current submission is
+ * the last row, and the serial `id` breaks the tie rather than `submitted_at`.
+ * The reason is not the audit trail — it is that with a deadline per entrega a
+ * late re-submission would overwrite the one that was on time. What the unique
+ * index would have covered, the double click, is covered by refusing to insert
+ * a SHA equal to the last one.
+ *
+ * `committed_at` is denormalised on purpose: reading it from GitHub would cost
+ * one call per repository on the teacher's dashboard, which is what
+ * `listRepositorySnapshots` exists to avoid. It comes free in the response that
+ * resolved the ref.
+ *
+ * See docs/entregas.md for why the student declares the SHA instead of a job
+ * freezing it, and for the fork-network hole in resolving a ref.
+ */
+export const submissions = pgTable(
+  'submissions',
+  {
+    id: serial('id').primaryKey(),
+    assignmentRepoId: integer('assignment_repo_id')
+      .notNull()
+      .references(() => assignmentRepos.id, { onDelete: 'cascade' }),
+    // No cascade, unlike the rest: deleting a checkpoint that has submissions
+    // would destroy the evidence of the grading, the same stance as DA-9 on
+    // deleting an assignment. lib/data/checkpoints.ts refuses it instead.
+    checkpointId: integer('checkpoint_id')
+      .notNull()
+      .references(() => checkpoints.id),
+    /** The resolved ref. This is what the teacher grades */
+    sha: varchar('sha', { length: 40 }).notNull(),
+    /** What the student typed — `main`, a tag, a sha. Evidence of intent */
+    ref: varchar('ref', { length: 255 }).notNull(),
+    committedAt: timestamp('committed_at', { withTimezone: true }).notNull(),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+    // NOT NULL: with nothing freezing submissions on a timer, the only writer
+    // is the student. On a team repository this is *the* interesting column
+    submittedByUserId: integer('submitted_by_user_id')
+      .notNull()
+      .references(() => users.id),
+  },
+  (table) => [
+    // Serves the `distinct on (assignment_repo_id, checkpoint_id) … order by
+    // id desc` that reads the current submission of every repository at once
+    index('index_submissions_on_repo_and_checkpoint').on(
+      table.assignmentRepoId,
+      table.checkpointId,
+      desc(table.id),
+    ),
+  ],
+)
+
 export type User = typeof users.$inferSelect
 export type Organization = typeof organizations.$inferSelect
 export type Assignment = typeof assignments.$inferSelect
@@ -704,3 +806,5 @@ export type GroupAssignment = typeof groupAssignments.$inferSelect
 export type GroupAssignmentInvitation = typeof groupAssignmentInvitations.$inferSelect
 export type GroupAssignmentRepo = typeof groupAssignmentRepos.$inferSelect
 export type GroupInviteStatus = typeof groupInviteStatuses.$inferSelect
+export type Checkpoint = typeof checkpoints.$inferSelect
+export type Submission = typeof submissions.$inferSelect

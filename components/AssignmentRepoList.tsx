@@ -15,6 +15,7 @@ import {
 import { type ComponentProps, useMemo, useRef, useState } from 'react'
 
 import { hasSubmitted, type RepoRow, type SubmissionTone } from '@/lib/assignment-rows'
+import { formatArgentina } from '@/lib/dates'
 
 import { LinkToStudentDialog } from './LinkToStudentDialog'
 import { Pagination } from './Pagination'
@@ -679,13 +680,12 @@ function memberAvatar(
   )
 }
 
-/** `May 6, 2026 23:54` on the live site, in the locale the rest of the port uses */
+/**
+ * `May 6, 2026 23:54` on the live site, in the locale the rest of the port uses.
+ *
+ * Through lib/dates so the hour is the cátedra's and not the viewer's: this
+ * used to leave `timeZone` unset, which on Vercel meant UTC.
+ */
 function formatCommitDate(date: Date): string {
-  return new Intl.DateTimeFormat('es-AR', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
+  return formatArgentina(date)
 }

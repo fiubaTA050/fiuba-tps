@@ -123,6 +123,29 @@ Creá el proyecto en Supabase, copiá las dos connection strings a `.env.local` 
 npm run db:migrate
 ```
 
+#### Una base local, para no desarrollar contra la de la cátedra
+
+`docker-compose.yml` levanta un Postgres 17 en el puerto **54322**:
+
+```bash
+docker compose up -d
+
+export LOCAL_DB=postgresql://postgres:postgres@127.0.0.1:54322/fiuba_tps
+DATABASE_URL=$LOCAL_DB DIRECT_URL=$LOCAL_DB npm run db:migrate
+DATABASE_URL=$LOCAL_DB npm run dev
+```
+
+Pasar `DATABASE_URL` en la línea de comando le gana a `.env.local`, así que
+apuntar a producción es siempre un acto deliberado y no lo que haya quedado de
+la última edición. Los tests no usan esto: corren PGlite en proceso
+(`test/helpers/db.ts`).
+
+Las llamadas a GitHub siguen siendo reales aunque la base sea local — el token
+de instalación no tiene un modo local. Para probar el flujo del alumno de punta
+a punta conviene crear un repositorio descartable en la org y borrarlo después,
+en vez de apuntarle al de un alumno: la pantalla de setup llama a
+`addCollaborator` sobre el repo que encuentra.
+
 ### 3. Correr
 
 ```bash

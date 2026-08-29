@@ -64,6 +64,13 @@
       "when": 1786929559889,
       "tag": "0008_backfill_invitation_short_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788043621011,
+      "tag": "0009_closed_post",
+      "breakpoints": true
     }
   ]
 }

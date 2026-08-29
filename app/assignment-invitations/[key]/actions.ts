@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { acceptInvitation, joinRoster } from '@/lib/data/invitations'
+import { confirmSubmission } from '@/lib/data/submissions'
 import { positiveInteger, type InvitationActionState } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
@@ -62,4 +63,38 @@ export async function joinRosterAction(
   // so only the fact that a link happened has to travel.
   revalidatePath(`/assignment-invitations/${key}`)
   redirect(`/assignment-invitations/${key}?joined=1`)
+}
+
+/**
+ * The student confirms a ref of their repository as their entrega.
+ *
+ * No equivalent in the original: there the submission was whatever HEAD its
+ * `DeadlineJob` happened to see. Here the student chooses the tree, and the
+ * deadline never refuses — a late confirmation is accepted and read as `Tarde`.
+ * See docs/entregas.md.
+ */
+export async function confirmSubmissionAction(
+  _previous: InvitationActionState,
+  formData: FormData,
+): Promise<InvitationActionState> {
+  const key = String(formData.get('key') ?? '')
+
+  const session = await auth()
+  if (!isUsableSession(session)) redirect(`/assignment-invitations/${key}`)
+
+  const result = await confirmSubmission(session, key, String(formData.get('ref') ?? ''))
+
+  if (!result.success) return { error: result.error, notice: null }
+
+  revalidatePath(`/assignment-invitations/${key}/setup`)
+
+  if (result.unchanged) {
+    return { error: null, notice: 'Esa entrega ya estaba confirmada: no cambió nada.' }
+  }
+
+  const confirmed = `Entrega confirmada: ${result.sha.slice(0, 7)}.`
+
+  // The warning rides along with the confirmation rather than replacing it —
+  // the entrega *was* recorded, and saying only the caveat reads as a failure
+  return { error: null, notice: result.warning ? `${confirmed} ${result.warning}` : confirmed }
 }

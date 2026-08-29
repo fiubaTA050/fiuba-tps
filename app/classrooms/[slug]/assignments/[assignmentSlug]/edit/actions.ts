@@ -9,6 +9,8 @@ import {
   updateAssignment,
   type AssignmentField,
 } from '@/lib/data/assignments'
+import { saveAssignmentCheckpoint } from '@/lib/data/checkpoints'
+import { parseArgentinaDateTime } from '@/lib/dates'
 import { isUsableSession } from '@/lib/session'
 
 export type EditAssignmentState = { error: string | null; field: AssignmentField | null }
@@ -24,6 +26,17 @@ export async function updateAssignmentAction(
   const classroomSlug = String(formData.get('classroom_slug') ?? '')
   const assignmentSlug = String(formData.get('assignment_slug') ?? '')
 
+  // The entrega and its date, which live in `checkpoints` and not in the
+  // assignment row — one assignment can have several entregas with a date each.
+  // Parsed before anything is written so a malformed date costs no round trip.
+  const submissionsEnabled = formData.get('submissions_enabled') === 'on'
+  const rawDeadline = String(formData.get('deadline_at') ?? '').trim()
+  const deadlineAt = rawDeadline === '' ? null : parseArgentinaDateTime(rawDeadline)
+
+  if (rawDeadline !== '' && deadlineAt === null) {
+    return { error: 'Esa fecha de entrega no se entiende.', field: 'base' }
+  }
+
   const result = await updateAssignment(session, classroomSlug, assignmentSlug, {
     title: String(formData.get('title') ?? ''),
     slug: String(formData.get('slug') ?? ''),
@@ -38,6 +51,16 @@ export async function updateAssignmentAction(
 
   // render :edit — the form comes back with the message
   if (!result.success) return { error: result.error, field: result.field }
+
+  // Last on purpose: the failures that are actually common here are the title
+  // and the prefix, and this way one of those leaves everything untouched. The
+  // slug is the one the update just settled on, which may have been renamed.
+  const checkpoint = await saveAssignmentCheckpoint(session, classroomSlug, result.slug, {
+    enabled: submissionsEnabled,
+    deadlineAt,
+  })
+
+  if (!checkpoint.success) return { error: checkpoint.error, field: 'base' }
 
   revalidatePath(`/classrooms/${classroomSlug}`)
   // The slug is what the URL carries, so a renamed prefix moves the page

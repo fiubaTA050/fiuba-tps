@@ -5,10 +5,12 @@ import { auth } from '@/auth'
 import { InvitationShell } from '@/components/InvitationShell'
 import { findInvitation } from '@/lib/data/invitations'
 import { claimPendingInvitation, findStudentRepository } from '@/lib/data/repositories'
+import { findSubmissionPanel } from '@/lib/data/submissions'
 import { findInstallationAccount } from '@/lib/github/organizations'
 import { isUsableSession } from '@/lib/session'
 
 import { SetupProgress } from '@/components/SetupProgress'
+import { SubmissionPanel } from '@/components/SubmissionPanel'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,11 +47,14 @@ export default async function AssignmentInvitationSetupPage(
     redirect(`/assignment-invitations/${key}`)
   }
 
-  const [organization, repository] = await Promise.all([
+  const [organization, repository, submissions] = await Promise.all([
     findInstallationAccount(invitation.classroom.installationId),
     // Already built: a reload, or the student coming back days later. Rendering
     // it server-side means the finished case never flashes "En espera" first.
     findStudentRepository(session, key),
+    // Everything the entrega panel shows comes from the database — the only
+    // GitHub call it costs is the one that resolves the ref on confirm
+    findSubmissionPanel(session, key),
   ])
 
   // The student's half of add_user_to_github_repository!, for the repository
@@ -84,6 +89,18 @@ export default async function AssignmentInvitationSetupPage(
         initialRepoUrl={repository?.htmlUrl ?? null}
         repoName={`${invitation.assignmentSlug}-${session.user.githubLogin}`}
       />
+
+      {/* Only once the repository is there: with nothing to point a ref at,
+          the panel would ask the student to hand in something that cannot
+          resolve */}
+      {repository && submissions && (
+        <SubmissionPanel
+          invitationKey={key}
+          repoUrl={repository.htmlUrl}
+          defaultBranch={repository.defaultBranch}
+          panel={submissions}
+        />
+      )}
     </InvitationShell>
   )
 }

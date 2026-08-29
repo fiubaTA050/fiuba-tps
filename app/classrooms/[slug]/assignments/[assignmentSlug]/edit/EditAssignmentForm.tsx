@@ -37,15 +37,19 @@ export function EditAssignmentForm({
   assignment,
   templates,
   starterCodeFullName,
+  entrega,
 }: {
   classroomSlug: string
   assignment: AssignmentListItem
   templates: GitHubRepository[]
   /** `owner/name` read from GitHub, or '' when there is none or it is gone */
   starterCodeFullName: string
+  /** The assignment's single checkpoint, already in Argentine time */
+  entrega: { enabled: boolean; deadlineInput: string; submissionCount: number }
 }) {
   const [title, setTitle] = useState(assignment.title)
   const [slug, setSlug] = useState(assignment.slug)
+  const [submissionsEnabled, setSubmissionsEnabled] = useState(entrega.enabled)
 
   const [state, formAction, pending] = useActionState<EditAssignmentState, FormData>(
     updateAssignmentAction,
@@ -186,6 +190,58 @@ export function EditAssignmentForm({
                 Cambiar la visibilidad vale para los repos que se creen de acá en adelante. Los ya
                 creados quedan como están.
               </p>
+            </div>
+
+            {/* The entrega. No equivalent in the archived original, which hangs
+                one `deadline` off the assignment and freezes submissions with a
+                Sidekiq job; here the entrega is a row of its own and the
+                student is the one who confirms. See docs/entregas.md. */}
+            <h3 className="h5 mt-5 pt-4 border-top">Entregas</h3>
+
+            <div className="form-group mt-3">
+              <div className="form-checkbox">
+                <label>
+                  <input
+                    type="checkbox"
+                    name="submissions_enabled"
+                    checked={submissionsEnabled}
+                    onChange={(event) => setSubmissionsEnabled(event.target.checked)}
+                  />
+                  Los alumnos pueden confirmar su entrega
+                </label>
+                <p className="note">
+                  Cada alumno elige una rama, un tag o un commit de su repositorio y confirma. Eso
+                  congela el árbol que vas a corregir. Sin esto, no hay nada que entregar.
+                </p>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <div className="form-group-header">
+                <label htmlFor="deadline_at">Fecha de entrega</label>
+              </div>
+              <div className="form-group-body">
+                <input
+                  type="datetime-local"
+                  id="deadline_at"
+                  name="deadline_at"
+                  className="form-control"
+                  defaultValue={entrega.deadlineInput}
+                  disabled={!submissionsEnabled}
+                />
+              </div>
+              <p className="note">
+                Opcional, y en hora de Argentina. La fecha <strong>no cierra la entrega</strong>:
+                las que lleguen después se aceptan y quedan marcadas como tarde. Para que nadie
+                entregue más, poné el assignment en Inactivo.
+              </p>
+              {entrega.submissionCount > 0 && (
+                <p className="note">
+                  Ya hay {entrega.submissionCount}{' '}
+                  {entrega.submissionCount === 1 ? 'entrega confirmada' : 'entregas confirmadas'}.
+                  Mientras existan no se pueden apagar las entregas.
+                </p>
+              )}
             </div>
 
             <h3 className="h5 mt-5 pt-4 border-top">Opcional</h3>

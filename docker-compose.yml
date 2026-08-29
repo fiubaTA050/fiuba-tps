@@ -1,0 +1,37 @@
+# A Postgres to develop and to drive the app end-to-end against, so that
+# neither needs the cátedra's Supabase. The tests do not use this — they run
+# PGlite in-process (test/helpers/db.ts).
+#
+#   docker compose up -d
+#   DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/fiuba_tps \
+#     DIRECT_URL=postgresql://postgres:postgres@127.0.0.1:54322/fiuba_tps \
+#     npm run db:migrate
+#
+# and then `npm run dev` with the same DATABASE_URL in front of it. Passing it
+# on the command line beats .env.local, so pointing at production is always a
+# deliberate act rather than whatever the last edit left behind.
+#
+# Port 54322 rather than 5432: it leaves a Postgres already installed on this
+# machine alone, and it is the port the Supabase CLI uses for the same job.
+
+services:
+  db:
+    image: postgres:17-alpine
+    # Same major as PGlite runs in the test suite, so a migration that applies
+    # in one applies in the other
+    ports:
+      - '54322:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fiuba_tps
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d fiuba_tps']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  pgdata:
