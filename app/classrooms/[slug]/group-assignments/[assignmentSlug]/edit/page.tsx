@@ -61,13 +61,13 @@ export default async function EditGroupAssignmentPage(
       />
 
       <div className="container-md p-responsive mt-6">
-        <h1 className="f2 mb-5">Editar el assignment grupal</h1>
+        <h1 className="f2 mb-5">Editar el trabajo práctico grupal</h1>
 
         {classroom.archivedAt ? (
           <div className="blankslate blankslate-spacious">
             <h3 className="mb-2">Este classroom está archivado</h3>
             <p className="color-fg-muted mb-4">
-              No se pueden modificar assignments en un classroom archivado.
+              No se pueden modificar trabajos prácticos en un classroom archivado.
             </p>
             <Link href={`/classrooms/${classroom.slug}`} className="btn" role="button">
               Volver al classroom

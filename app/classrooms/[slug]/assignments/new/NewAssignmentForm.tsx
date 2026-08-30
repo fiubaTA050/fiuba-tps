@@ -64,7 +64,7 @@ export function NewAssignmentForm({
         <div className="Box-body p-5">
         <div className={`form-group mt-0 ${errorFor('title') ? 'errored' : ''}`}>
           <div className="form-group-header">
-            <label htmlFor="assignment_title">Título del assignment</label>
+            <label htmlFor="assignment_title">Título del trabajo práctico</label>
           </div>
           <div className="form-group-body">
             <input
@@ -187,10 +187,10 @@ export function NewAssignmentForm({
             <div className="form-checkbox">
               <label>
                 <input type="checkbox" name="invitations_enabled" defaultChecked />
-                Permitir que los alumnos acepten el assignment
+                Permitir que los alumnos acepten el trabajo práctico
               </label>
               <p className="note">
-                Mientras esté habilitado, cualquiera con el link puede aceptar el assignment.
+                Mientras esté habilitado, cualquiera con el link puede aceptar el trabajo práctico.
               </p>
             </div>
           </div>
@@ -221,7 +221,7 @@ export function NewAssignmentForm({
           className="btn btn-primary"
           disabled={pending}
         >
-          {pending ? 'Creando…' : 'Crear assignment'}
+          {pending ? 'Creando…' : 'Crear trabajo práctico'}
         </button>
       </div>
     </form>

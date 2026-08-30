@@ -159,7 +159,7 @@ export async function createRoster(
 
   // ensure_organization_does_not_have_roster!
   if (classroom.rosterId) {
-    return { success: false, error: 'Este classroom ya tiene un roster.' }
+    return { success: false, error: 'Este classroom ya tiene una lista de alumnos.' }
   }
 
   const identifierName = input.identifierName.trim()
@@ -222,7 +222,7 @@ export async function addStudents(
   rawIdentifiers: string,
 ): Promise<AddStudentsResult> {
   const roster = await findRosterRow(session, classroomSlug)
-  if (!roster) return { success: false, error: 'Este classroom no tiene un roster.' }
+  if (!roster) return { success: false, error: 'Este classroom no tiene una lista de alumnos.' }
 
   const requested = parseIdentifiers(rawIdentifiers)
   if (requested.length === 0) return { success: true, created: 0, requested: 0 }
@@ -263,7 +263,7 @@ export async function renameEntry(
   rawIdentifier: string,
 ): Promise<RosterResult> {
   const roster = await findRosterRow(session, classroomSlug)
-  if (!roster) return { success: false, error: 'Este classroom no tiene un roster.' }
+  if (!roster) return { success: false, error: 'Este classroom no tiene una lista de alumnos.' }
 
   const identifier = rawIdentifier.trim()
 
@@ -281,7 +281,7 @@ export async function renameEntry(
     .from(rosterEntries)
     .where(and(eq(rosterEntries.id, entryId), eq(rosterEntries.rosterId, roster.id)))
 
-  if (!entry) return { success: false, error: 'No encontramos a ese alumno en el roster.' }
+  if (!entry) return { success: false, error: 'No encontramos a ese alumno en la lista.' }
   if (entry.identifier === identifier) return { success: true }
 
   // check_for_duplicate_entry
@@ -316,7 +316,7 @@ export async function deleteEntry(
   entryId: number,
 ): Promise<RosterResult> {
   const roster = await findRosterRow(session, classroomSlug)
-  if (!roster) return { success: false, error: 'Este classroom no tiene un roster.' }
+  if (!roster) return { success: false, error: 'Este classroom no tiene una lista de alumnos.' }
 
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -326,7 +326,7 @@ export async function deleteEntry(
   if (count <= 1) {
     return {
       success: false,
-      error: 'No podés borrar al último alumno del roster. Eliminá el roster entero.',
+      error: 'No podés borrar al último alumno de la lista. Eliminá la lista entera.',
     }
   }
 
@@ -336,7 +336,7 @@ export async function deleteEntry(
     .returning({ id: rosterEntries.id })
 
   if (deleted.length === 0) {
-    return { success: false, error: 'No encontramos a ese alumno en el roster.' }
+    return { success: false, error: 'No encontramos a ese alumno en la lista.' }
   }
 
   return { success: true }
@@ -422,7 +422,7 @@ export async function linkAccountToEntry(
   userId: number,
 ): Promise<RosterResult> {
   const classroom = await findClassroomRow(session, classroomSlug)
-  if (!classroom?.rosterId) return { success: false, error: 'Este classroom no tiene un roster.' }
+  if (!classroom?.rosterId) return { success: false, error: 'Este classroom no tiene una lista de alumnos.' }
 
   // ensure_current_roster_entry, scoped to this roster
   const [entry] = await db
@@ -434,7 +434,7 @@ export async function linkAccountToEntry(
     .from(rosterEntries)
     .where(and(eq(rosterEntries.id, entryId), eq(rosterEntries.rosterId, classroom.rosterId)))
 
-  if (!entry) return { success: false, error: 'No encontramos a ese alumno en el roster.' }
+  if (!entry) return { success: false, error: 'No encontramos a ese alumno en la lista.' }
   if (entry.userId !== null) return { success: false, error: alreadyLinkedMessage(entry.identifier) }
 
   const unlinked = await unlinkedUserIdsOf(classroom.id, classroom.rosterId)
@@ -462,7 +462,7 @@ export async function linkAccountToEntry(
     // index_roster_entries_on_roster_id_and_user_id: that account already holds
     // another identifier of this roster, claimed while this dialog was open
     if (isUniqueViolation(error)) {
-      return { success: false, error: 'Esa cuenta ya está vinculada a otro alumno del roster.' }
+      return { success: false, error: 'Esa cuenta ya está vinculada a otro alumno de la lista.' }
     }
 
     throw error
@@ -485,7 +485,7 @@ export async function unlinkAccountFromEntry(
   entryId: number,
 ): Promise<RosterResult> {
   const roster = await findRosterRow(session, classroomSlug)
-  if (!roster) return { success: false, error: 'Este classroom no tiene un roster.' }
+  if (!roster) return { success: false, error: 'Este classroom no tiene una lista de alumnos.' }
 
   const updated = await db
     .update(rosterEntries)
@@ -494,7 +494,7 @@ export async function unlinkAccountFromEntry(
     .returning({ id: rosterEntries.id })
 
   if (updated.length === 0) {
-    return { success: false, error: 'No encontramos a ese alumno en el roster.' }
+    return { success: false, error: 'No encontramos a ese alumno en la lista.' }
   }
 
   return { success: true }
@@ -575,7 +575,7 @@ export async function deleteRoster(
 ): Promise<RosterResult> {
   const classroom = await findClassroomRow(session, classroomSlug)
   if (!classroom?.rosterId) {
-    return { success: false, error: 'Este classroom no tiene un roster.' }
+    return { success: false, error: 'Este classroom no tiene una lista de alumnos.' }
   }
 
   const rosterId = classroom.rosterId

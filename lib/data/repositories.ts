@@ -89,7 +89,7 @@ export async function createStudentRepository(
   // AssignmentInvitation#enabled?, revalidated here: the teacher may have
   // turned invitations off between accepting and this request.
   if (!context.invitationsEnabled || context.archivedAt) {
-    return { status: 'errored', error: 'Las invitaciones para este assignment están cerradas.' }
+    return { status: 'errored', error: 'Las invitaciones para este trabajo práctico están cerradas.' }
   }
 
   // The lock. `create_repo` in the original starts from `accepted` or one of
@@ -329,7 +329,7 @@ async function createOnGitHub(plan: RepositoryPlan): Promise<GitHubRepository> {
   if (!template) {
     // CreateGitHubRepoService::Errors template_repository_not_found
     throw new Error(
-      'El starter code del assignment ya no está disponible. Avisale al docente.',
+      'El starter code del trabajo práctico ya no está disponible. Avisale al docente.',
     )
   }
 
@@ -420,7 +420,7 @@ export async function createTeamRepository(
   }
 
   if (!context.invitationsEnabled || context.archivedAt) {
-    return { status: 'errored', error: 'Las invitaciones para este assignment están cerradas.' }
+    return { status: 'errored', error: 'Las invitaciones para este trabajo práctico están cerradas.' }
   }
 
   // The same lock as the individual flow, including the expiry that a request

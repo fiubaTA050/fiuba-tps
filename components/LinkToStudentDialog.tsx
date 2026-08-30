@@ -92,7 +92,7 @@ export function LinkToStudentDialog({
                 one of the two modals the original wrote a blank slate for */}
             {entries.length === 0 ? (
               <p className="color-fg-muted mb-0">
-                No queda ningún {identifierName.toLowerCase()} sin vincular en el roster.
+                No queda ningún {identifierName.toLowerCase()} sin vincular en la lista.
               </p>
             ) : (
               <>

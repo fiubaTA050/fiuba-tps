@@ -93,14 +93,14 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
           and nothing leaves GitHub — see deleteAssignment */}
       {justDeleted && (
         <div className="flash flash-success mb-4">
-          Assignment borrado. Los repositorios de los alumnos siguen en la organización de GitHub.
+          Trabajo práctico borrado. Los repositorios de los alumnos siguen en la organización de GitHub.
         </div>
       )}
 
       {/* `d-flex flex-justify-between` with the h2 and a primary button
           carrying a `plus` leading visual, as the live site has it */}
       <div className="d-md-flex flex-items-center flex-justify-between mb-3">
-        <h2 className="f2 text-normal">Assignments</h2>
+        <h2 className="f2 text-normal">Trabajos prácticos</h2>
         {listed.length > 0 && (
           // The original disabled the button on an archived classroom instead
           // of hiding it, so the page still reads the same either way.
@@ -111,21 +111,21 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
             aria-disabled={Boolean(classroom.archivedAt)}
           >
             <PlusIcon className="mr-2" />
-            Nuevo assignment
+            Nuevo trabajo práctico
           </Link>
         )}
       </div>
 
       {listed.length === 0 ? (
         <div className="blankslate blankslate-spacious">
-          <h3 className="mb-2">Todavía no hay assignments</h3>
+          <h3 className="mb-2">Todavía no hay trabajos prácticos</h3>
           {classroom.archivedAt ? (
             <p className="color-fg-muted mb-0">
-              Este classroom está archivado, no se pueden crear assignments.
+              Este classroom está archivado, no se pueden crear trabajos prácticos.
             </p>
           ) : (
             <Link href={newAssignmentPath} className="btn btn-primary btn-large mt-3" role="button">
-              Crear el primer assignment
+              Crear el primer trabajo práctico
             </Link>
           )}
         </div>
@@ -167,8 +167,8 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
                           <PersonIcon className="mr-1" />
                         )}
                         {assignment.group
-                          ? `Assignment grupal de ${assignment.groupingTitle}`
-                          : 'Assignment individual'}
+                          ? `Trabajo práctico grupal de ${assignment.groupingTitle}`
+                          : 'Trabajo práctico individual'}
                       </p>
                     </div>
                   </div>

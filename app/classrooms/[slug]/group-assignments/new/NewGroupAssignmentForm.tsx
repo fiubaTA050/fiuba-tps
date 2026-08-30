@@ -61,7 +61,7 @@ export function NewGroupAssignmentForm({
         <div className="Box-body p-5">
           <div className={`form-group mt-0 ${errorFor('title') ? 'errored' : ''}`}>
             <div className="form-group-header">
-              <label htmlFor="group_assignment_title">Título del assignment</label>
+              <label htmlFor="group_assignment_title">Título del trabajo práctico</label>
             </div>
             <div className="form-group-body">
               <input
@@ -133,7 +133,7 @@ export function NewGroupAssignmentForm({
                   </select>
                 </div>
                 <p className="note">
-                  Reusá los equipos de otro TP y los alumnos no tienen que volver a armarlos.
+                  Reusá los equipos de otro trabajo práctico y los alumnos no tienen que volver a armarlos.
                 </p>
               </>
             )}
@@ -270,7 +270,7 @@ export function NewGroupAssignmentForm({
             <div className="form-checkbox">
               <label>
                 <input type="checkbox" name="invitations_enabled" defaultChecked />
-                Permitir que los alumnos acepten el assignment
+                Permitir que los alumnos acepten el trabajo práctico
               </label>
             </div>
           </div>
@@ -293,7 +293,7 @@ export function NewGroupAssignmentForm({
           Cancelar
         </Link>
         <button type="submit" className="btn btn-primary" disabled={pending}>
-          {pending ? 'Creando…' : 'Crear assignment grupal'}
+          {pending ? 'Creando…' : 'Crear trabajo práctico grupal'}
         </button>
       </div>
     </form>

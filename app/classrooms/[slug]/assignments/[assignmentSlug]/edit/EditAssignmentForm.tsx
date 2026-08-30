@@ -77,7 +77,7 @@ export function EditAssignmentForm({
           <div className="Box-body p-5">
             <div className={`form-group mt-0 ${errorFor('title') ? 'errored' : ''}`}>
               <div className="form-group-header">
-                <label htmlFor="assignment_title">Título del assignment</label>
+                <label htmlFor="assignment_title">Título del trabajo práctico</label>
               </div>
               <div className="form-group-body">
                 <input
@@ -98,7 +98,7 @@ export function EditAssignmentForm({
             {/* "Assignment status" of the live site's edit screen */}
             <div className="form-group">
               <div className="form-group-header">
-                <label htmlFor="assignment_status">Estado del assignment</label>
+                <label htmlFor="assignment_status">Estado del trabajo práctico</label>
               </div>
               <div className="form-group-body">
                 <select
@@ -112,7 +112,7 @@ export function EditAssignmentForm({
                 </select>
               </div>
               <p className="note">
-                Un assignment inactivo no lo pueden aceptar los alumnos. Ponelo en inactivo cuando
+                Un trabajo práctico inactivo no lo pueden aceptar los alumnos. Ponelo en inactivo cuando
                 venció la entrega. Lo que ya se aceptó no se toca: cada repo sigue siendo del
                 alumno.
               </p>
@@ -233,7 +233,7 @@ export function EditAssignmentForm({
               <p className="note">
                 Opcional, y en hora de Argentina. La fecha <strong>no cierra la entrega</strong>:
                 las que lleguen después se aceptan y quedan marcadas como tarde. Para que nadie
-                entregue más, poné el assignment en Inactivo.
+                entregue más, poné el trabajo práctico en Inactivo.
               </p>
               {entrega.submissionCount > 0 && (
                 <p className="note">
@@ -309,15 +309,15 @@ export function EditAssignmentForm({
           type the assignment name because deleting took the students'
           repositories with it; here nothing leaves GitHub, so a confirm is the
           proportionate warning — the same call RosterEntryRow made. */}
-      {/* The dashboard's "Borrar assignment" menu item scrolls here */}
+      {/* The dashboard's "Borrar el trabajo práctico" menu item scrolls here */}
       <div id="borrar" className="Box Box--danger mt-6 mb-6">
         <div className="Box-header">
-          <h3 className="Box-title color-fg-danger">Borrar este assignment</h3>
+          <h3 className="Box-title color-fg-danger">Borrar este trabajo práctico</h3>
         </div>
         <div className="Box-body">
           <p className="color-fg-muted">
             Desaparece del classroom y su link de invitación deja de funcionar. El título y el
-            prefijo quedan libres para otro assignment.
+            prefijo quedan libres para otro trabajo práctico.
           </p>
           <p className="color-fg-muted">
             <strong>Los repositorios de los alumnos no se borran</strong>: quedan en la
@@ -334,12 +334,12 @@ export function EditAssignmentForm({
               className="btn btn-danger"
               disabled={deleting}
               onClick={(event) => {
-                if (!window.confirm(`¿Borrar el assignment "${assignment.title}"?`)) {
+                if (!window.confirm(`¿Borrar el trabajo práctico "${assignment.title}"?`)) {
                   event.preventDefault()
                 }
               }}
             >
-              {deleting ? 'Borrando…' : 'Borrar este assignment'}
+              {deleting ? 'Borrando…' : 'Borrar este trabajo práctico'}
             </button>
           </form>
         </div>

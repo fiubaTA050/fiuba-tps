@@ -63,7 +63,7 @@ export function EditGroupAssignmentForm({
           <div className="Box-body p-5">
             <div className={`form-group mt-0 ${errorFor('title') ? 'errored' : ''}`}>
               <div className="form-group-header">
-                <label htmlFor="group_assignment_title">Título del assignment</label>
+                <label htmlFor="group_assignment_title">Título del trabajo práctico</label>
               </div>
               <div className="form-group-body">
                 <input
@@ -83,7 +83,7 @@ export function EditGroupAssignmentForm({
 
             <div className="form-group">
               <div className="form-group-header">
-                <label htmlFor="assignment_status">Estado del assignment</label>
+                <label htmlFor="assignment_status">Estado del trabajo práctico</label>
               </div>
               <div className="form-group-body">
                 <select
@@ -97,7 +97,7 @@ export function EditGroupAssignmentForm({
                 </select>
               </div>
               <p className="note">
-                Un assignment inactivo no lo pueden aceptar los alumnos. Ponelo en inactivo cuando
+                Un trabajo práctico inactivo no lo pueden aceptar los alumnos. Ponelo en inactivo cuando
                 venció la entrega. Los equipos que ya aceptaron conservan su repo.
               </p>
             </div>
@@ -146,7 +146,7 @@ export function EditGroupAssignmentForm({
                 />
               </div>
               <p className="note">
-                El conjunto de equipos no se puede cambiar después de crear el assignment.{' '}
+                El conjunto de equipos no se puede cambiar después de crear el trabajo práctico.{' '}
                 <Link href={`/classrooms/${classroomSlug}/groupings/${assignment.grouping.slug}`}>
                   Administrar los equipos
                 </Link>
@@ -314,16 +314,16 @@ export function EditGroupAssignmentForm({
         </div>
       </form>
 
-      {/* The dashboard's "Borrar assignment" menu item scrolls here */}
+      {/* The dashboard's "Borrar el trabajo práctico" menu item scrolls here */}
       <div id="borrar" className="Box Box--danger mt-6 mb-6">
         <div className="Box-header">
-          <h3 className="Box-title color-fg-danger">Borrar este assignment grupal</h3>
+          <h3 className="Box-title color-fg-danger">Borrar este trabajo práctico grupal</h3>
         </div>
         <div className="Box-body">
           <p className="color-fg-muted">
             Desaparece del classroom y su link de invitación deja de funcionar. El conjunto de
             equipos <strong>{assignment.grouping.title}</strong> queda, porque es del classroom y
-            puede estar compartido con otro TP.
+            puede estar compartido con otro trabajo práctico.
           </p>
           <p className="color-fg-muted">
             <strong>Los repositorios de los equipos no se borran</strong>: quedan en la organización
@@ -340,12 +340,12 @@ export function EditGroupAssignmentForm({
               className="btn btn-danger"
               disabled={deleting}
               onClick={(event) => {
-                if (!window.confirm(`¿Borrar el assignment "${assignment.title}"?`)) {
+                if (!window.confirm(`¿Borrar el trabajo práctico "${assignment.title}"?`)) {
                   event.preventDefault()
                 }
               }}
             >
-              {deleting ? 'Borrando…' : 'Borrar este assignment grupal'}
+              {deleting ? 'Borrando…' : 'Borrar este trabajo práctico grupal'}
             </button>
           </form>
         </div>

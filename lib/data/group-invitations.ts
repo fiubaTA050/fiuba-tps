@@ -404,7 +404,7 @@ async function resolveTeam(
 
     if (count >= invitation.maxTeams) {
       return {
-        error: `Este assignment llegó al máximo de ${invitation.maxTeams} equipos. Sumate a uno que ya exista.`,
+        error: `Este trabajo práctico llegó al máximo de ${invitation.maxTeams} equipos. Sumate a uno que ya exista.`,
       }
     }
   }

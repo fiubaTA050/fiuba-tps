@@ -213,7 +213,7 @@ export async function createAssignment(
   if (classroom.archivedAt) {
     return {
       success: false,
-      error: 'No se pueden crear assignments en un classroom archivado.',
+      error: 'No se pueden crear trabajos prácticos en un classroom archivado.',
       field: 'base',
     }
   }
@@ -227,7 +227,7 @@ export async function createAssignment(
   if (await isTitleTaken(classroom.id, title)) {
     return {
       success: false,
-      error: `Ya existe un assignment llamado "${title}" en este classroom.`,
+      error: `Ya existe un trabajo práctico llamado "${title}" en este classroom.`,
       field: 'title',
     }
   }
@@ -279,7 +279,7 @@ export async function createAssignment(
     if (isUniqueViolation(error)) {
       return {
         success: false,
-        error: `Ya existe un assignment con ese nombre o prefijo en este classroom.`,
+        error: `Ya existe un trabajo práctico con ese nombre o prefijo en este classroom.`,
         field: 'title',
       }
     }
@@ -327,7 +327,7 @@ export async function updateAssignment(
   if (classroom.archivedAt) {
     return {
       success: false,
-      error: 'No se pueden modificar assignments en un classroom archivado.',
+      error: 'No se pueden modificar trabajos prácticos en un classroom archivado.',
       field: 'base',
     }
   }
@@ -345,7 +345,7 @@ export async function updateAssignment(
 
   // `find_by!` raised; the screen answers 404 and this is its message
   if (!existing) {
-    return { success: false, error: 'No encontramos ese assignment.', field: 'base' }
+    return { success: false, error: 'No encontramos ese trabajo práctico.', field: 'base' }
   }
 
   const invalid = validateTitleAndSlug(title, slug)
@@ -357,7 +357,7 @@ export async function updateAssignment(
   if (await isTitleTaken(classroom.id, title, existing.id)) {
     return {
       success: false,
-      error: `Ya existe un assignment llamado "${title}" en este classroom.`,
+      error: `Ya existe un trabajo práctico llamado "${title}" en este classroom.`,
       field: 'title',
     }
   }
@@ -391,7 +391,7 @@ export async function updateAssignment(
     if (isUniqueViolation(error)) {
       return {
         success: false,
-        error: 'Ya existe un assignment con ese nombre o prefijo en este classroom.',
+        error: 'Ya existe un trabajo práctico con ese nombre o prefijo en este classroom.',
         field: 'title',
       }
     }
@@ -443,7 +443,7 @@ export async function deleteAssignment(
     )
     .returning({ id: assignments.id })
 
-  if (deleted.length === 0) return { success: false, error: 'No encontramos ese assignment.' }
+  if (deleted.length === 0) return { success: false, error: 'No encontramos ese trabajo práctico.' }
 
   // The invitation is meaningless without its assignment, and `default_scope`
   // hid it along with it. Soft-deleted too so the two rows read consistently.

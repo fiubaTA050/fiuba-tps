@@ -34,14 +34,14 @@ export default async function NewRosterPage(
         <div className="Subhead">
           <h2 className="Subhead-heading d-flex flex-items-center">
             <PeopleIcon size={22} className="mr-2" />
-            Cargar el roster
+            Cargar la lista de alumnos
           </h2>
         </div>
 
         <p className="col-md-9 color-fg-muted">
-          El roster es la lista de alumnos de la materia. Sirve para saber quién aceptó cada
-          assignment y quién falta, y para leer las entregas por padrón en vez de por usuario de
-          GitHub. Podés cargarlo ahora o más tarde.
+          La lista de alumnos de la materia. Sirve para saber quién aceptó cada
+          trabajo práctico y quién falta, y para leer las entregas por padrón en vez de por usuario de
+          GitHub. Podés cargarla ahora o más tarde.
         </p>
 
         <NewRosterForm classroomSlug={classroom.slug} defaultIdentifierName={DEFAULT_IDENTIFIER_NAME} />

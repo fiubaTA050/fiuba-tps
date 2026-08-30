@@ -57,7 +57,7 @@ export async function joinRosterAction(
   const entryId = positiveInteger(formData.get('roster_entry_id'))
 
   if (entryId === null) {
-    return { error: 'No encontramos ese identificador en el roster.', notice: null }
+    return { error: 'No encontramos ese identificador en la lista de alumnos.', notice: null }
   }
 
   const result = await joinRosterForGroup(session, key, entryId)

@@ -71,8 +71,8 @@ export function LinkToGitHubAccountDialog({
                 where these accounts come from */}
             {accounts.length === 0 ? (
               <p className="color-fg-muted mb-0">
-                Las cuentas aparecen acá cuando un alumno acepta un assignment del classroom sin
-                haber vinculado su cuenta de GitHub con un alumno del roster.
+                Las cuentas aparecen acá cuando un alumno acepta un trabajo práctico del classroom sin
+                haber vinculado su cuenta de GitHub con un alumno de la lista.
               </p>
             ) : (
               <>

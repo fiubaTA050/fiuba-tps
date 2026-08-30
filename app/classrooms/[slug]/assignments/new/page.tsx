@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
  * Port of assignments#new, reached through the chooser of
  * organizations#new_assignment — see ../../new-assignment.
  *
- * The frame is the live site's: breadcrumb down to "Nuevo assignment" and
+ * The frame is the live site's: breadcrumb down to "Nuevo trabajo práctico" and
  * nothing else — no title band and no tabs, because this screen is not one of
  * them, it is a step away from the classroom. Its `container-xl p-responsive
  * mt-6`, the `h1.f2.mb-5` and the form inside a `Box` are copied from a saved
@@ -50,7 +50,7 @@ export default async function NewAssignmentPage(
         items={[
           { label: 'Classrooms', href: '/classrooms' },
           { label: classroom.title, href: `/classrooms/${classroom.slug}` },
-          { label: 'Nuevo assignment', href: `/classrooms/${classroom.slug}/assignments/new` },
+          { label: 'Nuevo trabajo práctico', href: `/classrooms/${classroom.slug}/assignments/new` },
         ]}
       />
 
@@ -58,7 +58,7 @@ export default async function NewAssignmentPage(
           "Assignment creation steps" sidebar; with no sidebar to fill the left
           third, the same class would stretch the inputs across 1280px */}
       <div className="container-md p-responsive mt-6">
-        <h1 className="f2 mb-5">Configurá el assignment.</h1>
+        <h1 className="f2 mb-5">Configurá el trabajo práctico.</h1>
 
         {/* validate :organization_is_not_archived. The original let you open
             the form and only failed on submit; refusing here says it sooner. */}
@@ -66,7 +66,7 @@ export default async function NewAssignmentPage(
           <div className="blankslate blankslate-spacious">
             <h3 className="mb-2">Este classroom está archivado</h3>
             <p className="color-fg-muted mb-4">
-              No se pueden crear assignments en un classroom archivado.
+              No se pueden crear trabajos prácticos en un classroom archivado.
             </p>
             <Link href={`/classrooms/${classroom.slug}`} className="btn" role="button">
               Volver al classroom

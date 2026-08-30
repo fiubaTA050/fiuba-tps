@@ -54,7 +54,7 @@ export function AddStudentsDialog({
         <div className="Box Box--overlay text-left">
           <div className="Box-header d-flex flex-justify-between flex-items-center">
             <h2 className="Box-title" id="add-students-title">
-              Agregar alumnos al roster
+              Agregar alumnos a la lista
             </h2>
             <button
               type="button"
@@ -91,7 +91,7 @@ export function AddStudentsDialog({
                 Cancelar
               </button>
               <button type="submit" className="btn btn-primary" disabled={pending}>
-                {pending ? 'Agregando…' : 'Agregar al roster'}
+                {pending ? 'Agregando…' : 'Agregar a la lista'}
               </button>
             </div>
           </form>

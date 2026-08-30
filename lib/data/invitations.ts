@@ -45,11 +45,11 @@ import { db } from '@/lib/db'
  */
 
 /** AssignmentInvitation::INVITATIONS_DISABLED */
-export const INVITATIONS_DISABLED = 'Las invitaciones para este assignment están deshabilitadas.'
+export const INVITATIONS_DISABLED = 'Las invitaciones para este trabajo práctico están deshabilitadas.'
 
 /** AssignmentInvitation::INVITATIONS_DISABLED_ARCHIVED */
 export const INVITATIONS_DISABLED_ARCHIVED =
-  'Las invitaciones para este assignment están deshabilitadas porque el classroom está archivado.'
+  'Las invitaciones para este trabajo práctico están deshabilitadas porque el classroom está archivado.'
 
 /** Everything the student's screens render, for one invitation and one student */
 export type StudentInvitation = {
@@ -321,7 +321,7 @@ export async function linkRosterEntry(
   entryId: number,
 ): Promise<JoinRosterResult> {
   if (!roster) {
-    return { success: false, error: 'Este classroom no tiene un roster.' }
+    return { success: false, error: 'Este classroom no tiene una lista de alumnos.' }
   }
 
   // user_on_roster? — already linked, nothing to do
@@ -341,7 +341,7 @@ export async function linkRosterEntry(
     .where(and(eq(rosterEntries.id, entryId), eq(rosterEntries.rosterId, roster.id)))
 
   if (!entry) {
-    return { success: false, error: 'No encontramos ese identificador en el roster.' }
+    return { success: false, error: 'No encontramos ese identificador en la lista de alumnos.' }
   }
 
   if (entry.userId !== null) {
@@ -369,7 +369,7 @@ export async function linkRosterEntry(
     if (isUniqueViolation(error)) {
       return {
         success: false,
-        error: 'Ya estás vinculado a otro identificador de este roster.',
+        error: 'Ya estás vinculado a otro identificador de esta lista.',
       }
     }
 

@@ -46,20 +46,20 @@ export default async function NewGroupAssignmentPage(
           { label: 'Classrooms', href: '/classrooms' },
           { label: classroom.title, href: `/classrooms/${classroom.slug}` },
           {
-            label: 'Nuevo assignment grupal',
+            label: 'Nuevo trabajo práctico grupal',
             href: `/classrooms/${classroom.slug}/group-assignments/new`,
           },
         ]}
       />
 
       <div className="container-md p-responsive mt-6">
-        <h1 className="f2 mb-5">Configurá el assignment grupal.</h1>
+        <h1 className="f2 mb-5">Configurá el trabajo práctico grupal.</h1>
 
         {classroom.archivedAt ? (
           <div className="blankslate blankslate-spacious">
             <h3 className="mb-2">Este classroom está archivado</h3>
             <p className="color-fg-muted mb-4">
-              No se pueden crear assignments en un classroom archivado.
+              No se pueden crear trabajos prácticos en un classroom archivado.
             </p>
             <Link href={`/classrooms/${classroom.slug}`} className="btn" role="button">
               Volver al classroom

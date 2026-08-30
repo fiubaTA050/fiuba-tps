@@ -577,7 +577,7 @@ describe('updateGroupAssignment', () => {
 
     expect(result).toEqual({
       success: false,
-      error: 'Este assignment ya tiene 3 equipos, así que el máximo no puede ser 2.',
+      error: 'Este trabajo práctico ya tiene 3 equipos, así que el máximo no puede ser 2.',
       field: 'maxTeams',
     })
     expect((await db.select().from(groupAssignments))[0].maxTeams).toBeNull()
@@ -740,7 +740,7 @@ describe('deleteGroupAssignment', () => {
 
     expect(await deleteGroupAssignment(session, classroom.slug, VALID.slug)).toEqual({
       success: false,
-      error: 'No encontramos ese assignment.',
+      error: 'No encontramos ese trabajo práctico.',
     })
   })
 })

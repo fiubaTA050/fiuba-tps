@@ -205,7 +205,7 @@ function ClassroomCardArticle({ classroom }: { classroom: ClassroomCard }) {
                         role="menuitem"
                         className="ActionListContent"
                       >
-                        <span className="ActionListItem-label">Nuevo assignment</span>
+                        <span className="ActionListItem-label">Nuevo trabajo práctico</span>
                       </Link>
                     </li>
                   )}
@@ -279,7 +279,7 @@ function ClassroomCardArticle({ classroom }: { classroom: ClassroomCard }) {
             <div className="py-4 border-top">
               {!archived && (
                 <Link href={`${path}/new-assignment`} className="btn" role="button">
-                  Crear el primer assignment
+                  Crear el primer trabajo práctico
                 </Link>
               )}
             </div>

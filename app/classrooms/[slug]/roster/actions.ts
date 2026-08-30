@@ -134,7 +134,7 @@ export async function unlinkAccountAction(
   const classroomSlug = String(formData.get('classroom_slug') ?? '')
   const entryId = positiveInteger(formData.get('entry_id'))
 
-  if (entryId === null) return { error: 'No encontramos a ese alumno en el roster.', notice: null }
+  if (entryId === null) return { error: 'No encontramos a ese alumno en la lista.', notice: null }
 
   const result = await unlinkAccountFromEntry(session, classroomSlug, entryId)
 
@@ -155,7 +155,7 @@ export async function renameEntryAction(
   const classroomSlug = String(formData.get('classroom_slug') ?? '')
   const entryId = positiveInteger(formData.get('entry_id'))
 
-  if (entryId === null) return { error: 'No encontramos a ese alumno en el roster.', notice: null }
+  if (entryId === null) return { error: 'No encontramos a ese alumno en la lista.', notice: null }
 
   const result = await renameEntry(
     session,
@@ -181,7 +181,7 @@ export async function deleteEntryAction(
   const classroomSlug = String(formData.get('classroom_slug') ?? '')
   const entryId = positiveInteger(formData.get('entry_id'))
 
-  if (entryId === null) return { error: 'No encontramos a ese alumno en el roster.', notice: null }
+  if (entryId === null) return { error: 'No encontramos a ese alumno en la lista.', notice: null }
 
   const result = await deleteEntry(session, classroomSlug, entryId)
 

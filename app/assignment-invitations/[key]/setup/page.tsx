@@ -67,19 +67,19 @@ export default async function AssignmentInvitationSetupPage(
       <div className="d-flex flex-items-center mb-2">
         <PersonIcon size={22} className="mr-2 color-fg-muted" />
         <h2 className="f2 text-normal">
-          Aceptaste el assignment <strong>{invitation.assignmentTitle}</strong>
+          Aceptaste el trabajo práctico <strong>{invitation.assignmentTitle}</strong>
         </h2>
       </div>
 
       {invitation.rosterEntry ? (
         <p className="color-fg-muted">
-          Figurás en el roster como{' '}
+          Figurás en la lista de alumnos como{' '}
           <strong className="text-mono">{invitation.rosterEntry.identifier}</strong>.
         </p>
       ) : invitation.roster ? (
         <p className="color-fg-muted">
           Tu cuenta no está vinculada a ningún {invitation.roster.identifierName.toLowerCase()}{' '}
-          del roster. <a href={`/assignment-invitations/${key}`}>Vinculala ahora</a>
+          de la lista. <a href={`/assignment-invitations/${key}`}>Vinculala ahora</a>
         </p>
       ) : null}
 

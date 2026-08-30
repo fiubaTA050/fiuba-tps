@@ -44,7 +44,7 @@ export function SubmissionPanel({
         <div className="Box-body">
           <h3 className="h5 mb-1">Entrega</h3>
           <p className="color-fg-muted mb-0">
-            El docente todavía no habilitó las entregas para este assignment.
+            El docente todavía no habilitó las entregas para este trabajo práctico.
           </p>
         </div>
       </div>
@@ -65,7 +65,7 @@ export function SubmissionPanel({
               {panel.overdue && ' — ya pasó, lo que entregues queda marcado como tarde.'}
             </>
           ) : (
-            'Este assignment no tiene fecha de entrega.'
+            'Este trabajo práctico no tiene fecha de entrega.'
           )}
         </p>
 
@@ -105,7 +105,7 @@ export function SubmissionPanel({
               </div>
               <p className="note">
                 Lo que confirmes queda congelado aunque después sigas trabajando. Podés volver a
-                entregar las veces que quieras mientras el assignment esté activo.
+                entregar las veces que quieras mientras el trabajo práctico esté activo.
               </p>
             </div>
           </form>

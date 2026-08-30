@@ -245,7 +245,7 @@ export async function createGroupAssignment(
   if (classroom.archivedAt) {
     return {
       success: false,
-      error: 'No se pueden crear assignments en un classroom archivado.',
+      error: 'No se pueden crear trabajos prácticos en un classroom archivado.',
       field: 'base',
     }
   }
@@ -261,7 +261,7 @@ export async function createGroupAssignment(
   if (await isTitleTaken(classroom.id, title)) {
     return {
       success: false,
-      error: `Ya existe un assignment llamado "${title}" en este classroom.`,
+      error: `Ya existe un trabajo práctico llamado "${title}" en este classroom.`,
       field: 'title',
     }
   }
@@ -337,7 +337,7 @@ export async function createGroupAssignment(
     if (isUniqueViolation(error)) {
       return {
         success: false,
-        error: 'Ya existe un assignment o un conjunto de equipos con ese nombre en este classroom.',
+        error: 'Ya existe un trabajo práctico o un conjunto de equipos con ese nombre en este classroom.',
         field: 'title',
       }
     }
@@ -379,7 +379,7 @@ export async function updateGroupAssignment(
   if (classroom.archivedAt) {
     return {
       success: false,
-      error: 'No se pueden modificar assignments en un classroom archivado.',
+      error: 'No se pueden modificar trabajos prácticos en un classroom archivado.',
       field: 'base',
     }
   }
@@ -396,7 +396,7 @@ export async function updateGroupAssignment(
     )
 
   if (!existing) {
-    return { success: false, error: 'No encontramos ese assignment.', field: 'base' }
+    return { success: false, error: 'No encontramos ese trabajo práctico.', field: 'base' }
   }
 
   const invalid = validateTitleAndSlug(title, slug)
@@ -408,7 +408,7 @@ export async function updateGroupAssignment(
   if (await isTitleTaken(classroom.id, title, existing.id)) {
     return {
       success: false,
-      error: `Ya existe un assignment llamado "${title}" en este classroom.`,
+      error: `Ya existe un trabajo práctico llamado "${title}" en este classroom.`,
       field: 'title',
     }
   }
@@ -426,7 +426,7 @@ export async function updateGroupAssignment(
     if (input.maxTeams < teamCount) {
       return {
         success: false,
-        error: `Este assignment ya tiene ${teamCount} equipos, así que el máximo no puede ser ${input.maxTeams}.`,
+        error: `Este trabajo práctico ya tiene ${teamCount} equipos, así que el máximo no puede ser ${input.maxTeams}.`,
         field: 'maxTeams',
       }
     }
@@ -453,7 +453,7 @@ export async function updateGroupAssignment(
     if (isUniqueViolation(error)) {
       return {
         success: false,
-        error: 'Ya existe un assignment con ese nombre o prefijo en este classroom.',
+        error: 'Ya existe un trabajo práctico con ese nombre o prefijo en este classroom.',
         field: 'title',
       }
     }
@@ -494,7 +494,7 @@ export async function deleteGroupAssignment(
     )
     .returning({ id: groupAssignments.id })
 
-  if (deleted.length === 0) return { success: false, error: 'No encontramos ese assignment.' }
+  if (deleted.length === 0) return { success: false, error: 'No encontramos ese trabajo práctico.' }
 
   await db
     .update(groupAssignmentInvitations)

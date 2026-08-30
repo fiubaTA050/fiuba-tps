@@ -122,7 +122,7 @@ export async function confirmSubmission(
   }
 
   const context = await loadContext(session, key)
-  if (!context) return { success: false, error: 'No encontramos ese assignment.' }
+  if (!context) return { success: false, error: 'No encontramos ese trabajo práctico.' }
 
   const { enabled, disabledReason } = disabledState(context.invitationsEnabled, context.archivedAt)
   if (!enabled) return { success: false, error: disabledReason! }
@@ -132,7 +132,7 @@ export async function confirmSubmission(
   }
 
   if (context.repoId === null || context.githubRepoId === null) {
-    return { success: false, error: 'Todavía no tenés un repositorio para este assignment.' }
+    return { success: false, error: 'Todavía no tenés un repositorio para este trabajo práctico.' }
   }
 
   const [last] = await db

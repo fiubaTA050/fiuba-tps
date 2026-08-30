@@ -45,14 +45,14 @@ export default async function AcceptGroupAssignmentPage(
       <div className="d-flex flex-items-center mb-2">
         <OrganizationIcon size={22} className="mr-2 color-fg-muted" />
         <h2 className="f2 text-normal">
-          Aceptar el assignment <strong>{invitation.assignmentTitle}</strong>
+          Aceptar el trabajo práctico <strong>{invitation.assignmentTitle}</strong>
         </h2>
       </div>
 
       <div className="Box my-4">
         <div className="Box-row">
           <p className="mb-0">
-            Aceptar este assignment le va a dar a tu equipo (<strong>{invitation.team.title}</strong>
+            Aceptar este trabajo práctico le va a dar a tu equipo (<strong>{invitation.team.title}</strong>
             ) acceso al repositorio{' '}
             <strong className="text-mono">
               {invitation.assignmentSlug}-{invitation.team.slug}

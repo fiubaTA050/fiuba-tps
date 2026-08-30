@@ -68,7 +68,7 @@ export default async function AssignmentInvitationPage(
       {/* flash[:success] of #join_roster, which names the entry it linked */}
       {searchParams.joined === '1' && invitation.rosterEntry && (
         <div className="flash flash-success mb-4">
-          Tu cuenta quedó vinculada a {invitation.rosterEntry.identifier} en el roster. Si no es
+          Tu cuenta quedó vinculada a {invitation.rosterEntry.identifier} en la lista de alumnos. Si no es
           correcto, escribile al docente.
         </div>
       )}
@@ -84,13 +84,13 @@ export default async function AssignmentInvitationPage(
           <div className="d-flex flex-items-center mb-2">
             <PersonIcon size={22} className="mr-2 color-fg-muted" />
             <h2 className="f2 text-normal">
-              Aceptar el assignment <strong>{invitation.assignmentTitle}</strong>
+              Aceptar el trabajo práctico <strong>{invitation.assignmentTitle}</strong>
             </h2>
           </div>
 
           {invitation.rosterEntry ? (
             <p className="color-fg-muted">
-              Vas a figurar en el roster como{' '}
+              Vas a figurar en la lista de alumnos como{' '}
               <strong className="text-mono">{invitation.rosterEntry.identifier}</strong>.
             </p>
           ) : invitation.roster ? (
@@ -106,7 +106,7 @@ export default async function AssignmentInvitationPage(
             <div className="Box-row">
               {invitation.enabled ? (
                 <p className="mb-0">
-                  Aceptar este assignment te va a dar acceso al repositorio{' '}
+                  Aceptar este trabajo práctico te va a dar acceso al repositorio{' '}
                   <strong className="text-mono">
                     {invitation.assignmentSlug}-{session.user.githubLogin}
                   </strong>{' '}
@@ -150,7 +150,7 @@ async function JoinRoster({
     <>
       <div className="d-flex flex-items-center mb-2">
         <PersonIcon size={22} className="mr-2 color-fg-muted" />
-        <h2 className="f2 text-normal">Sumate al roster del classroom</h2>
+        <h2 className="f2 text-normal">Sumate a la lista de alumnos del classroom</h2>
       </div>
 
       <p className="f4">
@@ -174,7 +174,7 @@ function SignIn({ invitationKey }: { invitationKey: string }) {
   return (
     <PageContainer>
       <div className="blankslate blankslate-large blankslate-spacious">
-        <h1 className="h2 mb-3">Iniciá sesión para ver el assignment</h1>
+        <h1 className="h2 mb-3">Iniciá sesión para ver el trabajo práctico</h1>
         <p className="f4 color-fg-muted mb-4">
           Usá la misma cuenta de GitHub con la que vas a entregar los trabajos prácticos.
         </p>

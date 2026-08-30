@@ -115,12 +115,12 @@ export default async function AssignmentPage(
       <div className="container-xl p-responsive">
         {justCreated && (
           <div className="flash flash-success mt-4">
-            Assignment creado. Compartí el link de invitación con los alumnos.
+            Trabajo práctico creado. Compartí el link de invitación con los alumnos.
           </div>
         )}
 
         {/* flash[:success] = "Assignment \"...\" is being updated" */}
-        {justUpdated && <div className="flash flash-success mt-4">Assignment actualizado.</div>}
+        {justUpdated && <div className="flash flash-success mt-4">Trabajo práctico actualizado.</div>}
 
         <AssignmentHeader
           title={assignment.title}
@@ -138,11 +138,11 @@ export default async function AssignmentPage(
                 // AssignmentInvitation#reason_for_disabled_invitations
                 classroom.archivedAt
                 ? 'El link está deshabilitado porque el classroom está archivado.'
-                : 'El link está deshabilitado: este assignment no acepta invitaciones.'
+                : 'El link está deshabilitado: este trabajo práctico no acepta invitaciones.'
           }
         />
 
-        <h2 className="mb-2">Detalle del assignment</h2>
+        <h2 className="mb-2">Detalle del trabajo práctico</h2>
 
         {/* The live "Students total", "Accepted assignments" and "Assignment
             submissions", with the numbers the docs define for each. Its fourth
@@ -154,7 +154,7 @@ export default async function AssignmentPage(
               total: students,
               parts: [
                 // "the number of students on the classroom's roster"
-                { value: acceptances.entries.length, label: 'en el roster' },
+                { value: acceptances.entries.length, label: 'en la lista' },
                 // "GitHub accounts that have accepted the assignment and are
                 // not associated with a roster identifier"
                 { value: acceptances.unlinkedAccounts.length, label: 'agregados' },
@@ -162,7 +162,7 @@ export default async function AssignmentPage(
             },
             {
               // "the number of accounts that have accepted this assignment"
-              label: 'Assignments aceptados',
+              label: 'Trabajos prácticos aceptados',
               total: acceptances.acceptedCount,
               parts: [{ value: acceptances.acceptedCount, label: 'alumnos' }],
             },

@@ -51,7 +51,7 @@ export async function joinRosterAction(
   // `roster_entries.find("not_an_id")` raising RecordNotFound, which the
   // original rescued into a flash and a re-render of join_roster
   if (entryId === null) {
-    return { error: 'No encontramos ese identificador en el roster.', notice: null }
+    return { error: 'No encontramos ese identificador en la lista de alumnos.', notice: null }
   }
 
   const result = await joinRoster(session, key, entryId)

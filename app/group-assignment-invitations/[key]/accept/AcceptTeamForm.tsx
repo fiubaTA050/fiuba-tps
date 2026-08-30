@@ -24,7 +24,7 @@ export function AcceptTeamForm({ invitationKey }: { invitationKey: string }) {
       {state.error && <div className="flash flash-error mb-3">{state.error}</div>}
 
       <button type="submit" className="btn btn-primary" disabled={pending}>
-        {pending ? 'Aceptando…' : 'Aceptar este assignment'}
+        {pending ? 'Aceptando…' : 'Aceptar este trabajo práctico'}
       </button>
     </form>
   )

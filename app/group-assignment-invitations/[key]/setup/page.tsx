@@ -50,7 +50,7 @@ export default async function GroupAssignmentSetupPage(
       <div className="d-flex flex-items-center mb-2">
         <OrganizationIcon size={22} className="mr-2 color-fg-muted" />
         <h2 className="f2 text-normal">
-          Aceptaste el assignment <strong>{invitation.assignmentTitle}</strong>
+          Aceptaste el trabajo práctico <strong>{invitation.assignmentTitle}</strong>
         </h2>
       </div>
 
@@ -59,14 +59,14 @@ export default async function GroupAssignmentSetupPage(
         {invitation.rosterEntry ? (
           <>
             {' '}
-            Figurás en el roster como{' '}
+            Figurás en la lista de alumnos como{' '}
             <strong className="text-mono">{invitation.rosterEntry.identifier}</strong>.
           </>
         ) : invitation.roster ? (
           <>
             {' '}
             Tu cuenta no está vinculada a ningún {invitation.roster.identifierName.toLowerCase()}{' '}
-            del roster. <a href={`/group-assignment-invitations/${key}`}>Vinculala ahora</a>
+            de la lista. <a href={`/group-assignment-invitations/${key}`}>Vinculala ahora</a>
           </>
         ) : null}
       </p>

@@ -179,7 +179,7 @@ export async function findSlugClash(
 /** The message for a prefix already taken, which reads differently across classrooms */
 export function slugClashMessage(slug: string, clash: SlugClash, classroomId: number): string {
   if (clash.classroomId === classroomId) {
-    return `Ya existe un assignment con el prefijo "${slug}" en este classroom.`
+    return `Ya existe un trabajo práctico con el prefijo "${slug}" en este classroom.`
   }
 
   return (
@@ -245,7 +245,7 @@ export async function resolveStarterCode(
   if (await isRepositoryEmpty(installationId, repository.fullName)) {
     return invalid(
       `"${repository.fullName}" está vacío. Elegí un repo con contenido, o dejá el campo ` +
-        'en blanco para crear el assignment sin starter code.',
+        'en blanco para crear el trabajo práctico sin starter code.',
     )
   }
 

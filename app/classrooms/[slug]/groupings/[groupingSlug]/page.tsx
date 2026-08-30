@@ -54,7 +54,7 @@ export default async function GroupingPage(
         <div className="blankslate blankslate-spacious mt-4">
           <h3 className="mb-2">Este conjunto no tiene equipos</h3>
           <p className="color-fg-muted mb-0">
-            Compartí el link del assignment grupal y los equipos van a aparecer acá.
+            Compartí el link del trabajo práctico grupal y los equipos van a aparecer acá.
           </p>
         </div>
       ) : (

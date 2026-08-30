@@ -51,13 +51,13 @@ export default async function RosterPage(props: PageProps<'/classrooms/[slug]/ro
       {/* flash[:success] of #create. Without the count: the query parameter
           survives the later revalidations, and a number that keeps growing
           under "Roster creado" reads like a bug */}
-      {justCreated && <div className="flash flash-success mb-4">Roster creado.</div>}
+      {justCreated && <div className="flash flash-success mb-4">Lista de alumnos creada.</div>}
 
       <section>
         <div className="Box">
           <div className="Box-header d-flex flex-justify-between flex-column flex-sm-row">
             <h2 className="Box-title d-flex flex-items-center mb-2 mb-sm-0">
-              Roster del classroom
+              Lista de alumnos del classroom
             </h2>
 
             <div className="d-flex flex-column flex-sm-row">
@@ -108,8 +108,8 @@ export default async function RosterPage(props: PageProps<'/classrooms/[slug]/ro
             <h2 className="Box-title">Zona de peligro</h2>
           </div>
           <div className="Box-body color-border-danger-emphasis">
-            <p>Al eliminar el roster se borran todos los alumnos.</p>
-            <p>No se borran los assignments, ni los repos, ni las entregas.</p>
+            <p>Al eliminar la lista se borran todos los alumnos.</p>
+            <p>No se borran los trabajos prácticos, ni los repos, ni las entregas.</p>
             <p>
               Después de eliminarlo, los repos y las entregas se identifican por usuario de
               GitHub en vez de por {roster.identifierName.toLowerCase()}.

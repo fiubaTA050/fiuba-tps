@@ -67,7 +67,7 @@ export default async function EditAssignmentPage(
       />
 
       <div className="container-md p-responsive mt-6">
-        <h1 className="f2 mb-5">Editar el assignment</h1>
+        <h1 className="f2 mb-5">Editar el trabajo práctico</h1>
 
         {/* validate :organization_is_not_archived covers "create or modify",
             and saying it here beats failing on submit */}
@@ -75,7 +75,7 @@ export default async function EditAssignmentPage(
           <div className="blankslate blankslate-spacious">
             <h3 className="mb-2">Este classroom está archivado</h3>
             <p className="color-fg-muted mb-4">
-              No se pueden modificar assignments en un classroom archivado.
+              No se pueden modificar trabajos prácticos en un classroom archivado.
             </p>
             <Link href={`/classrooms/${classroom.slug}`} className="btn" role="button">
               Volver al classroom

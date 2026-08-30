@@ -387,7 +387,7 @@ describe('joinRoster', () => {
     const result = await joinRoster(student, key, 987_654)
     expect(result).toEqual({
       success: false,
-      error: 'No encontramos ese identificador en el roster.',
+      error: 'No encontramos ese identificador en la lista de alumnos.',
     })
   })
 
@@ -408,7 +408,7 @@ describe('joinRoster', () => {
 
     expect(await joinRoster(student, key, foreign.id)).toEqual({
       success: false,
-      error: 'No encontramos ese identificador en el roster.',
+      error: 'No encontramos ese identificador en la lista de alumnos.',
     })
 
     const [untouched] = await db
@@ -425,7 +425,7 @@ describe('joinRoster', () => {
 
     expect(await joinRoster(student, key, 1)).toEqual({
       success: false,
-      error: 'Este classroom no tiene un roster.',
+      error: 'Este classroom no tiene una lista de alumnos.',
     })
   })
 

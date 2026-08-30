@@ -40,7 +40,7 @@ export default async function NewAssignmentChooserPage(
           <div className="blankslate blankslate-spacious">
             <h3 className="mb-2">Este classroom está archivado</h3>
             <p className="color-fg-muted mb-4">
-              No se pueden crear assignments en un classroom archivado.
+              No se pueden crear trabajos prácticos en un classroom archivado.
             </p>
             <Link href={`/classrooms/${classroom.slug}`} className="btn" role="button">
               Volver al classroom
@@ -56,23 +56,23 @@ export default async function NewAssignmentChooserPage(
       <Chrome classroom={classroom} />
 
       <div className="container-md p-responsive mt-6">
-        <h1 className="f2 text-normal mb-3">Nuevo assignment</h1>
+        <h1 className="f2 text-normal mb-3">Nuevo trabajo práctico</h1>
 
         <div className="Box">
           <Option
             icon={<PersonIcon size={22} />}
-            title="Assignment individual"
+            title="Trabajo práctico individual"
             description="Cada alumno trabaja por su cuenta en su propio repositorio."
             href={`/classrooms/${classroom.slug}/assignments/new`}
-            action="Crear un assignment individual"
+            action="Crear un trabajo práctico individual"
           />
 
           <Option
             icon={<OrganizationIcon size={22} />}
-            title="Assignment grupal"
+            title="Trabajo práctico grupal"
             description="Los alumnos arman equipos y cada equipo trabaja en un repositorio compartido."
             href={`/classrooms/${classroom.slug}/group-assignments/new`}
-            action="Crear un assignment grupal"
+            action="Crear un trabajo práctico grupal"
           />
         </div>
       </div>
@@ -120,7 +120,7 @@ function Chrome({ classroom }: { classroom: { title: string; slug: string } }) {
       items={[
         { label: 'Classrooms', href: '/classrooms' },
         { label: classroom.title, href: `/classrooms/${classroom.slug}` },
-        { label: 'Nuevo assignment', href: `/classrooms/${classroom.slug}/new-assignment` },
+        { label: 'Nuevo trabajo práctico', href: `/classrooms/${classroom.slug}/new-assignment` },
       ]}
     />
   )

@@ -497,7 +497,7 @@ function planRoster(bundle: ExportBundle, warnings: string[]): PlanRosterEntry[]
   if (missing.size > 0) {
     warnings.push(
       `${missing.size} alumnos aceptaron sin padrón (${[...missing].map((l) => `@${l}`).join(', ')}): ` +
-        'quedan como usuarios, fuera del roster.',
+        'quedan como usuarios, fuera de la lista.',
     )
   }
 

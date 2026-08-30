@@ -80,7 +80,7 @@ export function AssignmentHeader({
               ) : (
                 <PersonIcon className="mr-1" />
               )}
-              <span>Assignment {group ? 'grupal' : 'individual'}</span>
+              <span>Trabajo práctico {group ? 'grupal' : 'individual'}</span>
             </div>
 
             <div className="d-flex flex-items-center">
@@ -113,11 +113,11 @@ export function AssignmentHeader({
                 style={{ width: 200 }}
               >
                 <Link href={editHref} className="dropdown-item" role="menuitem">
-                  Editar assignment
+                  Editar el trabajo práctico
                 </Link>
                 <div role="none" className="dropdown-divider" />
                 <Link href={`${editHref}#borrar`} className="dropdown-item" role="menuitem">
-                  Borrar assignment
+                  Borrar el trabajo práctico
                 </Link>
               </div>
             </details>

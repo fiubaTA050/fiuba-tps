@@ -235,7 +235,7 @@ describe('createRoster', () => {
       identifiers: '999',
     })
 
-    expect(result).toEqual({ success: false, error: 'Este classroom ya tiene un roster.' })
+    expect(result).toEqual({ success: false, error: 'Este classroom ya tiene una lista de alumnos.' })
     expect(await db.select().from(rosters)).toHaveLength(1)
   })
 
@@ -410,7 +410,7 @@ describe('renameEntry', () => {
 
     const result = await renameEntry(session, mine.slug, otherRoster!.entries[0].id, '999')
 
-    expect(result).toEqual({ success: false, error: 'No encontramos a ese alumno en el roster.' })
+    expect(result).toEqual({ success: false, error: 'No encontramos a ese alumno en la lista.' })
     const untouched = await findRoster(session, other.slug)
     expect(untouched?.entries[0].identifier).toBe('201')
   })
@@ -450,7 +450,7 @@ describe('deleteEntry', () => {
 
     const result = await deleteEntry(session, mine.slug, otherRoster!.entries[0].id)
 
-    expect(result).toEqual({ success: false, error: 'No encontramos a ese alumno en el roster.' })
+    expect(result).toEqual({ success: false, error: 'No encontramos a ese alumno en la lista.' })
     expect(await db.select().from(rosterEntries)).toHaveLength(4)
   })
 })
@@ -759,7 +759,7 @@ describe('linkAccountToEntry', () => {
       student,
     )
 
-    expect(result).toEqual({ success: false, error: 'No encontramos a ese alumno en el roster.' })
+    expect(result).toEqual({ success: false, error: 'No encontramos a ese alumno en la lista.' })
   })
 
   // DA-4: the boundary is organizations_users, as in every other function here
@@ -772,7 +772,7 @@ describe('linkAccountToEntry', () => {
 
     const result = await linkAccountToEntry(stranger, classroom.slug, entry, student)
 
-    expect(result).toEqual({ success: false, error: 'Este classroom no tiene un roster.' })
+    expect(result).toEqual({ success: false, error: 'Este classroom no tiene una lista de alumnos.' })
 
     const roster = await findRoster(owner, classroom.slug)
     expect(roster?.entries[0].githubLogin).toBeNull()
@@ -820,7 +820,7 @@ describe('unlinkAccountFromEntry', () => {
 
     expect(await unlinkAccountFromEntry(session, mine.slug, entry)).toEqual({
       success: false,
-      error: 'No encontramos a ese alumno en el roster.',
+      error: 'No encontramos a ese alumno en la lista.',
     })
 
     const roster = await findRoster(session, other.slug)

@@ -43,7 +43,7 @@ export function ClassroomNav({
             aria-current={tab === 'assignments' ? 'page' : undefined}
           >
             <StarIcon className="UnderlineNav-octicon" />
-            <span>Assignments</span>
+            <span>Trabajos prácticos</span>
             <span title={String(assignmentCount)} className="Counter">
               {assignmentCount}
             </span>

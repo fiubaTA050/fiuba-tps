@@ -105,12 +105,12 @@ export default async function GroupAssignmentPage(
       <div className="container-xl p-responsive">
         {justCreated && (
           <div className="flash flash-success mt-4">
-            Assignment grupal creado. Compartí el link de invitación con los alumnos: el primero de
+            Trabajo práctico grupal creado. Compartí el link de invitación con los alumnos: el primero de
             cada equipo lo crea y el resto se suma.
           </div>
         )}
 
-        {justUpdated && <div className="flash flash-success mt-4">Assignment actualizado.</div>}
+        {justUpdated && <div className="flash flash-success mt-4">Trabajo práctico actualizado.</div>}
 
         <AssignmentHeader
           title={assignment.title}
@@ -126,7 +126,7 @@ export default async function GroupAssignmentPage(
               ? null
               : classroom.archivedAt
                 ? 'El link está deshabilitado porque el classroom está archivado.'
-                : 'El link está deshabilitado: este assignment no acepta invitaciones.'
+                : 'El link está deshabilitado: este trabajo práctico no acepta invitaciones.'
           }
         />
 
@@ -143,7 +143,7 @@ export default async function GroupAssignmentPage(
           {assignment.maxTeams === null ? 'sin máximo de equipos' : `hasta ${assignment.maxTeams} equipos`}
         </p>
 
-        <h2 className="mb-2">Detalle del assignment</h2>
+        <h2 className="mb-2">Detalle del trabajo práctico</h2>
 
         {/* The group counterpart of the live tiles: the docs describe it as
             "total teams, rostered students, students not on a team, accepted
@@ -155,7 +155,7 @@ export default async function GroupAssignmentPage(
               label: 'Equipos',
               total: acceptances.teams.length,
               parts: [
-                { value: roster?.count ?? 0, label: 'alumnos en el roster' },
+                { value: roster?.count ?? 0, label: 'alumnos en la lista' },
                 { value: acceptances.studentsNotOnTeam.length, label: 'sin equipo' },
               ],
             },

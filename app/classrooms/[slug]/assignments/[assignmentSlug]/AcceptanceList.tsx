@@ -98,7 +98,7 @@ export function AcceptanceList({
   return (
     <>
       <AssignmentRepoList
-        title={identifierName ?? 'Aceptaron el assignment'}
+        title={identifierName ?? 'Aceptaron el trabajo práctico'}
         rows={rows}
         // No roster, nothing to link to — `set_unlinked_users` returns early on
         // the same condition
@@ -118,7 +118,7 @@ export function AcceptanceList({
       {identifierName !== null && unlinkedAccounts.length > 0 && (
         <p className="color-fg-muted f6 mt-2">
           {unlinkedAccounts.length === 1 ? 'Hay 1 alumno' : `Hay ${unlinkedAccounts.length} alumnos`}{' '}
-          que aceptaron el assignment sin elegir su {identifierName.toLowerCase()} en el roster.
+          que aceptaron el trabajo práctico sin elegir su {identifierName.toLowerCase()} en la lista.
           Filtralos con &quot;Sin vincular · Cuentas de GitHub&quot;.
         </p>
       )}

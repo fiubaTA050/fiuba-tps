@@ -72,7 +72,7 @@ export function NewRosterForm({
           spacing of its own in v22 — it is a clearfix plus `float: right` */}
       <div className="form-actions mt-5">
         <button type="submit" className="btn btn-primary" disabled={pending}>
-          {pending ? 'Creando…' : 'Crear roster'}
+          {pending ? 'Creando…' : 'Crear la lista'}
         </button>
         {/* 'Skip' in the original: the roster is optional and can wait */}
         <Link href={`/classrooms/${classroomSlug}`} className="btn" role="button">

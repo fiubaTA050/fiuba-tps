@@ -824,7 +824,7 @@ describe('updateAssignment', () => {
 
     expect(result).toEqual({
       success: false,
-      error: 'Ya existe un assignment con el prefijo "tp2" en este classroom.',
+      error: 'Ya existe un trabajo práctico con el prefijo "tp2" en este classroom.',
       field: 'slug',
     })
   })
@@ -866,7 +866,7 @@ describe('updateAssignment', () => {
 
     expect(result).toEqual({
       success: false,
-      error: 'Ya existe un assignment llamado "TP 2" en este classroom.',
+      error: 'Ya existe un trabajo práctico llamado "TP 2" en este classroom.',
       field: 'title',
     })
   })
@@ -903,7 +903,7 @@ describe('updateAssignment', () => {
 
     expect(result).toEqual({
       success: false,
-      error: 'No se pueden modificar assignments en un classroom archivado.',
+      error: 'No se pueden modificar trabajos prácticos en un classroom archivado.',
       field: 'base',
     })
   })
@@ -935,7 +935,7 @@ describe('updateAssignment', () => {
 
     expect(result).toEqual({
       success: false,
-      error: 'No encontramos ese assignment.',
+      error: 'No encontramos ese trabajo práctico.',
       field: 'base',
     })
   })
@@ -1040,7 +1040,7 @@ describe('deleteAssignment', () => {
 
     expect(await deleteAssignment(session, classroom.slug, 'tp1')).toEqual({
       success: false,
-      error: 'No encontramos ese assignment.',
+      error: 'No encontramos ese trabajo práctico.',
     })
   })
 })

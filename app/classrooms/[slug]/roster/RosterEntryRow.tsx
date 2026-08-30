@@ -165,7 +165,7 @@ export function RosterEntryRow({
               aria-label={`Borrar ${entry.identifier}`}
               disabled={deleting}
               onClick={(event) => {
-                if (!window.confirm(`¿Borrar a ${entry.identifier} del roster?`)) {
+                if (!window.confirm(`¿Borrar a ${entry.identifier} de la lista?`)) {
                   event.preventDefault()
                 }
               }}

@@ -42,7 +42,7 @@ export function RosterTabs({
   return (
     <>
       <div className="tabnav">
-        <ul role="tablist" aria-label="Roster" className="tabnav-tabs list-style-none">
+        <ul role="tablist" aria-label="Lista de alumnos" className="tabnav-tabs list-style-none">
           <Tab
             id="students"
             label="Todos los alumnos"

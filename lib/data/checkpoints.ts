@@ -90,7 +90,7 @@ export async function saveAssignmentCheckpoint(
   if (classroom.archivedAt) {
     return {
       success: false,
-      error: 'No se pueden modificar assignments en un classroom archivado.',
+      error: 'No se pueden modificar trabajos prácticos en un classroom archivado.',
     }
   }
 
@@ -105,7 +105,7 @@ export async function saveAssignmentCheckpoint(
       ),
     )
 
-  if (!assignment) return { success: false, error: 'No encontramos ese assignment.' }
+  if (!assignment) return { success: false, error: 'No encontramos ese trabajo práctico.' }
 
   const [existing] = await db
     .select({ id: checkpoints.id })
@@ -126,7 +126,7 @@ export async function saveAssignmentCheckpoint(
         error:
           `No se pueden cerrar las entregas: ya hay ${handedIn} confirmada` +
           `${handedIn === 1 ? '' : 's'}. Para que nadie entregue más, poné el ` +
-          'assignment en Inactivo.',
+          'trabajo práctico en Inactivo.',
       }
     }
 
