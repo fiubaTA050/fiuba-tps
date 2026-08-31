@@ -187,8 +187,10 @@ export async function findAssignment(
  *   3. save → runs every validation, both records at once via autosave
  *   4. deadline&.create_job
  *
- * Steps 1 to 3 carry over as they are; step 4 does not exist here (no
- * deadlines, see db/schema.ts).
+ * Steps 1 to 3 carry over as they are; step 4 does not exist here — this
+ * assignment-level `deadline` was never ported. What exists instead is a
+ * per-checkpoint `deadline_at` (`db/schema.ts`, `lib/data/checkpoints.ts`), a
+ * deliberately different concept: see docs/entregas.md.
  */
 export async function createAssignment(
   session: Session,
@@ -296,8 +298,10 @@ export async function createAssignment(
  *
  * The editor did three things: recreate the deadline, `update_attributes` and
  * then walk `previous_changes` handing each one to
- * `update_attribute_for_all_assignment_repos`. The first does not exist here
- * (no deadlines), and **the third is deliberately dropped**: its `case` had a
+ * `update_attribute_for_all_assignment_repos`. The first does not exist here —
+ * this is the assignment-level deadline, not the checkpoint's own
+ * `deadline_at`, which is edited through `lib/data/checkpoints.ts` instead —
+ * and **the third is deliberately dropped**: its `case` had a
  * single `when "public_repo"`, which enqueued `AssignmentRepositoryVisibilityJob`
  * to flip every repository already created. There is no queue here, and doing
  * it inline is one GitHub call per student against a 60 s function ceiling —

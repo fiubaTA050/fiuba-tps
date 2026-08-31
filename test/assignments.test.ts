@@ -20,8 +20,10 @@ import { createTestDatabase } from './helpers/db'
  * cases in spec/controllers/assignments_controller_spec.rb.
  *
  * The original's specs around starter code (`#starter_code_repository_not_empty`,
- * `#starter_code_repository_is_template`) and deadlines are absent because
- * neither is ported; see db/schema.ts.
+ * `#starter_code_repository_is_template`) are absent because neither is
+ * ported. Its deadline specs are absent too — this is the assignment-level
+ * deadline, which stays unported; the checkpoint's own `deadline_at` is
+ * covered separately, in test/checkpoints.test.ts.
  */
 
 let db: Awaited<ReturnType<typeof createTestDatabase>>['db']
@@ -697,7 +699,9 @@ describe('findAssignment', () => {
 /**
  * Port of spec/models/assignment/editor_spec.rb and of the
  * AssignmentsController#update cases of the controller spec. The deadline half
- * of the editor spec is absent because deadlines are not ported.
+ * of the editor spec is absent because the assignment-level deadline is not
+ * ported — see test/checkpoints.test.ts and test/submissions.test.ts for the
+ * checkpoint's own deadline.
  */
 describe('updateAssignment', () => {
   /** A classroom with `VALID` already created in it */

@@ -14,6 +14,12 @@ export type SubmissionLabel = {
   tone: SubmissionTone
 }
 
+/** The repo's current confirmed submission, as `listAssignmentSubmissions` reads it */
+export type RepoSubmission = {
+  sha: string
+  late: boolean
+}
+
 /** One student or one team, with everything the filters need to decide on it */
 export type RepoRow = {
   key: string
@@ -27,6 +33,13 @@ export type RepoRow = {
   members?: { githubLogin: string | null; githubAvatarUrl: string | null }[]
   label: SubmissionLabel
   snapshot: RepositorySnapshot | null
+  /**
+   * The repo's current confirmed submission. `undefined` on a dashboard with
+   * no checkpoint concept at all (the group one, for now — group checkpoints
+   * do not exist yet); `null` once a checkpoint is tracked but this repo
+   * has not confirmed.
+   */
+  submission?: RepoSubmission | null
   /** Accepted the assignment, whatever came of the repository afterwards */
   accepted: boolean
   /** A roster entry nobody claimed — the live filter's "student identifiers" */
@@ -56,6 +69,13 @@ export type RepoRow = {
  * has since moved to the commit-based reading this follows — its own filter
  * says "Submitted: students who've committed to repository".
  *
+ * That commit-based reading is the whole story only where no checkpoint is
+ * tracked — the group dashboard today, which calls this with `submission`
+ * left `undefined`. Where one is (the individual dashboard), "Entregado" means
+ * the stronger fact: the student named a SHA and confirmed it. A repo with
+ * commits and no confirmation reads as "Sin confirmar" instead, per
+ * docs/entregas.md.
+ *
  * `snapshot` null with an id set is the NullGitHubRepository case — the repo
  * was deleted or moved out of the org. Deleting an assignment here does not
  * delete repositories (DA-9), so the reverse is common too and harmless.
@@ -63,15 +83,29 @@ export type RepoRow = {
 export function submissionLabel(
   hasRepo: boolean,
   snapshot: RepositorySnapshot | null,
+  submission?: RepoSubmission | null,
 ): SubmissionLabel {
   if (!hasRepo) return { text: 'Sin repo', tone: 'neutral' }
   if (!snapshot) return { text: 'Repo inaccesible', tone: 'attention' }
+
+  // No checkpoint tracked on this dashboard at all (the group one, for now)
+  if (submission === undefined) {
+    return snapshot.commitCount > 0
+      ? { text: 'Entregado', tone: 'success' }
+      : { text: 'Sin entregar', tone: 'danger' }
+  }
+
+  if (submission !== null) {
+    return { text: `Entregado · ${submission.sha.slice(0, 7)}`, tone: 'success' }
+  }
+
   return snapshot.commitCount > 0
-    ? { text: 'Entregado', tone: 'success' }
+    ? { text: 'Sin confirmar', tone: 'attention' }
     : { text: 'Sin entregar', tone: 'danger' }
 }
 
 /** Whether the row counts as handed in, which is what the filter asks */
 export function hasSubmitted(row: RepoRow): boolean {
+  if (row.submission !== undefined) return row.submission !== null
   return (row.snapshot?.commitCount ?? 0) > 0
 }

@@ -66,7 +66,9 @@ vi.mock('@/lib/github/repositories', async (importOriginal) => {
   }
 })
 
-const { confirmSubmission, findSubmissionPanel } = await import('@/lib/data/submissions')
+const { confirmSubmission, findSubmissionPanel, listAssignmentSubmissions } = await import(
+  '@/lib/data/submissions'
+)
 
 let nextUid = 1
 let nextGithubId = 1000
@@ -406,5 +408,155 @@ describe('findSubmissionPanel', () => {
     await db.update(assignments).set({ deletedAt: new Date() }).where(eq(assignments.id, assignmentId))
 
     expect(await findSubmissionPanel(alumna, key)).toBeNull()
+  })
+})
+
+/**
+ * The cohort-wide read for the teacher dashboard: every repo's current
+ * submission on the assignment's single checkpoint, in one query. No spec to
+ * port — this is new. Serves the `distinct on` that
+ * `index_submissions_on_repo_and_checkpoint`'s comment anticipates.
+ */
+describe('listAssignmentSubmissions', () => {
+  async function classroomWithAssignment(
+    profe: Session,
+  ): Promise<{ classroomSlug: string; assignmentSlug: string; assignmentId: number }> {
+    const githubId = nextGithubId++
+
+    const [classroom] = await db
+      .insert(organizations)
+      .values({
+        githubId,
+        installationId: githubId,
+        title: `${githubId}`,
+        slug: `${githubId}-classroom`,
+      })
+      .returning({ id: organizations.id, slug: organizations.slug })
+
+    await db
+      .insert(organizationsUsers)
+      .values({ organizationId: classroom.id, userId: Number(profe.user.id) })
+
+    const [assignment] = await db
+      .insert(assignments)
+      .values({
+        organizationId: classroom.id,
+        creatorId: Number(profe.user.id),
+        title: `TP ${githubId}`,
+        slug: `tp-${githubId}`,
+      })
+      .returning({ id: assignments.id, slug: assignments.slug })
+
+    return {
+      classroomSlug: classroom.slug,
+      assignmentSlug: assignment.slug,
+      assignmentId: assignment.id,
+    }
+  }
+
+  async function repoFor(
+    assignmentId: number,
+    owner: Session,
+  ): Promise<{ repoId: number; githubRepoId: number }> {
+    const githubRepoId = nextGithubId++
+    const [repo] = await db
+      .insert(assignmentRepos)
+      .values({ assignmentId, userId: Number(owner.user.id), githubRepoId })
+      .returning({ id: assignmentRepos.id })
+
+    return { repoId: repo.id, githubRepoId }
+  }
+
+  async function openCheckpoint(assignmentId: number, deadlineAt: Date | null = null): Promise<number> {
+    const [checkpoint] = await db
+      .insert(checkpoints)
+      .values({ assignmentId, title: null, deadlineAt })
+      .returning({ id: checkpoints.id })
+
+    return checkpoint.id
+  }
+
+  async function submit(
+    repoId: number,
+    checkpointId: number,
+    by: Session,
+    sha: string,
+    submittedAt?: Date,
+  ): Promise<void> {
+    await db.insert(submissions).values({
+      assignmentRepoId: repoId,
+      checkpointId,
+      sha,
+      ref: 'main',
+      committedAt: submittedAt ?? new Date(),
+      ...(submittedAt ? { submittedAt } : {}),
+      submittedByUserId: Number(by.user.id),
+    })
+  }
+
+  it('keys the map by the github repo id, leaving out repos that never confirmed', async () => {
+    const profe = await student('profe')
+    const alumna1 = await student('alumna1')
+    const alumna2 = await student('alumna2')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await openCheckpoint(assignmentId)
+    const repo1 = await repoFor(assignmentId, alumna1)
+    const repo2 = await repoFor(assignmentId, alumna2)
+
+    await submit(repo1.repoId, checkpointId, alumna1, 'a'.repeat(40))
+
+    const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
+
+    expect(result?.byRepoId.get(repo1.githubRepoId)).toMatchObject({ sha: 'a'.repeat(40), late: false })
+    expect(result?.byRepoId.has(repo2.githubRepoId)).toBe(false)
+  })
+
+  it("marks late by comparing to the checkpoint's own deadline", async () => {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const deadlineAt = new Date('2026-09-11T02:59:00Z')
+    const checkpointId = await openCheckpoint(assignmentId, deadlineAt)
+    const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+
+    await submit(repoId, checkpointId, alumna, 'a'.repeat(40), new Date('2026-09-12T00:00:00Z'))
+
+    const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
+
+    expect(result?.byRepoId.get(githubRepoId)?.late).toBe(true)
+  })
+
+  it('keeps the latest row by id on a re-submission, not by submitted_at', async () => {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await openCheckpoint(assignmentId)
+    const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+
+    await submit(repoId, checkpointId, alumna, 'a'.repeat(40), new Date('2026-09-10T00:00:00Z'))
+    // Deliberately timestamped earlier than the first — append-only means the
+    // serial id breaks the tie, not submitted_at
+    await submit(repoId, checkpointId, alumna, 'b'.repeat(40), new Date('2026-09-01T00:00:00Z'))
+
+    const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
+
+    expect(result?.byRepoId.get(githubRepoId)?.sha).toBe('b'.repeat(40))
+  })
+
+  it('reports no checkpoint as an empty map, not an error', async () => {
+    const profe = await student('profe')
+    const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+
+    const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
+
+    expect(result).toEqual({ checkpoint: null, byRepoId: new Map() })
+  })
+
+  it('does not let a teacher of another classroom read it', async () => {
+    const profe = await student('profe')
+    const ajeno = await student('ajeno')
+    const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+
+    expect(await listAssignmentSubmissions(ajeno, classroomSlug, assignmentSlug)).toBeNull()
   })
 })

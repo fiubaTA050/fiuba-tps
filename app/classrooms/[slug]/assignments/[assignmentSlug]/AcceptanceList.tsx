@@ -1,5 +1,5 @@
 import { AssignmentRepoList } from '@/components/AssignmentRepoList'
-import { submissionLabel, type RepoRow } from '@/lib/assignment-rows'
+import { submissionLabel, type RepoRow, type RepoSubmission } from '@/lib/assignment-rows'
 import type { AssignmentAcceptances } from '@/lib/data/invitations'
 import type { RepositorySnapshot } from '@/lib/github/repositories'
 
@@ -24,6 +24,7 @@ export function AcceptanceList({
   acceptances,
   assignmentTitle,
   snapshots,
+  submissions,
   classroomSlug,
   assignmentSlug,
   unlinkedEntries,
@@ -31,6 +32,8 @@ export function AcceptanceList({
   acceptances: AssignmentAcceptances
   assignmentTitle: string
   snapshots: Map<number, RepositorySnapshot>
+  /** The current confirmed submission of each repo, keyed the same as `snapshots` */
+  submissions: Map<number, RepoSubmission>
   classroomSlug: string
   assignmentSlug: string
   /** The identifiers "Link to student" offers — empty when there is no roster */
@@ -53,9 +56,13 @@ export function AcceptanceList({
   const snapshotOf = (repoId: number | null) =>
     repoId === null ? null : (snapshots.get(repoId) ?? null)
 
+  const submissionOf = (repoId: number | null) =>
+    repoId === null ? null : (submissions.get(repoId) ?? null)
+
   const rows: RepoRow[] = [
     ...entries.map((entry): RepoRow => {
       const snapshot = snapshotOf(entry.repoId)
+      const submission = submissionOf(entry.repoId)
 
       return {
         key: `entry-${entry.entryId}`,
@@ -69,8 +76,9 @@ export function AcceptanceList({
             : // `render 'shared/failed_repo_detail', text: "Not accepted"`
               entry.state === 'linked_not_accepted'
               ? { text: 'No aceptó', tone: 'neutral' }
-              : submissionLabel(entry.repoId !== null, snapshot),
+              : submissionLabel(entry.repoId !== null, snapshot, submission),
         snapshot,
+        submission,
         accepted: entry.state === 'accepted',
         unlinkedIdentifier: entry.state === 'not_joined',
         unlinkedAccount: false,
@@ -79,14 +87,16 @@ export function AcceptanceList({
 
     ...unlinkedAccounts.map((account): RepoRow => {
       const snapshot = snapshotOf(account.repoId)
+      const submission = submissionOf(account.repoId)
 
       return {
         key: `account-${account.userId}`,
         name: account.githubLogin ? `@${account.githubLogin}` : 'Cuenta desconocida',
         githubLogin: account.githubLogin,
         visual: 'account',
-        label: submissionLabel(account.repoId !== null, snapshot),
+        label: submissionLabel(account.repoId !== null, snapshot, submission),
         snapshot,
+        submission,
         accepted: true,
         unlinkedIdentifier: false,
         unlinkedAccount: true,

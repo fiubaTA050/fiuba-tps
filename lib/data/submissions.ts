@@ -12,6 +12,7 @@ import {
   submissions,
 } from '@/db/schema'
 import { disabledState } from '@/lib/data/invitations'
+import { findTeachingClassroom } from '@/lib/data/organizations'
 import { db } from '@/lib/db'
 import { isReachableFromDefaultBranch, resolveRepositoryRef } from '@/lib/github/repositories'
 
@@ -55,6 +56,83 @@ export type SubmissionPanel = {
   current: SubmissionRow | null
   /** Every confirmation, newest first. The student argues with data, not memory */
   history: SubmissionRow[]
+}
+
+export type CurrentSubmission = {
+  sha: string
+  submittedAt: Date
+  /** `submitted_at` past the checkpoint's deadline. Accepted anyway — it closes nothing */
+  late: boolean
+}
+
+export type AssignmentSubmissions = {
+  /** Null when the teacher has not opened entregas — nothing to confirm yet */
+  checkpoint: { id: number; deadlineAt: Date | null } | null
+  /** Keyed by the GitHub repo id — the same key `listRepositorySnapshots` and
+   *  `AssignmentAcceptances` use, not the internal `assignment_repos.id` */
+  byRepoId: Map<number, CurrentSubmission>
+}
+
+/**
+ * The current submission of every repository on an assignment's single
+ * checkpoint, for the teacher dashboard.
+ *
+ * "Current" is the literal latest row by id, late or not — the same reading
+ * `findSubmissionPanel` gives the student as `current`. Serves the
+ * `distinct on` that `index_submissions_on_repo_and_checkpoint`'s comment
+ * anticipates.
+ *
+ * DA-4: verifies the caller teaches this classroom independently, the same
+ * way `setClassroomArchived` does, rather than trusting a sibling call in the
+ * page's `Promise.all` to have checked.
+ */
+export async function listAssignmentSubmissions(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+): Promise<AssignmentSubmissions | null> {
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+  if (!classroom) return null
+
+  const [checkpoint] = await db
+    .select({ id: checkpoints.id, deadlineAt: checkpoints.deadlineAt })
+    .from(checkpoints)
+    .innerJoin(assignments, eq(assignments.id, checkpoints.assignmentId))
+    .where(
+      and(
+        eq(assignments.organizationId, classroom.id),
+        eq(assignments.slug, assignmentSlug),
+        isNull(assignments.deletedAt),
+        isNull(checkpoints.title),
+      ),
+    )
+
+  if (!checkpoint) return { checkpoint: null, byRepoId: new Map() }
+
+  const rows = await db
+    .selectDistinctOn([submissions.assignmentRepoId], {
+      githubRepoId: assignmentRepos.githubRepoId,
+      sha: submissions.sha,
+      submittedAt: submissions.submittedAt,
+    })
+    .from(submissions)
+    .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissions.assignmentRepoId))
+    .where(eq(submissions.checkpointId, checkpoint.id))
+    .orderBy(submissions.assignmentRepoId, desc(submissions.id))
+
+  const byRepoId = new Map(
+    rows.map((row) => [
+      row.githubRepoId,
+      {
+        sha: row.sha,
+        submittedAt: row.submittedAt,
+        late:
+          checkpoint.deadlineAt !== null && row.submittedAt.getTime() > checkpoint.deadlineAt.getTime(),
+      },
+    ]),
+  )
+
+  return { checkpoint, byRepoId }
 }
 
 /**

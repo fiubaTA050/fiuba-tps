@@ -37,9 +37,12 @@ import { Pagination } from './Pagination'
  * filters in the URL would re-run that query on every keystroke. The whole
  * cohort is already in the browser; filtering it there is instant and free.
  *
- * Two of the live filters have nothing behind them: "Passing/Failing" is
- * autograding, and the "On-time/Late" halves of the submission filter need
- * deadlines. Neither is ported.
+ * One of the live filters has nothing behind it: "Passing/Failing" is
+ * autograding and is not ported. The "On-time/Late" halves of the submission
+ * filter needed deadlines, which checkpoints now give the individual
+ * dashboard — its own `CheckboxMenu` below only renders when a row actually
+ * carries submission data, which the group dashboard's rows do not yet (no
+ * group checkpoints).
  *
  * **Pagination is client-side for the same reason**, over the rows the filters
  * left. The live site puts it in the URL, as Kaminari does — see
@@ -53,8 +56,14 @@ import { Pagination } from './Pagination'
  */
 const PER_PAGE = 30
 
-/** The live "Filter by submission", minus its two deadline options */
+/** The live "Filter by submission" */
 type SubmissionFilter = 'submitted' | 'not_submitted'
+/**
+ * The live "On-time/Late" halves of the submission filter, split into their
+ * own menu here rather than merged into `SubmissionFilter`'s checkboxes,
+ * since a row can be late only once it has confirmed at all.
+ */
+type TimingFilter = 'on_time' | 'late'
 /** The live "Filter by accepted" */
 type AcceptedFilter = 'accepted' | 'unaccepted'
 /** The live "Filter by unlinked" */
@@ -108,6 +117,7 @@ export function AssignmentRepoList({
 }) {
   const [query, setQuery] = useState('')
   const [submission, setSubmission] = useState<Set<SubmissionFilter>>(new Set())
+  const [timing, setTiming] = useState<Set<TimingFilter>>(new Set())
   const [accepted, setAccepted] = useState<Set<AcceptedFilter>>(new Set())
   const [unlinked, setUnlinked] = useState<Set<UnlinkedFilter>>(new Set())
   const [sort, setSort] = useState<Sort>('az')
@@ -134,6 +144,13 @@ export function AssignmentRepoList({
         if (!submission.has(state)) return false
       }
 
+      if (timing.size > 0) {
+        // Nothing to be on-time or late about without a confirmation
+        if (row.submission == null) return false
+        const state: TimingFilter = row.submission.late ? 'late' : 'on_time'
+        if (!timing.has(state)) return false
+      }
+
       if (accepted.size > 0) {
         const state: AcceptedFilter = row.accepted ? 'accepted' : 'unaccepted'
         if (!accepted.has(state)) return false
@@ -150,7 +167,7 @@ export function AssignmentRepoList({
     })
 
     return [...kept].sort(compareBy(sort))
-  }, [rows, query, submission, accepted, unlinked, sort])
+  }, [rows, query, submission, timing, accepted, unlinked, sort])
 
   // Back to the first page whenever the list underneath changes — a filter, a
   // sort or a search. `filtered` is a memo, so its identity is that change.
@@ -172,15 +189,25 @@ export function AssignmentRepoList({
   }
 
   const dirty =
-    query !== '' || submission.size > 0 || accepted.size > 0 || unlinked.size > 0 || sort !== 'az'
+    query !== '' ||
+    submission.size > 0 ||
+    timing.size > 0 ||
+    accepted.size > 0 ||
+    unlinked.size > 0 ||
+    sort !== 'az'
 
   function clear() {
     setQuery('')
     setSubmission(new Set())
+    setTiming(new Set())
     setAccepted(new Set())
     setUnlinked(new Set())
     setSort('az')
   }
+
+  // Only the individual dashboard's rows carry submission data today — the
+  // group one always leaves `submission` undefined (no group checkpoints yet)
+  const hasTimingData = rows.some((row) => row.submission !== undefined)
 
   return (
     <>
@@ -266,6 +293,22 @@ export function AssignmentRepoList({
             selected={accepted}
             onToggle={(value) => setAccepted(toggle(accepted, value))}
           />
+
+          {/* Only where entregas are tracked — the individual dashboard, for
+              now. Without a confirmation there is nothing to be on-time or
+              late about, so this stays hidden on the group one. */}
+          {hasTimingData && (
+            <CheckboxMenu
+              label="Filtrar por vencimiento"
+              heading="Filtrar por vencimiento:"
+              options={[
+                { value: 'on_time', label: 'A tiempo' },
+                { value: 'late', label: 'Tarde' },
+              ]}
+              selected={timing}
+              onToggle={(value) => setTiming(toggle(timing, value))}
+            />
+          )}
 
           <details className="dropdown details-reset details-overlay d-inline-block mr-2 mb-2 mb-lg-0">
             <summary className="btn" role="button" aria-haspopup="menu">
@@ -514,6 +557,12 @@ function RepoListItem({
               <span className={`IssueLabel IssueLabel--big mr-2 ${TONE_CLASS[row.label.tone]}`}>
                 {row.label.text}
               </span>
+
+              {/* No saved copy of the live site to port this from — AGENTS.md
+                  notes its own "Late" label isn't ported yet either. New UI. */}
+              {row.submission?.late && (
+                <span className="IssueLabel IssueLabel--big mr-2 color-bg-danger">Tarde</span>
+              )}
             </div>
 
             <div className="d-flex flex-items-baseline flex-wrap">

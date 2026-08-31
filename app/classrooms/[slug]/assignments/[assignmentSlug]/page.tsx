@@ -8,6 +8,7 @@ import { findAssignment } from '@/lib/data/assignments'
 import { listAssignmentAcceptances } from '@/lib/data/invitations'
 import { currentInstallationId, findClassroomInstallation } from '@/lib/data/organizations'
 import { listUnlinkedEntries } from '@/lib/data/rosters'
+import { listAssignmentSubmissions } from '@/lib/data/submissions'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
 import { baseUrl, invitationUrl } from '@/lib/url'
@@ -37,7 +38,7 @@ export default async function AssignmentPage(
 
   const { slug, assignmentSlug } = await props.params
 
-  const [classroom, assignment, acceptances, unlinkedEntries] = await Promise.all([
+  const [classroom, assignment, acceptances, unlinkedEntries, submissions] = await Promise.all([
     findClassroomInstallation(session, slug),
     findAssignment(session, slug, assignmentSlug),
     listAssignmentAcceptances(session, slug, assignmentSlug),
@@ -45,9 +46,13 @@ export default async function AssignmentPage(
     // than when the dialog opens, the way the live site does it: the list is
     // small, and the page is force-dynamic so it is as fresh as the rows.
     listUnlinkedEntries(session, slug),
+    // Each repo's current confirmed submission — null checkpoint means the
+    // teacher hasn't opened entregas, which every row below reads correctly
+    // as "sin confirmar" without a special case here.
+    listAssignmentSubmissions(session, slug, assignmentSlug),
   ])
 
-  if (!classroom || !assignment || !acceptances) notFound()
+  if (!classroom || !assignment || !acceptances || !submissions) notFound()
 
   // flash[:success]: only right after creating or saving, not on every later visit
   const searchParams = await props.searchParams
@@ -96,7 +101,7 @@ export default async function AssignmentPage(
       ? await readGitHub(installationId)
       : reads
 
-  const submitted = repoIds.filter((id) => (snapshots.get(id)?.commitCount ?? 0) > 0).length
+  const submitted = repoIds.filter((id) => submissions.byRepoId.has(id)).length
   const students = acceptances.entries.length + acceptances.unlinkedAccounts.length
 
   return (
@@ -145,8 +150,9 @@ export default async function AssignmentPage(
         <h2 className="mb-2">Detalle del trabajo práctico</h2>
 
         {/* The live "Students total", "Accepted assignments" and "Assignment
-            submissions", with the numbers the docs define for each. Its fourth
-            tile, "Passing students", is autograding and is not ported. */}
+            submissions" — the third redefined here as confirmations, not
+            commits, now that entregas exist. Its fourth tile, "Passing
+            students", is autograding and is not ported. */}
         <StatTiles
           tiles={[
             {
@@ -168,12 +174,14 @@ export default async function AssignmentPage(
             },
             {
               // "the number of students that have submitted the assignment",
-              // which here means a commit of their own — see submissionLabel
+              // which here means a confirmed submission — see submissionLabel.
+              // With no checkpoint opened yet, this legitimately reads 0/all:
+              // nothing can be confirmed without one.
               label: 'Entregas',
               total: acceptances.acceptedCount,
               parts: [
-                { value: submitted, label: 'entregaron' },
-                { value: acceptances.acceptedCount - submitted, label: 'sin entregar' },
+                { value: submitted, label: 'confirmaron' },
+                { value: acceptances.acceptedCount - submitted, label: 'sin confirmar' },
               ],
             },
           ]}
@@ -183,6 +191,7 @@ export default async function AssignmentPage(
           acceptances={acceptances}
           assignmentTitle={assignment.title}
           snapshots={snapshots}
+          submissions={submissions.byRepoId}
           classroomSlug={classroom.slug}
           assignmentSlug={assignment.slug}
           unlinkedEntries={unlinkedEntries}
