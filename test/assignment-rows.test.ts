@@ -66,6 +66,7 @@ describe('hasSubmitted', () => {
       visual: 'account',
       label: { text: '', tone: 'neutral' },
       snapshot: null,
+      repoId: null,
       accepted: true,
       unlinkedIdentifier: false,
       unlinkedAccount: false,

@@ -178,6 +178,52 @@ export async function findSubmissionPanel(
 }
 
 /**
+ * One repo's full submission history, teacher-facing — fetched on demand
+ * when a dashboard row is expanded, not eagerly for the whole cohort. A
+ * single repo can carry many confirmations (the cooldown limits the rate,
+ * not the count — see docs/entregas.md), which would otherwise inflate
+ * every teacher's page load for rows nobody opens.
+ */
+export async function findSubmissionHistory(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  githubRepoId: number,
+): Promise<SubmissionRow[] | null> {
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+  if (!classroom) return null
+
+  const [row] = await db
+    .select({
+      repoId: assignmentRepos.id,
+      checkpointId: checkpoints.id,
+      deadlineAt: checkpoints.deadlineAt,
+    })
+    .from(assignmentRepos)
+    .innerJoin(
+      assignments,
+      and(eq(assignments.id, assignmentRepos.assignmentId), isNull(assignments.deletedAt)),
+    )
+    .innerJoin(
+      checkpoints,
+      and(eq(checkpoints.assignmentId, assignments.id), isNull(checkpoints.title)),
+    )
+    .where(
+      and(
+        eq(assignments.organizationId, classroom.id),
+        eq(assignments.slug, assignmentSlug),
+        eq(assignmentRepos.githubRepoId, githubRepoId),
+      ),
+    )
+
+  // No checkpoint, or this repo isn't this assignment's — nothing to show,
+  // never "not yours to see" (that classroom check already happened above)
+  if (!row) return []
+
+  return listSubmissions(row.repoId, row.checkpointId, row.deadlineAt)
+}
+
+/**
  * The student confirms a ref as their submission.
  *
  * The deadline is deliberately **not** a rejection: late submissions are

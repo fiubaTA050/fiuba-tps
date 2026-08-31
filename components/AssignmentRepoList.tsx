@@ -15,6 +15,7 @@ import {
 import { type ComponentProps, useMemo, useRef, useState } from 'react'
 
 import { hasSubmitted, type RepoRow, type SubmissionTone } from '@/lib/assignment-rows'
+import type { SubmissionRow } from '@/lib/data/submissions'
 import { formatArgentina } from '@/lib/dates'
 
 import { LinkToStudentDialog } from './LinkToStudentDialog'
@@ -109,10 +110,15 @@ export type LinkToStudent = Omit<
 export function AssignmentRepoList({
   title,
   rows,
+  classroomSlug,
+  assignmentSlug,
   linkToStudent,
 }: {
   title: string
   rows: RepoRow[]
+  /** Only used to build the submission-history request of a confirmed row */
+  classroomSlug: string
+  assignmentSlug: string
   linkToStudent?: LinkToStudent
 }) {
   const [query, setQuery] = useState('')
@@ -384,7 +390,13 @@ export function AssignmentRepoList({
           ) : (
             <div className="assignment-repo-list pb-2">
               {visible.map((row) => (
-                <RepoListItem key={row.key} row={row} linkToStudent={linkToStudent} />
+                <RepoListItem
+                  key={row.key}
+                  row={row}
+                  classroomSlug={classroomSlug}
+                  assignmentSlug={assignmentSlug}
+                  linkToStudent={linkToStudent}
+                />
               ))}
             </div>
           )}
@@ -526,9 +538,13 @@ function CheckboxMenu<T extends string>({
 
 function RepoListItem({
   row,
+  classroomSlug,
+  assignmentSlug,
   linkToStudent,
 }: {
   row: RepoRow
+  classroomSlug: string
+  assignmentSlug: string
   linkToStudent?: LinkToStudent
 }) {
   const { snapshot } = row
@@ -610,6 +626,12 @@ function RepoListItem({
                 </>
               )}
             </div>
+
+            <SubmissionHistoryDetails
+              row={row}
+              classroomSlug={classroomSlug}
+              assignmentSlug={assignmentSlug}
+            />
           </div>
         </div>
       </div>
@@ -635,6 +657,91 @@ function RepoListItem({
         </div>
       </div>
     </div>
+  )
+}
+
+/** `SubmissionRow` as it comes back over JSON: dates are still strings */
+type RawSubmissionRow = Omit<SubmissionRow, 'committedAt' | 'submittedAt'> & {
+  committedAt: string
+  submittedAt: string
+}
+
+/**
+ * "Ver entregas anteriores", fetched on demand — see docs/entregas.md and
+ * lib/data/submissions.ts:findSubmissionHistory on why this is per-row and
+ * on click, not eager for the whole cohort: a single repo can carry many
+ * confirmations, and shipping that for every row would inflate the page for
+ * rows nobody opens. Same `<details>` idiom as SubmissionPanel.tsx's own
+ * history disclosure, just fetched instead of pre-loaded — there's only one
+ * confirmed student behind that one, a whole cohort behind this one.
+ */
+function SubmissionHistoryDetails({
+  row,
+  classroomSlug,
+  assignmentSlug,
+}: {
+  row: RepoRow
+  classroomSlug: string
+  assignmentSlug: string
+}) {
+  const [state, setState] = useState<'closed' | 'loading' | 'error' | SubmissionRow[]>('closed')
+
+  // Nothing confirmed, nothing to show — and no repo id to ask about anyway
+  if (row.submission == null || row.repoId === null) return null
+
+  return (
+    <details
+      className="mt-1"
+      onToggle={(event) => {
+        if (!event.currentTarget.open || state !== 'closed') return
+        setState('loading')
+        fetch(`/api/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}`)
+          .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
+          .then(({ history }: { history: RawSubmissionRow[] }) =>
+            setState(
+              history.map((entry) => ({
+                ...entry,
+                committedAt: new Date(entry.committedAt),
+                submittedAt: new Date(entry.submittedAt),
+              })),
+            ),
+          )
+          .catch(() => setState('error'))
+      }}
+    >
+      <summary className="btn-link f6">Ver entregas anteriores</summary>
+
+      {state === 'loading' && <p className="color-fg-muted f6 mt-1 mb-0">Cargando…</p>}
+      {state === 'error' && (
+        <p className="color-fg-muted f6 mt-1 mb-0">No pudimos cargar el historial.</p>
+      )}
+      {Array.isArray(state) &&
+        (state.length === 0 ? (
+          <p className="color-fg-muted f6 mt-1 mb-0">No hay entregas registradas.</p>
+        ) : (
+          <ul className="list-style-none mt-1">
+            {state.map((entry) => (
+              <li key={entry.id} className="py-1 border-bottom color-fg-muted f6">
+                {row.snapshot ? (
+                  <a
+                    href={`${row.snapshot.htmlUrl}/tree/${entry.sha}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-mono"
+                  >
+                    {entry.sha.slice(0, 7)}
+                  </a>
+                ) : (
+                  <span className="text-mono">{entry.sha.slice(0, 7)}</span>
+                )}{' '}
+                <span className="color-fg-muted">({entry.ref})</span> el{' '}
+                {formatCommitDate(entry.submittedAt)}
+                {entry.late && <span className="IssueLabel color-bg-attention ml-2">Tarde</span>}
+              </li>
+            ))}
+          </ul>
+        ))}
+    </details>
   )
 }
 

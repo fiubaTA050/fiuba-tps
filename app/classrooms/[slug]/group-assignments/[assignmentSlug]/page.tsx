@@ -185,6 +185,8 @@ export default async function GroupAssignmentPage(
         ) : (
           <AssignmentRepoList
             title="Equipos"
+            classroomSlug={classroom.slug}
+            assignmentSlug={assignment.slug}
             rows={acceptances.teams.map((team): RepoRow => {
               const snapshot = team.repoId === null ? null : (snapshots.get(team.repoId) ?? null)
 
@@ -197,6 +199,7 @@ export default async function GroupAssignmentPage(
                 members: team.members,
                 label: teamLabel(team, snapshot),
                 snapshot,
+                repoId: team.repoId,
                 accepted: team.status !== 'unaccepted',
                 unlinkedIdentifier: false,
                 unlinkedAccount: false,

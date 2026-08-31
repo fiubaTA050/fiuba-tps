@@ -33,6 +33,10 @@ export type RepoRow = {
   members?: { githubLogin: string | null; githubAvatarUrl: string | null }[]
   label: SubmissionLabel
   snapshot: RepositorySnapshot | null
+  /** The GitHub repo id `snapshot` was read with — null when there is no repo.
+   *  Kept separately from `snapshot` because it's needed even when the repo
+   *  is unreachable (fetching the submission history by repo id). */
+  repoId: number | null
   /**
    * The repo's current confirmed submission. `undefined` on a dashboard with
    * no checkpoint concept at all (the group one, for now — group checkpoints

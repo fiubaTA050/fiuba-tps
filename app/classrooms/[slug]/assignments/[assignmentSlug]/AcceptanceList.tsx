@@ -78,6 +78,7 @@ export function AcceptanceList({
               ? { text: 'No aceptó', tone: 'neutral' }
               : submissionLabel(entry.repoId !== null, snapshot, submission),
         snapshot,
+        repoId: entry.repoId,
         submission,
         accepted: entry.state === 'accepted',
         unlinkedIdentifier: entry.state === 'not_joined',
@@ -96,6 +97,7 @@ export function AcceptanceList({
         visual: 'account',
         label: submissionLabel(account.repoId !== null, snapshot, submission),
         snapshot,
+        repoId: account.repoId,
         submission,
         accepted: true,
         unlinkedIdentifier: false,
@@ -110,6 +112,8 @@ export function AcceptanceList({
       <AssignmentRepoList
         title={identifierName ?? 'Aceptaron el trabajo práctico'}
         rows={rows}
+        classroomSlug={classroomSlug}
+        assignmentSlug={assignmentSlug}
         // No roster, nothing to link to — `set_unlinked_users` returns early on
         // the same condition
         linkToStudent={
