@@ -267,7 +267,7 @@ describe('confirmSubmission', () => {
     const alumna = await student('alumna')
     const { key, repoId, checkpointId } = await assignmentWithRepo(alumna)
 
-    const result = await confirmSubmission(alumna, key, 'main')
+    const result = await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
 
     expect(result).toMatchObject({ success: true, sha: 'a'.repeat(40), unchanged: false })
 
@@ -288,9 +288,9 @@ describe('confirmSubmission', () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna)
 
-    await confirmSubmission(alumna, key, 'main')
+    await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
     await ageLastSubmission()
-    await confirmSubmission(alumna, key, 'entrega-final')
+    await confirmSubmission(alumna, key, 'entrega-final', 'No usé herramientas de IA.')
 
     const rows = await db.select().from(submissions).orderBy(submissions.id)
     expect(rows.map((row) => row.ref)).toEqual(['main', 'entrega-final'])
@@ -300,12 +300,12 @@ describe('confirmSubmission', () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna)
 
-    await confirmSubmission(alumna, key, 'main')
+    await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
     await ageLastSubmission()
 
     // A different ref resolving to the same commit is the same submission
     github.refs.set('HEAD', 'a'.repeat(40))
-    const again = await confirmSubmission(alumna, key, 'HEAD')
+    const again = await confirmSubmission(alumna, key, 'HEAD', 'No usé herramientas de IA.')
 
     expect(again).toMatchObject({ success: true, unchanged: true })
     expect(await db.select().from(submissions)).toHaveLength(1)
@@ -315,7 +315,7 @@ describe('confirmSubmission', () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna)
 
-    const result = await confirmSubmission(alumna, key, 'no-existe')
+    const result = await confirmSubmission(alumna, key, 'no-existe', 'No usé herramientas de IA.')
 
     expect(result).toMatchObject({ success: false })
     expect(await db.select().from(submissions)).toHaveLength(0)
@@ -325,10 +325,36 @@ describe('confirmSubmission', () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna)
 
-    const result = await confirmSubmission(alumna, key, '   ')
+    const result = await confirmSubmission(alumna, key, '   ', 'No usé herramientas de IA.')
 
     expect(result).toMatchObject({ success: false })
     expect(github.resolveCalls).toBe(0)
+  })
+
+  it('rejects a blank ai declaration before asking GitHub anything', async () => {
+    const alumna = await student('alumna')
+    const { key } = await assignmentWithRepo(alumna)
+
+    const result = await confirmSubmission(alumna, key, 'main', '   ')
+
+    expect(result).toMatchObject({ success: false })
+    expect(github.resolveCalls).toBe(0)
+  })
+
+  it('treats a changed declaration on the same sha as a real re-submission', async () => {
+    const alumna = await student('alumna')
+    const { key } = await assignmentWithRepo(alumna)
+
+    await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
+    await ageLastSubmission()
+    const second = await confirmSubmission(alumna, key, 'main', 'Usé un asistente para los tests.')
+
+    expect(second).toMatchObject({ success: true, unchanged: false })
+    const rows = await db.select().from(submissions).orderBy(submissions.id)
+    expect(rows.map((row) => row.aiDeclaration)).toEqual([
+      'No usé herramientas de IA.',
+      'Usé un asistente para los tests.',
+    ])
   })
 
   it('accepts a late submission and marks it, because the deadline closes nothing', async () => {
@@ -336,7 +362,7 @@ describe('confirmSubmission', () => {
     const deadlineAt = new Date(Date.now() - 60_000)
     const { key } = await assignmentWithRepo(alumna, { deadlineAt })
 
-    const result = await confirmSubmission(alumna, key, 'main')
+    const result = await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
     expect(result).toMatchObject({ success: true })
 
     const panel = await findSubmissionPanel(alumna, key)
@@ -349,7 +375,7 @@ describe('confirmSubmission', () => {
       deadlineAt: new Date(Date.now() + 3_600_000),
     })
 
-    await confirmSubmission(alumna, key, 'main')
+    await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
 
     const panel = await findSubmissionPanel(alumna, key)
     expect(panel?.current?.late).toBe(false)
@@ -359,7 +385,7 @@ describe('confirmSubmission', () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna, { invitationsEnabled: false })
 
-    expect(await confirmSubmission(alumna, key, 'main')).toMatchObject({ success: false })
+    expect(await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')).toMatchObject({ success: false })
     expect(await db.select().from(submissions)).toHaveLength(0)
   })
 
@@ -367,14 +393,14 @@ describe('confirmSubmission', () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna, { archived: true })
 
-    expect(await confirmSubmission(alumna, key, 'main')).toMatchObject({ success: false })
+    expect(await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')).toMatchObject({ success: false })
   })
 
   it('refuses when the assignment has no entrega at all', async () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna, { checkpoint: false })
 
-    const result = await confirmSubmission(alumna, key, 'main')
+    const result = await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
 
     expect(result).toMatchObject({ success: false })
     expect(github.resolveCalls).toBe(0)
@@ -384,10 +410,10 @@ describe('confirmSubmission', () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna)
 
-    await confirmSubmission(alumna, key, 'main')
+    await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
     // A different sha, so the dedupe is not what answers — this is the case
     // the dedupe cannot cover: a script that commits before each confirmation
-    const second = await confirmSubmission(alumna, key, 'v1')
+    const second = await confirmSubmission(alumna, key, 'v1', 'No usé herramientas de IA.')
 
     expect(second).toMatchObject({ success: false })
     expect(await db.select().from(submissions)).toHaveLength(1)
@@ -398,7 +424,7 @@ describe('confirmSubmission', () => {
     const { key } = await assignmentWithRepo(alumna)
     github.reachable = false
 
-    const result = await confirmSubmission(alumna, key, 'v1')
+    const result = await confirmSubmission(alumna, key, 'v1', 'No usé herramientas de IA.')
 
     expect(result).toMatchObject({ success: true })
     expect(result.success && result.warning).toContain('main')
@@ -410,7 +436,7 @@ describe('confirmSubmission', () => {
     const { key } = await assignmentWithRepo(alumna)
     github.reachable = null
 
-    const result = await confirmSubmission(alumna, key, 'v1')
+    const result = await confirmSubmission(alumna, key, 'v1', 'No usé herramientas de IA.')
 
     expect(result).toMatchObject({ success: true, warning: null })
   })
@@ -422,7 +448,7 @@ describe('confirmSubmission', () => {
 
     // Same invitation key, a different signed-in user: there is no repo row of
     // theirs, so there is nothing to confirm against
-    const result = await confirmSubmission(otro, key, 'main')
+    const result = await confirmSubmission(otro, key, 'main', 'No usé herramientas de IA.')
 
     expect(result).toMatchObject({ success: false })
     expect(await db.select().from(submissions)).toHaveLength(0)
@@ -434,9 +460,9 @@ describe('findSubmissionPanel', () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna)
 
-    await confirmSubmission(alumna, key, 'main')
+    await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
     await ageLastSubmission()
-    await confirmSubmission(alumna, key, 'v1')
+    await confirmSubmission(alumna, key, 'v1', 'No usé herramientas de IA.')
 
     const panel = await findSubmissionPanel(alumna, key)
 
@@ -468,7 +494,7 @@ describe('findSubmissionPanel', () => {
     const otro = await student('otro')
     const { key } = await assignmentWithRepo(alumna)
 
-    await confirmSubmission(alumna, key, 'main')
+    await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
 
     const panel = await findSubmissionPanel(otro, key)
     expect(panel?.current).toBeNull()

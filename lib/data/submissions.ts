@@ -38,6 +38,8 @@ export type SubmissionRow = {
   id: number
   sha: string
   ref: string
+  /** Null on submissions confirmed before this field existed */
+  aiDeclaration: string | null
   committedAt: Date
   submittedAt: Date
   /** `submitted_at` past the deadline. Accepted anyway — it closes nothing */
@@ -148,6 +150,8 @@ const COOLDOWN_MS = 10_000
 
 const MAX_REF_LENGTH = 255
 
+const MAX_AI_DECLARATION_LENGTH = 2000
+
 /** What the setup screen needs, in one query plus the submissions of this repo */
 export async function findSubmissionPanel(
   session: Session,
@@ -234,6 +238,7 @@ export async function confirmSubmission(
   session: Session,
   key: string,
   ref: string,
+  aiDeclaration: string,
 ): Promise<ConfirmSubmissionResult> {
   const trimmed = ref.trim()
 
@@ -243,6 +248,19 @@ export async function confirmSubmission(
 
   if (trimmed.length > MAX_REF_LENGTH) {
     return { success: false, error: 'Ese ref es demasiado largo.' }
+  }
+
+  const trimmedDeclaration = aiDeclaration.trim()
+
+  if (trimmedDeclaration.length === 0) {
+    return {
+      success: false,
+      error: 'Contá si usaste herramientas de IA para este trabajo práctico, aunque no hayas usado ninguna.',
+    }
+  }
+
+  if (trimmedDeclaration.length > MAX_AI_DECLARATION_LENGTH) {
+    return { success: false, error: 'Esa declaración es demasiado larga.' }
   }
 
   const context = await loadContext(session, key)
@@ -260,7 +278,11 @@ export async function confirmSubmission(
   }
 
   const [last] = await db
-    .select({ sha: submissions.sha, submittedAt: submissions.submittedAt })
+    .select({
+      sha: submissions.sha,
+      aiDeclaration: submissions.aiDeclaration,
+      submittedAt: submissions.submittedAt,
+    })
     .from(submissions)
     .where(
       and(
@@ -291,9 +313,11 @@ export async function confirmSubmission(
 
   const { sha, committedAt } = resolved.commit
 
-  // The double click. Confirming the same tree twice is not a new submission,
-  // which is what makes the unique index the first design wanted unnecessary
-  if (last?.sha === sha) {
+  // The double click. Confirming the same tree with the same declaration
+  // twice is not a new submission, which is what makes the unique index the
+  // first design wanted unnecessary. A changed declaration on the same SHA
+  // still counts as a change — the student may be correcting what they wrote.
+  if (last?.sha === sha && last?.aiDeclaration === trimmedDeclaration) {
     return { success: true, sha, unchanged: true, warning: null }
   }
 
@@ -302,6 +326,7 @@ export async function confirmSubmission(
     checkpointId: context.checkpointId,
     sha,
     ref: trimmed,
+    aiDeclaration: trimmedDeclaration,
     committedAt,
     submittedByUserId: Number(session.user.id),
   })
@@ -338,6 +363,7 @@ async function listSubmissions(
       id: submissions.id,
       sha: submissions.sha,
       ref: submissions.ref,
+      aiDeclaration: submissions.aiDeclaration,
       committedAt: submissions.committedAt,
       submittedAt: submissions.submittedAt,
     })

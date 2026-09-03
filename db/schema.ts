@@ -9,6 +9,7 @@ import {
   pgTable,
   primaryKey,
   serial,
+  text,
   timestamp,
   unique,
   uniqueIndex,
@@ -773,6 +774,12 @@ export const submissions = pgTable(
     sha: varchar('sha', { length: 40 }).notNull(),
     /** What the student typed — `main`, a tag, a sha. Evidence of intent */
     ref: varchar('ref', { length: 255 }).notNull(),
+    // Nullable, not because it is optional going forward — the form requires
+    // it — but because submissions confirmed before this column existed can't
+    // be backfilled with an answer nobody gave. Same stance as checkpoints:
+    // no retroactive data for a fact that didn't exist yet.
+    /** Declaración jurada: qué herramientas de IA usó el alumno y para qué, o que no usó ninguna */
+    aiDeclaration: text('ai_declaration'),
     committedAt: timestamp('committed_at', { withTimezone: true }).notNull(),
     submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
     // NOT NULL: with nothing freezing submissions on a timer, the only writer

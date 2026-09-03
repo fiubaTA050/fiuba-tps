@@ -82,7 +82,12 @@ export async function confirmSubmissionAction(
   const session = await auth()
   if (!isUsableSession(session)) redirect(`/assignment-invitations/${key}`)
 
-  const result = await confirmSubmission(session, key, String(formData.get('ref') ?? ''))
+  const result = await confirmSubmission(
+    session,
+    key,
+    String(formData.get('ref') ?? ''),
+    String(formData.get('ai_declaration') ?? ''),
+  )
 
   if (!result.success) return { error: result.error, notice: null }
 

@@ -108,6 +108,26 @@ export function SubmissionPanel({
                 entregar las veces que quieras mientras el trabajo práctico esté activo.
               </p>
             </div>
+
+            <div className="form-group">
+              <div className="form-group-header">
+                <label htmlFor="ai_declaration">Declaración de uso de IA</label>
+              </div>
+              <div className="form-group-body">
+                <textarea
+                  id="ai_declaration"
+                  name="ai_declaration"
+                  className="form-control width-full"
+                  rows={3}
+                  required
+                  defaultValue={panel.current?.aiDeclaration ?? ''}
+                />
+              </div>
+              <p className="note">
+                Declaración jurada: contá qué herramientas de IA usaste y para qué partes del
+                trabajo práctico, o escribí que no usaste ninguna.
+              </p>
+            </div>
           </form>
         ) : (
           // AssignmentInvitation#reason_for_disabled_invitations, which is the

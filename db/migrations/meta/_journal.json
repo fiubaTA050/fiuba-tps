@@ -71,6 +71,13 @@
       "when": 1788043621011,
       "tag": "0009_closed_post",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788395255198,
+      "tag": "0010_nifty_anthem",
+      "breakpoints": true
     }
   ]
 }
