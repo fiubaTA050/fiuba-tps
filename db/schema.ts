@@ -809,6 +809,36 @@ export const submissions = pgTable(
   ],
 )
 
+/**
+ * A credential for a non-browser client of the API — the grading worker
+ * today, and whatever else gets built on top of this later, which is why the
+ * table is generic rather than named after that one caller.
+ *
+ * `scopes` is the only concession to that future: each endpoint validates its
+ * own scope is in the array, so a key issued for one purpose does not
+ * automatically work for another. No roles, no scope hierarchy, no
+ * per-scope expiration — the minimal extension, not a permission system.
+ */
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** How the user tells their own keys apart, e.g. "PC de casa" */
+    label: varchar('label', { length: 255 }).notNull(),
+    /** SHA-256 of the raw key. The raw key itself is never stored */
+    keyHash: varchar('key_hash', { length: 255 }).notNull(),
+    scopes: text('scopes').array().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('index_api_keys_on_user_id').on(table.userId),
+    uniqueIndex('index_api_keys_on_key_hash').on(table.keyHash),
+  ],
+)
+
 export type User = typeof users.$inferSelect
 export type Organization = typeof organizations.$inferSelect
 export type Assignment = typeof assignments.$inferSelect
@@ -825,3 +855,4 @@ export type GroupAssignmentRepo = typeof groupAssignmentRepos.$inferSelect
 export type GroupInviteStatus = typeof groupInviteStatuses.$inferSelect
 export type Checkpoint = typeof checkpoints.$inferSelect
 export type Submission = typeof submissions.$inferSelect
+export type ApiKey = typeof apiKeys.$inferSelect

@@ -85,6 +85,16 @@ export async function SiteHeader() {
                             </Link>
                           </li>
 
+                          <li role="none" className="ActionListItem">
+                            <Link
+                              href="/settings/api-keys"
+                              role="menuitem"
+                              className="ActionListContent"
+                            >
+                              <span className="ActionListItem-label">API keys</span>
+                            </Link>
+                          </li>
+
                           {/* Empty: `.ActionList-sectionDivider:empty` is the hairline */}
                           <li role="presentation" aria-hidden className="ActionList-sectionDivider" />
 
