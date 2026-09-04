@@ -78,6 +78,13 @@
       "when": 1788395255198,
       "tag": "0010_nifty_anthem",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788486744912,
+      "tag": "0011_polite_red_wolf",
+      "breakpoints": true
     }
   ]
 }

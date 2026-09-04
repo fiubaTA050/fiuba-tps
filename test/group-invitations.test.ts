@@ -510,6 +510,7 @@ describe('what editing the assignment does to its link', () => {
     invitationsEnabled: true,
     studentsAreRepoAdmins: false,
     starterCodeRepo: '',
+    autograderId: null,
     maxMembers: null,
     maxTeams: null,
   }

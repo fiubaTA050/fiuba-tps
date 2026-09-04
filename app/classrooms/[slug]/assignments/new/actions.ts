@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { createAssignment, type AssignmentField } from '@/lib/data/assignments'
+import { optionalText } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
 export type CreateAssignmentState = { error: string | null; field: AssignmentField | null }
@@ -30,6 +31,7 @@ export async function createAssignmentAction(
     studentsAreRepoAdmins: formData.get('students_are_repo_admins') === 'on',
     // `repo_name` in the original's new_assignment_params
     starterCodeRepo: String(formData.get('repo_name') ?? ''),
+    autograderId: optionalText(formData.get('autograder_id')),
   })
 
   // render :new — the form comes back with the message

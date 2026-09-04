@@ -25,6 +25,13 @@ export function limitField(value: FormDataEntryValue | null): number | null {
   return Number.isSafeInteger(parsed) ? parsed : 0
 }
 
+/** A free-text field where blank means absent, such as `autograder_id`. */
+export function optionalText(value: FormDataEntryValue | null): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
 /** What the invitation forms hand back to `useActionState`, mirroring the flashes */
 export type InvitationActionState = {
   error: string | null

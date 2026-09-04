@@ -11,6 +11,7 @@ import {
 } from '@/lib/data/assignments'
 import { saveAssignmentCheckpoint } from '@/lib/data/checkpoints'
 import { parseArgentinaDateTime } from '@/lib/dates'
+import { optionalText } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
 export type EditAssignmentState = { error: string | null; field: AssignmentField | null }
@@ -47,6 +48,7 @@ export async function updateAssignmentAction(
     invitationsEnabled: formData.get('assignment_status') === 'active',
     studentsAreRepoAdmins: formData.get('students_are_repo_admins') === 'on',
     starterCodeRepo: String(formData.get('repo_name') ?? ''),
+    autograderId: optionalText(formData.get('autograder_id')),
   })
 
   // render :edit — the form comes back with the message

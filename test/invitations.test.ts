@@ -691,6 +691,7 @@ describe('what editing the assignment does to its link', () => {
     invitationsEnabled: true,
     studentsAreRepoAdmins: false,
     starterCodeRepo: '',
+    autograderId: null,
   }
 
   // The live site's "Assignment status" set to Inactive

@@ -55,6 +55,7 @@ export type GroupAssignmentListItem = {
   /** Null on invitations created before short keys existed */
   invitationShortKey: string | null
   starterCodeRepoId: number | null
+  autograderId: string | null
   maxMembers: number | null
   maxTeams: number | null
   grouping: { id: number; title: string; slug: string }
@@ -76,6 +77,8 @@ export type NewGroupAssignmentInput = {
   invitationsEnabled: boolean
   studentsAreRepoAdmins: boolean
   starterCodeRepo: string
+  /** Free text id an external autograder worker reads, or null for none */
+  autograderId: string | null
   /** An existing set of teams, or null to create one from `groupingTitle` */
   groupingId: number | null
   groupingTitle: string
@@ -103,6 +106,7 @@ const SELECTION = {
   invitationKey: groupAssignmentInvitations.key,
   invitationShortKey: groupAssignmentInvitations.shortKey,
   starterCodeRepoId: groupAssignments.starterCodeRepoId,
+  autograderId: groupAssignments.autograderId,
   maxMembers: groupAssignments.maxMembers,
   maxTeams: groupAssignments.maxTeams,
   groupingId: groupings.id,
@@ -317,6 +321,7 @@ export async function createGroupAssignment(
           title,
           slug,
           starterCodeRepoId: starterCode.repositoryId,
+          autograderId: input.autograderId,
           publicRepo: input.publicRepo,
           invitationsEnabled: input.invitationsEnabled,
           studentsAreRepoAdmins: input.studentsAreRepoAdmins,
@@ -442,6 +447,7 @@ export async function updateGroupAssignment(
         title,
         slug,
         starterCodeRepoId: starterCode.repositoryId,
+        autograderId: input.autograderId,
         publicRepo: input.publicRepo,
         invitationsEnabled: input.invitationsEnabled,
         studentsAreRepoAdmins: input.studentsAreRepoAdmins,

@@ -50,6 +50,8 @@ export type AssignmentListItem = {
   invitationShortKey: string | null
   /** Assignment#starter_code? is `starterCodeRepoId !== null` */
   starterCodeRepoId: number | null
+  /** Null means no automated grading. See worker-corrector-plan memory. */
+  autograderId: string | null
 }
 
 export type NewAssignmentInput = {
@@ -60,6 +62,8 @@ export type NewAssignmentInput = {
   studentsAreRepoAdmins: boolean
   /** `owner/name` of the template repo, or empty for no starter code */
   starterCodeRepo: string
+  /** Free text id an external autograder worker reads, or null for none */
+  autograderId: string | null
 }
 
 /**
@@ -86,6 +90,7 @@ export async function listAssignments(
       invitationKey: assignmentInvitations.key,
       invitationShortKey: assignmentInvitations.shortKey,
       starterCodeRepoId: assignments.starterCodeRepoId,
+      autograderId: assignments.autograderId,
     })
     .from(assignments)
     // An inner join: `validates :assignment_invitation, presence: true` makes
@@ -158,6 +163,7 @@ export async function findAssignment(
       invitationKey: assignmentInvitations.key,
       invitationShortKey: assignmentInvitations.shortKey,
       starterCodeRepoId: assignments.starterCodeRepoId,
+      autograderId: assignments.autograderId,
     })
     .from(assignments)
     .innerJoin(
@@ -262,6 +268,7 @@ export async function createAssignment(
           title,
           slug,
           starterCodeRepoId: starterCode.repositoryId,
+          autograderId: input.autograderId,
           publicRepo: input.publicRepo,
           invitationsEnabled: input.invitationsEnabled,
           studentsAreRepoAdmins: input.studentsAreRepoAdmins,
@@ -385,6 +392,7 @@ export async function updateAssignment(
         title,
         slug,
         starterCodeRepoId: starterCode.repositoryId,
+        autograderId: input.autograderId,
         publicRepo: input.publicRepo,
         invitationsEnabled: input.invitationsEnabled,
         studentsAreRepoAdmins: input.studentsAreRepoAdmins,

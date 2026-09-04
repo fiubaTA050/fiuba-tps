@@ -114,6 +114,7 @@ const VALID = {
   invitationsEnabled: true,
   studentsAreRepoAdmins: false,
   starterCodeRepo: '',
+  autograderId: null,
 }
 
 beforeEach(async () => {

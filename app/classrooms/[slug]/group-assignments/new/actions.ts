@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { createGroupAssignment, type GroupAssignmentField } from '@/lib/data/group-assignments'
-import { limitField, positiveInteger } from '@/lib/form'
+import { limitField, optionalText, positiveInteger } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
 export type CreateGroupAssignmentState = {
@@ -30,6 +30,7 @@ export async function createGroupAssignmentAction(
     invitationsEnabled: formData.get('invitations_enabled') === 'on',
     studentsAreRepoAdmins: formData.get('students_are_repo_admins') === 'on',
     starterCodeRepo: String(formData.get('repo_name') ?? ''),
+    autograderId: optionalText(formData.get('autograder_id')),
     // `group_assignment[grouping_id]` and `grouping[title]`, the two halves of
     // GroupAssignmentService
     groupingId: positiveInteger(formData.get('grouping_id')),

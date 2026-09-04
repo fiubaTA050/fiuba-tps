@@ -220,6 +220,23 @@ export function NewGroupAssignmentForm({
             )}
           </div>
 
+          <div className="mt-4">
+            <h4 className="h6">Corrección automática</h4>
+            <div className="form-group-body">
+              <input
+                id="autograder_id"
+                name="autograder_id"
+                type="text"
+                autoComplete="off"
+                className="form-control input-block"
+              />
+            </div>
+            <p className="note">
+              El id que el corrector externo usa para elegir cómo corregir este trabajo práctico.
+              Dejalo vacío si no tiene corrección automática.
+            </p>
+          </div>
+
           {/* "Team options" of the original */}
           <div className="mt-4">
             <h4 className="h6">Equipos</h4>

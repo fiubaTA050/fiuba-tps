@@ -220,6 +220,14 @@ export const assignments = pgTable(
      * anything. bigint rather than the original's int4, like the other ids.
      */
     starterCodeRepoId: bigint('starter_code_repo_id', { mode: 'number' }),
+    /**
+     * The id an external autograder worker uses to pick which correction to
+     * run (e.g. the `tp1`/`tp2` of `~/fiuba/autograder`'s `tps/*.json`). Free
+     * text, not a foreign key: this project has no notion of what a valid id
+     * is, that autograder does. Null means no automated grading for this
+     * assignment. See the worker-corrector-plan memory.
+     */
+    autograderId: varchar('autograder_id', { length: 255 }),
     studentsAreRepoAdmins: boolean('students_are_repo_admins').notNull().default(false),
     invitationsEnabled: boolean('invitations_enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -580,6 +588,8 @@ export const groupAssignments = pgTable(
     /** Prefixes every team repo: `<slug>-<team-slug>` */
     slug: varchar('slug', { length: 255 }).notNull(),
     starterCodeRepoId: bigint('starter_code_repo_id', { mode: 'number' }),
+    /** Mirrors `assignments.autograderId` above */
+    autograderId: varchar('autograder_id', { length: 255 }),
     /** Null means no limit, as in the original */
     maxMembers: integer('max_members'),
     maxTeams: integer('max_teams'),

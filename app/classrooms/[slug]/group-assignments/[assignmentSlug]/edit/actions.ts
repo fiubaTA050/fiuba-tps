@@ -9,7 +9,7 @@ import {
   updateGroupAssignment,
   type GroupAssignmentField,
 } from '@/lib/data/group-assignments'
-import { limitField } from '@/lib/form'
+import { limitField, optionalText } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
 export type EditGroupAssignmentState = {
@@ -35,6 +35,7 @@ export async function updateGroupAssignmentAction(
     invitationsEnabled: formData.get('assignment_status') === 'active',
     studentsAreRepoAdmins: formData.get('students_are_repo_admins') === 'on',
     starterCodeRepo: String(formData.get('repo_name') ?? ''),
+    autograderId: optionalText(formData.get('autograder_id')),
     // An empty number field means "no limit", which is the column's null
     maxMembers: limitField(formData.get('max_members')),
     maxTeams: limitField(formData.get('max_teams')),

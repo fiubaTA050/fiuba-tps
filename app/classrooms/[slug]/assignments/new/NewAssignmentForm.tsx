@@ -183,6 +183,23 @@ export function NewAssignmentForm({
           </div>
 
           <div className="mt-4">
+            <h4 className="h6">Corrección automática</h4>
+            <div className="form-group-body">
+              <input
+                id="autograder_id"
+                name="autograder_id"
+                type="text"
+                autoComplete="off"
+                className="form-control input-block"
+              />
+            </div>
+            <p className="note">
+              El id que el corrector externo usa para elegir cómo corregir este trabajo práctico.
+              Dejalo vacío si no tiene corrección automática.
+            </p>
+          </div>
+
+          <div className="mt-4">
             <h4 className="h6">Link de invitación</h4>
             <div className="form-checkbox">
               <label>
