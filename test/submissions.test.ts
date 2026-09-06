@@ -101,6 +101,8 @@ async function assignmentWithRepo(
     checkpoint?: boolean
     invitationsEnabled?: boolean
     archived?: boolean
+    /** The teacher closed this entrega by hand */
+    closedAt?: Date | null
   } = {},
 ): Promise<Fixture> {
   const githubId = nextGithubId++
@@ -154,6 +156,7 @@ async function assignmentWithRepo(
         assignmentId: assignment.id,
         title: null,
         deadlineAt: options.deadlineAt ?? null,
+        closedAt: options.closedAt ?? null,
       })
       .returning({ id: checkpoints.id })
     checkpointId = checkpoint.id
@@ -406,6 +409,17 @@ describe('confirmSubmission', () => {
     expect(github.resolveCalls).toBe(0)
   })
 
+  it('refuses when the checkpoint is closed', async () => {
+    const alumna = await student('alumna')
+    const { key } = await assignmentWithRepo(alumna, { closedAt: new Date() })
+
+    const result = await confirmSubmission(alumna, key, 'main', 'No usé herramientas de IA.')
+
+    expect(result).toMatchObject({ success: false })
+    expect(github.resolveCalls).toBe(0)
+    expect(await db.select().from(submissions)).toHaveLength(0)
+  })
+
   it('holds a second confirmation inside the cooldown', async () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna)
@@ -482,6 +496,16 @@ describe('findSubmissionPanel', () => {
   it('carries the reason the entrega is closed', async () => {
     const alumna = await student('alumna')
     const { key } = await assignmentWithRepo(alumna, { invitationsEnabled: false })
+
+    const panel = await findSubmissionPanel(alumna, key)
+
+    expect(panel?.enabled).toBe(false)
+    expect(panel?.disabledReason).toBeTruthy()
+  })
+
+  it('carries the reason when the checkpoint itself is closed', async () => {
+    const alumna = await student('alumna')
+    const { key } = await assignmentWithRepo(alumna, { closedAt: new Date() })
 
     const panel = await findSubmissionPanel(alumna, key)
 

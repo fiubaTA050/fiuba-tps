@@ -95,6 +95,8 @@ export default async function EditAssignmentPage(
                 ? toArgentinaDateTimeInput(checkpoint.deadlineAt)
                 : '',
               submissionCount: checkpoint?.submissionCount ?? 0,
+              autograderId: checkpoint?.autograderId ?? null,
+              closed: Boolean(checkpoint?.closedAt),
             }}
           />
         )}

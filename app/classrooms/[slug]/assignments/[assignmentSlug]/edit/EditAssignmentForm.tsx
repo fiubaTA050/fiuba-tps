@@ -45,7 +45,13 @@ export function EditAssignmentForm({
   /** `owner/name` read from GitHub, or '' when there is none or it is gone */
   starterCodeFullName: string
   /** The assignment's single checkpoint, already in Argentine time */
-  entrega: { enabled: boolean; deadlineInput: string; submissionCount: number }
+  entrega: {
+    enabled: boolean
+    deadlineInput: string
+    submissionCount: number
+    autograderId: string | null
+    closed: boolean
+  }
 }) {
   const [title, setTitle] = useState(assignment.title)
   const [slug, setSlug] = useState(assignment.slug)
@@ -233,7 +239,7 @@ export function EditAssignmentForm({
               <p className="note">
                 Opcional, y en hora de Argentina. La fecha <strong>no cierra la entrega</strong>:
                 las que lleguen después se aceptan y quedan marcadas como tarde. Para que nadie
-                entregue más, poné el trabajo práctico en Inactivo.
+                entregue más, cerrala más abajo, o poné el trabajo práctico entero en Inactivo.
               </p>
               {entrega.submissionCount > 0 && (
                 <p className="note">
@@ -242,6 +248,45 @@ export function EditAssignmentForm({
                   Mientras existan no se pueden apagar las entregas.
                 </p>
               )}
+            </div>
+
+            <div className="form-group">
+              <div className="form-group-header">
+                <label htmlFor="autograder_id">Corrección automática</label>
+              </div>
+              <div className="form-group-body">
+                <input
+                  id="autograder_id"
+                  name="autograder_id"
+                  type="text"
+                  defaultValue={entrega.autograderId ?? ''}
+                  autoComplete="off"
+                  className="form-control input-block"
+                  disabled={!submissionsEnabled}
+                />
+              </div>
+              <p className="note">
+                El id que el corrector externo usa para elegir cómo corregir esta entrega. Dejalo
+                vacío si no tiene corrección automática.
+              </p>
+            </div>
+
+            <div className="form-group">
+              <div className="form-checkbox">
+                <label>
+                  <input
+                    type="checkbox"
+                    name="checkpoint_closed"
+                    defaultChecked={entrega.closed}
+                    disabled={!submissionsEnabled}
+                  />
+                  Cerrar esta entrega
+                </label>
+                <p className="note">
+                  Frena confirmaciones nuevas para esta entrega y, si tiene corrección automática,
+                  la habilita para que el corrector la pida. Se puede reabrir en cualquier momento.
+                </p>
+              </div>
             </div>
 
             <h3 className="h5 mt-5 pt-4 border-top">Opcional</h3>
@@ -271,24 +316,6 @@ export function EditAssignmentForm({
               )}
               <p className="note">
                 Cambiarlo vale para los repos que se creen de acá en adelante.
-              </p>
-            </div>
-
-            <div className="mt-4">
-              <h4 className="h6">Corrección automática</h4>
-              <div className="form-group-body">
-                <input
-                  id="autograder_id"
-                  name="autograder_id"
-                  type="text"
-                  defaultValue={assignment.autograderId ?? ''}
-                  autoComplete="off"
-                  className="form-control input-block"
-                />
-              </div>
-              <p className="note">
-                El id que el corrector externo usa para elegir cómo corregir este trabajo
-                práctico. Dejalo vacío si no tiene corrección automática.
               </p>
             </div>
 

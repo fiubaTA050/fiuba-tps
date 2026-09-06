@@ -94,14 +94,14 @@ export async function deleteApiKey(session: Session, keyId: number): Promise<{ s
   return { success: Boolean(row) }
 }
 
-/** No caller yet — the grading lease endpoint (Historia 2) is the first one */
+/** Used by the grading lease endpoints (lib/data/grading.ts) */
 export async function authenticateApiKey(
   rawKey: string,
   scope: string,
-): Promise<{ success: true; userId: number } | { success: false }> {
+): Promise<{ success: true; userId: number; apiKeyId: number } | { success: false }> {
   const [row] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, hashKey(rawKey)))
 
   if (!row || !row.scopes.includes(scope)) return { success: false }
 
-  return { success: true, userId: row.userId }
+  return { success: true, userId: row.userId, apiKeyId: row.id }
 }

@@ -52,7 +52,7 @@ export type SubmissionPanel = {
   /** Read on the server: the screen must not decide "late" off the viewer's clock */
   overdue: boolean
   hasCheckpoint: boolean
-  /** AssignmentInvitation#enabled?, the only thing that actually closes entregas */
+  /** False when the assignment is Inactive/archived, or this entrega itself was closed */
   enabled: boolean
   disabledReason: string | null
   current: SubmissionRow | null
@@ -146,6 +146,9 @@ export async function listAssignmentSubmissions(
  * SHA dedupe below does not cover that case: each of those confirmations
  * carries a different SHA.
  */
+/** The teacher closed this entrega by hand — see checkpoints.closedAt in db/schema.ts */
+const CHECKPOINT_CLOSED = 'Esta entrega ya está cerrada.'
+
 const COOLDOWN_MS = 10_000
 
 const MAX_REF_LENGTH = 255
@@ -160,7 +163,15 @@ export async function findSubmissionPanel(
   const context = await loadContext(session, key)
   if (!context) return null
 
-  const { enabled, disabledReason } = disabledState(context.invitationsEnabled, context.archivedAt)
+  let { enabled, disabledReason } = disabledState(context.invitationsEnabled, context.archivedAt)
+
+  // A closed entrega is a second, independent reason confirmations are
+  // refused — checked after the assignment-level one so an Inactive/archived
+  // message still wins if both apply
+  if (enabled && context.closedAt !== null) {
+    enabled = false
+    disabledReason = CHECKPOINT_CLOSED
+  }
 
   const base: SubmissionPanel = {
     deadlineAt: context.deadlineAt,
@@ -232,7 +243,8 @@ export async function findSubmissionHistory(
  *
  * The deadline is deliberately **not** a rejection: late submissions are
  * accepted and read as `Tarde`. What closes entregas is the assignment going
- * Inactive, which is the lever the teacher already has.
+ * Inactive, or this entrega's own checkpoint being closed by hand — the two
+ * levers the teacher has, checked here as `disabledState` and `closedAt`.
  */
 export async function confirmSubmission(
   session: Session,
@@ -271,6 +283,10 @@ export async function confirmSubmission(
 
   if (context.checkpointId === null) {
     return { success: false, error: 'El docente todavía no habilitó las entregas.' }
+  }
+
+  if (context.closedAt !== null) {
+    return { success: false, error: CHECKPOINT_CLOSED }
   }
 
   if (context.repoId === null || context.githubRepoId === null) {
@@ -399,6 +415,7 @@ async function loadContext(session: Session, key: string) {
       archivedAt: organizations.archivedAt,
       checkpointId: checkpoints.id,
       deadlineAt: checkpoints.deadlineAt,
+      closedAt: checkpoints.closedAt,
     })
     .from(assignmentInvitations)
     .innerJoin(

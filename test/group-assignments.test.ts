@@ -123,7 +123,6 @@ const VALID = {
   invitationsEnabled: true,
   studentsAreRepoAdmins: false,
   starterCodeRepo: '',
-  autograderId: null,
   groupingId: null,
   groupingTitle: 'Equipos formados en agosto',
   maxMembers: null,
@@ -141,7 +140,6 @@ const EDITABLE = {
   invitationsEnabled: VALID.invitationsEnabled,
   studentsAreRepoAdmins: VALID.studentsAreRepoAdmins,
   starterCodeRepo: VALID.starterCodeRepo,
-  autograderId: VALID.autograderId,
   maxMembers: VALID.maxMembers,
   maxTeams: VALID.maxTeams,
 }

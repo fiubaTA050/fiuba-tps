@@ -48,7 +48,6 @@ export async function updateAssignmentAction(
     invitationsEnabled: formData.get('assignment_status') === 'active',
     studentsAreRepoAdmins: formData.get('students_are_repo_admins') === 'on',
     starterCodeRepo: String(formData.get('repo_name') ?? ''),
-    autograderId: optionalText(formData.get('autograder_id')),
   })
 
   // render :edit — the form comes back with the message
@@ -60,6 +59,8 @@ export async function updateAssignmentAction(
   const checkpoint = await saveAssignmentCheckpoint(session, classroomSlug, result.slug, {
     enabled: submissionsEnabled,
     deadlineAt,
+    autograderId: optionalText(formData.get('autograder_id')),
+    closed: formData.get('checkpoint_closed') === 'on',
   })
 
   if (!checkpoint.success) return { error: checkpoint.error, field: 'base' }

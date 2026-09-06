@@ -94,6 +94,36 @@ export function installationClient(installationId: number): Octokit {
   return client
 }
 
+/** An installation token scoped to a single repository, for the grading worker */
+export type ScopedToken = { token: string; expiresAt: Date }
+
+/**
+ * Mints a token that can only read the contents of one repository, for the
+ * grading worker's `git clone` — see grading-runs-plan. Not built on
+ * `installationClient`'s cached client on purpose: that one holds the
+ * installation's full permissions and is reused across requests, where this
+ * has to be minted fresh, scoped down, every time.
+ *
+ * `createAppAuth`'s `repositoryIds` takes the same numeric id the database
+ * stores (DA-2) — no node id to derive, unlike the GraphQL calls in
+ * lib/github/repositories.ts.
+ */
+export async function mintRepositoryScopedToken(
+  installationId: number,
+  repositoryId: number,
+): Promise<ScopedToken> {
+  const auth = createAppAuth({ appId: env.githubAppId, privateKey: env.githubAppPrivateKey })
+
+  const { token, expiresAt } = await auth({
+    type: 'installation',
+    installationId,
+    repositoryIds: [repositoryId],
+    permissions: { contents: 'read' },
+  })
+
+  return { token, expiresAt: new Date(expiresAt) }
+}
+
 /** Where we send the teacher to install the App on another org */
 export function appInstallationUrl(state?: string): string {
   const url = new URL(`https://github.com/apps/${env.githubAppSlug}/installations/new`)

@@ -5,6 +5,8 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -220,14 +222,6 @@ export const assignments = pgTable(
      * anything. bigint rather than the original's int4, like the other ids.
      */
     starterCodeRepoId: bigint('starter_code_repo_id', { mode: 'number' }),
-    /**
-     * The id an external autograder worker uses to pick which correction to
-     * run (e.g. the `tp1`/`tp2` of `~/fiuba/autograder`'s `tps/*.json`). Free
-     * text, not a foreign key: this project has no notion of what a valid id
-     * is, that autograder does. Null means no automated grading for this
-     * assignment. See the worker-corrector-plan memory.
-     */
-    autograderId: varchar('autograder_id', { length: 255 }),
     studentsAreRepoAdmins: boolean('students_are_repo_admins').notNull().default(false),
     invitationsEnabled: boolean('invitations_enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -588,8 +582,6 @@ export const groupAssignments = pgTable(
     /** Prefixes every team repo: `<slug>-<team-slug>` */
     slug: varchar('slug', { length: 255 }).notNull(),
     starterCodeRepoId: bigint('starter_code_repo_id', { mode: 'number' }),
-    /** Mirrors `assignments.autograderId` above */
-    autograderId: varchar('autograder_id', { length: 255 }),
     /** Null means no limit, as in the original */
     maxMembers: integer('max_members'),
     maxTeams: integer('max_teams'),
@@ -732,6 +724,26 @@ export const checkpoints = pgTable(
     title: varchar('title', { length: 60 }),
     /** Decides late/on-time. It closes nothing — see docs/entregas.md */
     deadlineAt: timestamp('deadline_at', { withTimezone: true }),
+    /**
+     * The id an external autograder worker uses to pick which correction to
+     * run (e.g. the `tp1`/`tp2` of `~/fiuba/autograder`'s `tps/*.json`). Free
+     * text, not a foreign key: this project has no notion of what a valid id
+     * is, that autograder does. Null means no automated grading for this
+     * entrega. Lives here and not on `assignments` because one assignment can
+     * have several entregas (TP2 is 2A to 2D) that may need different ones.
+     * See the grading-runs-plan memory.
+     */
+    autograderId: varchar('autograder_id', { length: 255 }),
+    /**
+     * Set by the teacher, by hand, when they close this entrega — never by a
+     * timer or a background job, same principle as the rest of this table.
+     * Null means still open: new confirmations are accepted and nothing is
+     * offered to the grading worker. Once set, `confirmSubmission` refuses
+     * new confirmations and `leaseSubmissionForGrading` starts offering its
+     * current submission. Reversible: clearing it reopens confirmations,
+     * without touching any `grading_runs` already recorded.
+     */
+    closedAt: timestamp('closed_at', { withTimezone: true }),
     position: integer('position').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -839,6 +851,52 @@ export const apiKeys = pgTable(
   ],
 )
 
+export const gradingRunStatusEnum = pgEnum('grading_run_status', ['leased', 'succeeded', 'failed'])
+
+/**
+ * One attempt at automatically grading a submission — a lease handed to the
+ * external worker of the worker-corrector-plan memory, and its result once
+ * the worker posts one back. One table for both halves, not two: a row *is*
+ * an attempt, `leased` through `succeeded`/`failed`, see grading-runs-plan.
+ *
+ * No unique index on `submissionId`: a failed or expired attempt must not
+ * block retrying, and "is there an active attempt" is answered by
+ * `lib/data/grading.ts`'s eligibility query, not by a constraint here — same
+ * stance as `submissions` being append-only with no cron expiring anything
+ * (docs/creacion-de-repos.md's case against workers/queues at this size).
+ *
+ * A submission stops being eligible after 3 rows with no `succeeded` among
+ * them, worker or no worker involved — the cap that keeps a broken worker
+ * (fails every job instantly) from re-leasing the same submission forever and
+ * burning the installation's shared GitHub rate limit on it. Surfacing that a
+ * submission is stuck past its cap is future work, not part of this table.
+ */
+export const gradingRuns = pgTable(
+  'grading_runs',
+  {
+    id: serial('id').primaryKey(),
+    submissionId: integer('submission_id')
+      .notNull()
+      .references(() => submissions.id, { onDelete: 'cascade' }),
+    // Nullable with `set null`, not `not null`: deleting an API key (a real
+    // DELETE, like GitHub's own "Delete") must not be blocked by, or cascade
+    // into, the grading history it authenticated — see api-keys-plan.
+    apiKeyId: integer('api_key_id').references(() => apiKeys.id, { onDelete: 'set null' }),
+    status: gradingRunStatusEnum('status').notNull().default('leased'),
+    leasedAt: timestamp('leased_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Fixed 1h TTL from `leasedAt`, no extension endpoint yet — see grading-runs-plan */
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    // { mode: 'number' } keeps numeric's exact storage but hands back a plain
+    // JS number, instead of Drizzle's numeric default of a string
+    score: numeric('score', { mode: 'number' }),
+    output: text('output'),
+    /** Gradescope's `results.json` shape: `{ name, score, max_score, status, output }[]` */
+    tests: jsonb('tests'),
+  },
+  (table) => [index('index_grading_runs_on_submission_id').on(table.submissionId)],
+)
+
 export type User = typeof users.$inferSelect
 export type Organization = typeof organizations.$inferSelect
 export type Assignment = typeof assignments.$inferSelect
@@ -856,3 +914,4 @@ export type GroupInviteStatus = typeof groupInviteStatuses.$inferSelect
 export type Checkpoint = typeof checkpoints.$inferSelect
 export type Submission = typeof submissions.$inferSelect
 export type ApiKey = typeof apiKeys.$inferSelect
+export type GradingRun = typeof gradingRuns.$inferSelect

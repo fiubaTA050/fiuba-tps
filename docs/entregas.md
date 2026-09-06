@@ -89,10 +89,17 @@ Dos cosas, y nada más:
 una entrega tardía visible el docente la ignora si quiere, y la cátedra se queda
 con el dato de que el trabajo existía.
 
-Lo único que cierra las entregas sigue siendo **poner el assignment en
-Inactive**, que es la palanca que ya existe y que documenta
-`edicion-y-borrado-de-assignments.md`. Esa es también la semántica del original,
-donde la deadline tampoco bloqueaba nada.
+Lo que cierra las entregas son dos palancas independientes: **poner el
+assignment en Inactive** (la que ya existía, documentada en
+`edicion-y-borrado-de-assignments.md`, y también la semántica del original,
+donde la deadline tampoco bloqueaba nada) o **cerrar el checkpoint puntual**
+(`checkpoints.closed_at`, agregado 2026-09-06 — ver grading-runs-plan). La
+segunda es más granular: frena confirmaciones de esa entrega sin tocar el
+resto del assignment, y además es lo que habilita
+`POST /api/grading/lease` a ofrecer su submission vigente — sin cerrar, no
+hay corrección automática aunque el checkpoint tenga `autograder_id`. Se
+setea a mano desde un checkbox reversible en la pantalla de edición, nunca
+por un timer.
 
 ## Append-only
 

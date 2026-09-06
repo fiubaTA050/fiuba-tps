@@ -50,6 +50,7 @@ describe('createApiKey', () => {
     expect(await authenticateApiKey(rawKey, 'grading')).toEqual({
       success: true,
       userId: Number(profe.user.id),
+      apiKeyId: id,
     })
   })
 

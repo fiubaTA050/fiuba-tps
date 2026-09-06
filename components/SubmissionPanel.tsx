@@ -130,9 +130,9 @@ export function SubmissionPanel({
             </div>
           </form>
         ) : (
-          // AssignmentInvitation#reason_for_disabled_invitations, which is the
-          // only thing that actually closes entregas. Its wording is about
-          // invitations, so the consequence for this screen is spelled out
+          // Two independent reasons land here: AssignmentInvitation#reason_for_disabled_invitations
+          // (Inactive/archived) or this entrega itself being closed — both come
+          // through `panel.disabledReason`, already worded for this screen
           <div className="flash flash-warn mb-0">
             No se pueden confirmar entregas. {panel.disabledReason}
           </div>

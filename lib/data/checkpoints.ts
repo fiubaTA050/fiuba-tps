@@ -28,6 +28,9 @@ export type CheckpointResult = { success: true } | { success: false; error: stri
 export type AssignmentCheckpoint = {
   id: number
   deadlineAt: Date | null
+  autograderId: string | null
+  /** Null means still open — see checkpoints.closedAt in db/schema.ts */
+  closedAt: Date | null
   /** Whether anybody has handed in yet, which is what blocks closing entregas */
   submissionCount: number
 }
@@ -45,6 +48,8 @@ export async function findAssignmentCheckpoint(
     .select({
       id: checkpoints.id,
       deadlineAt: checkpoints.deadlineAt,
+      autograderId: checkpoints.autograderId,
+      closedAt: checkpoints.closedAt,
       submissionCount: count(submissions.id),
     })
     .from(checkpoints)
@@ -64,23 +69,31 @@ export async function findAssignmentCheckpoint(
 }
 
 /**
- * Creates, dates or removes the assignment's single entrega.
+ * Creates, dates, closes or removes the assignment's single entrega.
  *
- * The two controls of the edit screen map one to one onto the model:
- * `enabled` is whether the checkpoint exists at all — *no checkpoints means
- * nothing to hand in* — and `deadlineAt` is its date, which may be null for an
- * entrega whose date is not decided yet.
+ * The controls of the edit screen map one to one onto the model: `enabled` is
+ * whether the checkpoint exists at all — *no checkpoints means nothing to
+ * hand in* — `deadlineAt` is its date, which may be null for an entrega whose
+ * date is not decided yet, `autograderId` is which correction an external
+ * worker runs (null means none), and `closed` is a separate, orthogonal axis:
+ * whether the teacher has closed this entrega by hand. Closing is what
+ * `confirmSubmission` reads to refuse new confirmations, and what
+ * `leaseSubmissionForGrading` reads to start offering it — see
+ * grading-runs-plan. Reversible: unchecking it clears `closedAt` back to
+ * null, which does not touch any `grading_runs` already recorded.
  *
  * Turning entregas off once somebody has handed in is refused rather than
  * cascaded. The submission is the evidence of the grading, and one click
  * taking a hundred of them is the failure DA-9 already rules out for
- * repositories.
+ * repositories. That guard is orthogonal to `closed` too: a closed entrega
+ * with submissions is already covered by it, since closing without anybody
+ * having handed in is a legal (if pointless) state.
  */
 export async function saveAssignmentCheckpoint(
   session: Session,
   classroomSlug: string,
   assignmentSlug: string,
-  input: { enabled: boolean; deadlineAt: Date | null },
+  input: { enabled: boolean; deadlineAt: Date | null; autograderId: string | null; closed: boolean },
 ): Promise<CheckpointResult> {
   const classroom = await findTeachingClassroom(session, classroomSlug)
   if (!classroom) return { success: false, error: 'No encontramos ese classroom.' }
@@ -108,7 +121,7 @@ export async function saveAssignmentCheckpoint(
   if (!assignment) return { success: false, error: 'No encontramos ese trabajo práctico.' }
 
   const [existing] = await db
-    .select({ id: checkpoints.id })
+    .select({ id: checkpoints.id, closedAt: checkpoints.closedAt })
     .from(checkpoints)
     .where(and(eq(checkpoints.assignmentId, assignment.id), isNull(checkpoints.title)))
 
@@ -137,7 +150,13 @@ export async function saveAssignmentCheckpoint(
   if (existing) {
     await db
       .update(checkpoints)
-      .set({ deadlineAt: input.deadlineAt, updatedAt: new Date() })
+      .set({
+        deadlineAt: input.deadlineAt,
+        autograderId: input.autograderId,
+        // Preserve the original close time across re-saves; only flip it
+        closedAt: input.closed ? (existing.closedAt ?? new Date()) : null,
+        updatedAt: new Date(),
+      })
       .where(eq(checkpoints.id, existing.id))
 
     return { success: true }
@@ -147,6 +166,8 @@ export async function saveAssignmentCheckpoint(
     assignmentId: assignment.id,
     title: null,
     deadlineAt: input.deadlineAt,
+    autograderId: input.autograderId,
+    closedAt: input.closed ? new Date() : null,
     position: 0,
   })
 

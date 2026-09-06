@@ -122,6 +122,8 @@ describe('saveAssignmentCheckpoint', () => {
     const result = await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt,
+      autograderId: null,
+      closed: false,
     })
 
     expect(result).toEqual({ success: true })
@@ -137,6 +139,8 @@ describe('saveAssignmentCheckpoint', () => {
     await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
 
     const found = await findAssignmentCheckpoint(profe, classroomSlug, assignmentSlug)
@@ -150,11 +154,15 @@ describe('saveAssignmentCheckpoint', () => {
     await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: new Date('2026-09-12T02:59:00Z'),
+      autograderId: null,
+      closed: false,
     })
     const moved = new Date('2026-09-15T02:59:00Z')
     await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: moved,
+      autograderId: null,
+      closed: false,
     })
 
     expect(await db.select().from(checkpoints)).toHaveLength(1)
@@ -169,10 +177,14 @@ describe('saveAssignmentCheckpoint', () => {
     await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: new Date('2026-09-12T02:59:00Z'),
+      autograderId: null,
+      closed: false,
     })
     await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
 
     const found = await findAssignmentCheckpoint(profe, classroomSlug, assignmentSlug)
@@ -186,10 +198,14 @@ describe('saveAssignmentCheckpoint', () => {
     await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
     const result = await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: false,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
 
     expect(result).toEqual({ success: true })
@@ -203,6 +219,8 @@ describe('saveAssignmentCheckpoint', () => {
     await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
     const checkpoint = await findAssignmentCheckpoint(profe, classroomSlug, assignmentSlug)
     await handIn(assignmentId, checkpoint!.id, profe)
@@ -210,6 +228,8 @@ describe('saveAssignmentCheckpoint', () => {
     const result = await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: false,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
 
     expect(result).toMatchObject({ success: false })
@@ -225,6 +245,8 @@ describe('saveAssignmentCheckpoint', () => {
     await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
     const checkpoint = await findAssignmentCheckpoint(profe, classroomSlug, assignmentSlug)
     await handIn(assignmentId, checkpoint!.id, profe)
@@ -241,6 +263,8 @@ describe('saveAssignmentCheckpoint', () => {
     const result = await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: false,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
 
     expect(result).toEqual({ success: true })
@@ -255,6 +279,8 @@ describe('saveAssignmentCheckpoint', () => {
     const result = await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
 
     expect(result).toMatchObject({ success: false })
@@ -269,6 +295,8 @@ describe('saveAssignmentCheckpoint', () => {
     const result = await saveAssignmentCheckpoint(ajeno, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
 
     expect(result).toMatchObject({ success: false })
@@ -287,9 +315,85 @@ describe('saveAssignmentCheckpoint', () => {
     const result = await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
       enabled: true,
       deadlineAt: null,
+      autograderId: null,
+      closed: false,
     })
 
     expect(result).toMatchObject({ success: false })
+  })
+
+  it('sets an autograderId', async () => {
+    const profe = await teacher()
+    const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+
+    await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
+      enabled: true,
+      deadlineAt: null,
+      autograderId: 'tp1',
+      closed: false,
+    })
+
+    const found = await findAssignmentCheckpoint(profe, classroomSlug, assignmentSlug)
+    expect(found).toMatchObject({ autograderId: 'tp1', closedAt: null })
+  })
+
+  it('closes an entrega, stamping closedAt', async () => {
+    const profe = await teacher()
+    const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+
+    await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
+      enabled: true,
+      deadlineAt: null,
+      autograderId: 'tp1',
+      closed: true,
+    })
+
+    const found = await findAssignmentCheckpoint(profe, classroomSlug, assignmentSlug)
+    expect(found?.closedAt).toBeInstanceOf(Date)
+  })
+
+  it('re-saving a closed entrega does not move its closedAt', async () => {
+    const profe = await teacher()
+    const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+
+    await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
+      enabled: true,
+      deadlineAt: null,
+      autograderId: 'tp1',
+      closed: true,
+    })
+    const first = await findAssignmentCheckpoint(profe, classroomSlug, assignmentSlug)
+
+    await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
+      enabled: true,
+      deadlineAt: null,
+      autograderId: 'tp1',
+      closed: true,
+    })
+    const second = await findAssignmentCheckpoint(profe, classroomSlug, assignmentSlug)
+
+    expect(second?.closedAt).toEqual(first?.closedAt)
+  })
+
+  it('reopening clears closedAt', async () => {
+    const profe = await teacher()
+    const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+
+    await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
+      enabled: true,
+      deadlineAt: null,
+      autograderId: 'tp1',
+      closed: true,
+    })
+    await saveAssignmentCheckpoint(profe, classroomSlug, assignmentSlug, {
+      enabled: true,
+      deadlineAt: null,
+      autograderId: 'tp1',
+      closed: false,
+    })
+
+    const found = await findAssignmentCheckpoint(profe, classroomSlug, assignmentSlug)
+    expect(found?.closedAt).toBeNull()
   })
 })
 

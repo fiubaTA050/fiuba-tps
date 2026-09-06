@@ -359,7 +359,7 @@ const SNAPSHOT_BATCH = 5
  * what `Repository.id` returns for it today. Deriving it is what lets this ask
  * for repositories by id without a name, a migration or a stored column.
  */
-function repositoryNodeId(databaseId: number): string {
+export function repositoryNodeId(databaseId: number): string {
   // msgpack: 0x92 = 2-element array, 0x00 = the Repository type tag, then the
   // id as the narrowest unsigned int that holds it
   if (databaseId <= 0xffffffff) {
@@ -670,4 +670,38 @@ export async function isReachableFromDefaultBranch(
   } catch {
     return null
   }
+}
+
+const OWNER_AND_NAME_QUERY = `query($id: ID!) {
+  node(id: $id) {
+    ... on Repository { name owner { login } }
+  }
+}`
+
+type OwnerAndNameNode = { name: string; owner: { login: string } } | null
+
+/**
+ * The owner login and name of a repository, asked for by id — what the
+ * grading worker needs to `git clone`, resolved the same way
+ * `listRepositorySnapshots` and `resolveRepositoryRef` do (DA-2: only the id
+ * is stored). Null when the repository is gone or unreachable.
+ */
+export async function findRepositoryOwnerAndName(
+  installationId: number,
+  repositoryId: number,
+): Promise<{ owner: string; name: string } | null> {
+  let node: OwnerAndNameNode
+  try {
+    const data = await installationClient(installationId).graphql<{ node: OwnerAndNameNode }>(
+      OWNER_AND_NAME_QUERY,
+      { id: repositoryNodeId(repositoryId) },
+    )
+    node = data.node
+  } catch {
+    return null
+  }
+
+  if (!node) return null
+
+  return { owner: node.owner.login, name: node.name }
 }
