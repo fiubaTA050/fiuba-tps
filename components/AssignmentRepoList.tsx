@@ -12,6 +12,7 @@ import {
   XCircleFillIcon,
   XIcon,
 } from '@primer/octicons-react'
+import Link from 'next/link'
 import { type ComponentProps, useMemo, useRef, useState } from 'react'
 
 import { hasSubmitted, type RepoRow, type SubmissionTone } from '@/lib/assignment-rows'
@@ -736,7 +737,13 @@ function SubmissionHistoryDetails({
                 )}{' '}
                 <span className="color-fg-muted">({entry.ref})</span> el{' '}
                 {formatCommitDate(entry.submittedAt)}
-                {entry.late && <span className="IssueLabel color-bg-attention ml-2">Tarde</span>}
+                {entry.late && <span className="IssueLabel color-bg-attention ml-2">Tarde</span>}{' '}
+                <Link
+                  href={`/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}/${entry.id}`}
+                  className="Link--secondary ml-1"
+                >
+                  Ver detalle
+                </Link>
               </li>
             ))}
           </ul>

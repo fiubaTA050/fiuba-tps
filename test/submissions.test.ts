@@ -7,6 +7,7 @@ import {
   assignmentRepos,
   assignments,
   checkpoints,
+  gradingRuns,
   organizations,
   organizationsUsers,
   submissions,
@@ -66,8 +67,13 @@ vi.mock('@/lib/github/repositories', async (importOriginal) => {
   }
 })
 
-const { confirmSubmission, findSubmissionPanel, findSubmissionHistory, listAssignmentSubmissions } =
-  await import('@/lib/data/submissions')
+const {
+  confirmSubmission,
+  findSubmissionPanel,
+  findSubmissionHistory,
+  findSubmissionDetail,
+  listAssignmentSubmissions,
+} = await import('@/lib/data/submissions')
 
 let nextUid = 1
 let nextGithubId = 1000
@@ -240,16 +246,21 @@ async function submit(
   by: Session,
   sha: string,
   submittedAt?: Date,
-): Promise<void> {
-  await db.insert(submissions).values({
-    assignmentRepoId: repoId,
-    checkpointId,
-    sha,
-    ref: 'main',
-    committedAt: submittedAt ?? new Date(),
-    ...(submittedAt ? { submittedAt } : {}),
-    submittedByUserId: Number(by.user.id),
-  })
+): Promise<number> {
+  const [row] = await db
+    .insert(submissions)
+    .values({
+      assignmentRepoId: repoId,
+      checkpointId,
+      sha,
+      ref: 'main',
+      committedAt: submittedAt ?? new Date(),
+      ...(submittedAt ? { submittedAt } : {}),
+      submittedByUserId: Number(by.user.id),
+    })
+    .returning({ id: submissions.id })
+
+  return row.id
 }
 
 beforeEach(async () => {
@@ -680,5 +691,83 @@ describe('findSubmissionHistory', () => {
     await submit(repoId, checkpointId, alumna, 'a'.repeat(40))
 
     expect(await findSubmissionHistory(ajeno, classroomSlug, assignmentSlug, githubRepoId)).toBeNull()
+  })
+})
+
+describe('findSubmissionDetail', () => {
+  it('returns the submission with an empty gradingRuns list when none ran', async () => {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await openCheckpoint(assignmentId)
+    const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+    const submissionId = await submit(repoId, checkpointId, alumna, 'a'.repeat(40))
+
+    const detail = await findSubmissionDetail(profe, classroomSlug, assignmentSlug, githubRepoId, submissionId)
+
+    expect(detail).toMatchObject({ submission: { id: submissionId, sha: 'a'.repeat(40) }, gradingRuns: [] })
+  })
+
+  it('returns gradingRuns newest first', async () => {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await openCheckpoint(assignmentId)
+    const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+    const submissionId = await submit(repoId, checkpointId, alumna, 'a'.repeat(40))
+
+    const [first] = await db
+      .insert(gradingRuns)
+      .values({ submissionId, status: 'failed', expiresAt: new Date() })
+      .returning({ id: gradingRuns.id })
+    const [second] = await db
+      .insert(gradingRuns)
+      .values({ submissionId, status: 'succeeded', score: 8, expiresAt: new Date() })
+      .returning({ id: gradingRuns.id })
+
+    const detail = await findSubmissionDetail(profe, classroomSlug, assignmentSlug, githubRepoId, submissionId)
+
+    expect(detail?.gradingRuns.map((run) => run.id)).toEqual([second.id, first.id])
+    expect(detail?.gradingRuns[0]).toMatchObject({ status: 'succeeded', score: 8 })
+  })
+
+  it('returns null for a repo id that is not this assignment\'s', async () => {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await openCheckpoint(assignmentId)
+    const { repoId } = await repoFor(assignmentId, alumna)
+    const submissionId = await submit(repoId, checkpointId, alumna, 'a'.repeat(40))
+
+    expect(
+      await findSubmissionDetail(profe, classroomSlug, assignmentSlug, 999_999_999, submissionId),
+    ).toBeNull()
+  })
+
+  it('returns null for a submission id that does not belong to that repo', async () => {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await openCheckpoint(assignmentId)
+    const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+    await submit(repoId, checkpointId, alumna, 'a'.repeat(40))
+
+    expect(
+      await findSubmissionDetail(profe, classroomSlug, assignmentSlug, githubRepoId, 999_999_999),
+    ).toBeNull()
+  })
+
+  it('does not let a teacher of another classroom read it', async () => {
+    const profe = await student('profe')
+    const ajeno = await student('ajeno')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await openCheckpoint(assignmentId)
+    const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+    const submissionId = await submit(repoId, checkpointId, alumna, 'a'.repeat(40))
+
+    expect(
+      await findSubmissionDetail(ajeno, classroomSlug, assignmentSlug, githubRepoId, submissionId),
+    ).toBeNull()
   })
 })

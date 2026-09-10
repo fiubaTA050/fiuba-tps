@@ -8,6 +8,7 @@ import {
   assignmentRepos,
   assignments,
   checkpoints,
+  gradingRuns,
   organizations,
   submissions,
 } from '@/db/schema'
@@ -236,6 +237,101 @@ export async function findSubmissionHistory(
   if (!row) return []
 
   return listSubmissions(row.repoId, row.checkpointId, row.deadlineAt)
+}
+
+export type GradingRunRow = {
+  id: number
+  status: 'leased' | 'succeeded' | 'failed'
+  leasedAt: Date
+  expiresAt: Date
+  completedAt: Date | null
+  score: number | null
+  output: string | null
+  tests: unknown
+}
+
+export type SubmissionDetail = {
+  submission: SubmissionRow
+  gradingRuns: GradingRunRow[]
+}
+
+/**
+ * One submission, teacher-facing, with every grading_runs attempt against
+ * it — the two facts a docente cannot see anywhere else: the AI declaration
+ * and the automated grading result. See worker-corrector-plan.
+ *
+ * Unlike `findSubmissionHistory`, the join here does not restrict to the
+ * single unnamed checkpoint: `submissions.id` already pins the row, so there
+ * is nothing to disambiguate.
+ */
+export async function findSubmissionDetail(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  githubRepoId: number,
+  submissionId: number,
+): Promise<SubmissionDetail | null> {
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+  if (!classroom) return null
+
+  const [row] = await db
+    .select({
+      id: submissions.id,
+      sha: submissions.sha,
+      ref: submissions.ref,
+      aiDeclaration: submissions.aiDeclaration,
+      committedAt: submissions.committedAt,
+      submittedAt: submissions.submittedAt,
+      deadlineAt: checkpoints.deadlineAt,
+    })
+    .from(submissions)
+    .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissions.assignmentRepoId))
+    .innerJoin(
+      assignments,
+      and(eq(assignments.id, assignmentRepos.assignmentId), isNull(assignments.deletedAt)),
+    )
+    .innerJoin(checkpoints, eq(checkpoints.id, submissions.checkpointId))
+    .where(
+      and(
+        eq(assignments.organizationId, classroom.id),
+        eq(assignments.slug, assignmentSlug),
+        eq(assignmentRepos.githubRepoId, githubRepoId),
+        eq(submissions.id, submissionId),
+      ),
+    )
+
+  // Not this classroom's, not this assignment's repo, or not this
+  // submission's id — never distinguished from each other, same stance as
+  // findSubmissionHistory's "nothing to show" above
+  if (!row) return null
+
+  const runs = await db
+    .select({
+      id: gradingRuns.id,
+      status: gradingRuns.status,
+      leasedAt: gradingRuns.leasedAt,
+      expiresAt: gradingRuns.expiresAt,
+      completedAt: gradingRuns.completedAt,
+      score: gradingRuns.score,
+      output: gradingRuns.output,
+      tests: gradingRuns.tests,
+    })
+    .from(gradingRuns)
+    .where(eq(gradingRuns.submissionId, row.id))
+    .orderBy(desc(gradingRuns.id))
+
+  return {
+    submission: {
+      id: row.id,
+      sha: row.sha,
+      ref: row.ref,
+      aiDeclaration: row.aiDeclaration,
+      committedAt: row.committedAt,
+      submittedAt: row.submittedAt,
+      late: row.deadlineAt !== null && row.submittedAt.getTime() > row.deadlineAt.getTime(),
+    },
+    gradingRuns: runs,
+  }
 }
 
 /**
