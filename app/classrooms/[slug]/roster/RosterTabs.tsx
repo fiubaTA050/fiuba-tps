@@ -1,8 +1,10 @@
 'use client'
 
-import { useRef, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 
+import { CheckboxMenu } from '@/components/CheckboxMenu'
 import { Pagination } from '@/components/Pagination'
+import { SearchField } from '@/components/SearchField'
 
 /**
  * The roster page's two tabs, ported from the live site's `tab-container`:
@@ -25,6 +27,18 @@ import { Pagination } from '@/components/Pagination'
  */
 const PER_PAGE = 20
 
+/** One row, already server-rendered, plus what the search box and filters match it on */
+export type RosterRow = {
+  key: string | number
+  searchText: string
+  /** Whether this student holds a linked GitHub account */
+  linked: boolean
+  node: ReactNode
+}
+
+/** The roster's own "Vinculado / Sin vincular" filter, students tab only */
+type LinkFilter = 'linked' | 'unlinked'
+
 export function RosterTabs({
   studentsCount,
   students,
@@ -32,10 +46,9 @@ export function RosterTabs({
   accounts,
 }: {
   studentsCount: number
-  /** One node per row, so the panel can hand out a page of them */
-  students: ReactNode[]
+  students: RosterRow[]
   accountsCount: number
-  accounts: ReactNode[]
+  accounts: RosterRow[]
 }) {
   const [selected, setSelected] = useState<'students' | 'accounts'>('students')
 
@@ -66,7 +79,14 @@ export function RosterTabs({
         aria-labelledby="roster-tab-students"
         hidden={selected !== 'students'}
       >
-        <Panel rows={students} label="Todos los alumnos" />
+        <Panel
+          rows={students}
+          label="Todos los alumnos"
+          searchPlaceholder="Buscar por identificador o usuario de GitHub"
+          searchAriaLabel="Buscar en la lista de alumnos"
+          emptyMessage="Ningún alumno coincide con la búsqueda."
+          showLinkFilter
+        />
       </div>
 
       <div
@@ -83,23 +103,102 @@ export function RosterTabs({
             </p>
           </div>
         ) : (
-          <Panel rows={accounts} label="Cuentas de GitHub sin vincular" />
+          <Panel
+            rows={accounts}
+            label="Cuentas de GitHub sin vincular"
+            searchPlaceholder="Buscar por usuario de GitHub"
+            searchAriaLabel="Buscar en las cuentas sin vincular"
+            emptyMessage="Ninguna cuenta coincide con la búsqueda."
+          />
         )}
       </div>
     </>
   )
 }
 
-/** One tab panel: a page of rows and, under them, its paginator */
-function Panel({ rows, label }: { rows: ReactNode[]; label: string }) {
+/**
+ * One tab panel: its own search box, a page of the rows it matches, and under
+ * them its paginator. Search state is local to each panel, so switching tabs
+ * does not touch the other one's query.
+ */
+function Panel({
+  rows,
+  label,
+  searchPlaceholder,
+  searchAriaLabel,
+  emptyMessage,
+  showLinkFilter = false,
+}: {
+  rows: RosterRow[]
+  label: string
+  searchPlaceholder: string
+  searchAriaLabel: string
+  emptyMessage: string
+  /** Only "Todos los alumnos" has both linked and unlinked rows to tell apart */
+  showLinkFilter?: boolean
+}) {
+  const [query, setQuery] = useState('')
+  const [linkFilter, setLinkFilter] = useState<Set<LinkFilter>>(new Set())
   const [page, setPage] = useState(1)
   const top = useRef<HTMLDivElement>(null)
 
-  const pageCount = Math.ceil(rows.length / PER_PAGE)
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+
+    return rows.filter((row) => {
+      if (needle && !row.searchText.includes(needle)) return false
+
+      if (linkFilter.size > 0) {
+        const state: LinkFilter = row.linked ? 'linked' : 'unlinked'
+        if (!linkFilter.has(state)) return false
+      }
+
+      return true
+    })
+  }, [rows, query, linkFilter])
+
+  // Back to the first page whenever the search or the filter narrows or
+  // widens the list — `filtered` is a memo, so its identity is that change.
+  // Same trick as AssignmentRepoList.tsx.
+  const [lastFiltered, setLastFiltered] = useState(filtered)
+  if (lastFiltered !== filtered) {
+    setLastFiltered(filtered)
+    setPage(1)
+  }
+
+  const pageCount = Math.ceil(filtered.length / PER_PAGE)
 
   return (
     <div className="px-2" ref={top}>
-      {rows.slice((page - 1) * PER_PAGE, page * PER_PAGE)}
+      <div className="mb-3 d-flex flex-column-reverse flex-sm-row flex-wrap">
+        {showLinkFilter && (
+          <CheckboxMenu
+            label="Filtrar por vínculo"
+            heading="Filtrar por vínculo:"
+            options={[
+              { value: 'linked', label: 'Vinculados' },
+              { value: 'unlinked', label: 'Sin vincular' },
+            ]}
+            selected={linkFilter}
+            onToggle={(value) => setLinkFilter(toggle(linkFilter, value))}
+          />
+        )}
+
+        <div className="flex-1 mb-2 mb-sm-0">
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            placeholder={searchPlaceholder}
+            ariaLabel={searchAriaLabel}
+          />
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="color-fg-muted text-center my-3 mb-0">{emptyMessage}</p>
+      ) : (
+        filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE).map((row) => row.node)
+      )}
 
       {/* `<div class="d-flex col-12">` around the paginator, as in the view */}
       <div className="d-flex col-12">
@@ -115,6 +214,12 @@ function Panel({ rows, label }: { rows: ReactNode[]; label: string }) {
       </div>
     </div>
   )
+}
+
+function toggle<T>(set: Set<T>, value: T): Set<T> {
+  const next = new Set(set)
+  if (!next.delete(value)) next.add(value)
+  return next
 }
 
 function Tab({

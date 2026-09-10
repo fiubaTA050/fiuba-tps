@@ -23,9 +23,8 @@ export const dynamic = 'force-dynamic'
  *
  * Both tabs paginate, as they do on the live site and in the original — 20
  * rows to a page, each tab with its own page number. The whole roster is
- * server-rendered and `RosterTabs` hands out a page of it, so the paging costs
- * no request; what it does cost is the browser's find-in-page over the rows
- * that are not on the page.
+ * server-rendered and `RosterTabs` hands out a page of it, so neither the
+ * paging nor the search box each tab has now costs a request.
  */
 export default async function RosterPage(props: PageProps<'/classrooms/[slug]/roster'>) {
   const session = await auth()
@@ -81,24 +80,36 @@ export default async function RosterPage(props: PageProps<'/classrooms/[slug]/ro
           <div className="Box-body">
             <RosterTabs
               studentsCount={roster.entries.length}
-              students={roster.entries.map((entry) => (
-                <RosterEntryRow
-                  key={entry.id}
-                  entry={entry}
-                  classroomSlug={classroom.slug}
-                  unlinkedAccounts={accounts}
-                />
-              ))}
+              students={roster.entries.map((entry) => ({
+                key: entry.id,
+                searchText: `${entry.identifier} ${entry.githubLogin ?? ''}`.toLowerCase(),
+                linked: entry.githubLogin !== null,
+                node: (
+                  <RosterEntryRow
+                    key={entry.id}
+                    entry={entry}
+                    classroomSlug={classroom.slug}
+                    unlinkedAccounts={accounts}
+                  />
+                ),
+              }))}
               accountsCount={accounts.length}
-              accounts={accounts.map((account) => (
-                <UnlinkedAccountRow
-                  key={account.id}
-                  account={account}
-                  classroomSlug={classroom.slug}
-                  identifierName={roster.identifierName}
-                  entries={unlinkedEntries}
-                />
-              ))}
+              accounts={accounts.map((account) => ({
+                key: account.id,
+                searchText: (account.githubLogin ?? '').toLowerCase(),
+                // Unused here: this tab has no link filter, its rows are all
+                // unlinked by definition (that's what put them on this tab)
+                linked: false,
+                node: (
+                  <UnlinkedAccountRow
+                    key={account.id}
+                    account={account}
+                    classroomSlug={classroom.slug}
+                    identifierName={roster.identifierName}
+                    entries={unlinkedEntries}
+                  />
+                ),
+              }))}
             />
           </div>
         </div>
