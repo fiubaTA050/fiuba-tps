@@ -1,6 +1,7 @@
 import { AssignmentRepoList } from '@/components/AssignmentRepoList'
-import { submissionLabel, type RepoRow, type RepoSubmission } from '@/lib/assignment-rows'
+import type { RepoRow } from '@/lib/assignment-rows'
 import type { AssignmentAcceptances } from '@/lib/data/invitations'
+import type { AssignmentSubmissions } from '@/lib/data/submissions'
 import type { RepositorySnapshot } from '@/lib/github/repositories'
 
 import { linkAccountAction } from './actions'
@@ -32,8 +33,9 @@ export function AcceptanceList({
   acceptances: AssignmentAcceptances
   assignmentTitle: string
   snapshots: Map<number, RepositorySnapshot>
-  /** The current confirmed submission of each repo, keyed the same as `snapshots` */
-  submissions: Map<number, RepoSubmission>
+  /** Every entrega of the assignment with its own per-repo confirmations —
+   *  `AssignmentRepoList` picks which one to read off its active tab */
+  submissions: AssignmentSubmissions
   classroomSlug: string
   assignmentSlug: string
   /** The identifiers "Link to student" offers — empty when there is no roster */
@@ -56,30 +58,27 @@ export function AcceptanceList({
   const snapshotOf = (repoId: number | null) =>
     repoId === null ? null : (snapshots.get(repoId) ?? null)
 
-  const submissionOf = (repoId: number | null) =>
-    repoId === null ? null : (submissions.get(repoId) ?? null)
-
   const rows: RepoRow[] = [
     ...entries.map((entry): RepoRow => {
       const snapshot = snapshotOf(entry.repoId)
-      const submission = submissionOf(entry.repoId)
 
       return {
         key: `entry-${entry.entryId}`,
         name: entry.identifier,
         githubLogin: entry.githubLogin,
         visual: entry.state === 'not_joined' ? 'no-account' : 'account',
+        // "Not joined classroom" / `render 'shared/failed_repo_detail', text:
+        // "Not accepted"` — states no checkpoint changes anything about.
+        // Anything else is left undefined: AssignmentRepoList derives it with
+        // submissionLabel, against whichever entrega tab is open.
         label:
-          // "Not joined classroom"
           entry.state === 'not_joined'
             ? { text: 'Sin cuenta vinculada', tone: 'neutral' }
-            : // `render 'shared/failed_repo_detail', text: "Not accepted"`
-              entry.state === 'linked_not_accepted'
+            : entry.state === 'linked_not_accepted'
               ? { text: 'No aceptó', tone: 'neutral' }
-              : submissionLabel(entry.repoId !== null, snapshot, submission),
+              : undefined,
         snapshot,
         repoId: entry.repoId,
-        submission,
         accepted: entry.state === 'accepted',
         unlinkedIdentifier: entry.state === 'not_joined',
         unlinkedAccount: false,
@@ -88,17 +87,14 @@ export function AcceptanceList({
 
     ...unlinkedAccounts.map((account): RepoRow => {
       const snapshot = snapshotOf(account.repoId)
-      const submission = submissionOf(account.repoId)
 
       return {
         key: `account-${account.userId}`,
         name: account.githubLogin ? `@${account.githubLogin}` : 'Cuenta desconocida',
         githubLogin: account.githubLogin,
         visual: 'account',
-        label: submissionLabel(account.repoId !== null, snapshot, submission),
         snapshot,
         repoId: account.repoId,
-        submission,
         accepted: true,
         unlinkedIdentifier: false,
         unlinkedAccount: true,
@@ -112,6 +108,7 @@ export function AcceptanceList({
       <AssignmentRepoList
         title={identifierName ?? 'Aceptaron el trabajo práctico'}
         rows={rows}
+        checkpoints={submissions.checkpoints}
         classroomSlug={classroomSlug}
         assignmentSlug={assignmentSlug}
         // No roster, nothing to link to — `set_unlinked_users` returns early on

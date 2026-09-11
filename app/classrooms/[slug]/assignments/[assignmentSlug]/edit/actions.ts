@@ -40,10 +40,19 @@ function parseCheckpointsField(value: FormDataEntryValue | null): CheckpointInpu
   if (!Array.isArray(parsed)) return null
 
   const rows: CheckpointInput[] = []
+  const seenIds = new Set<number>()
   for (const item of parsed) {
     if (typeof item !== 'object' || item === null) return null
     const { id, title, deadlineAt, autograderId, closed } = item as Record<string, unknown>
     if (id !== null && typeof id !== 'number') return null
+    // Two rows sharing an existing id would UPDATE the same checkpoint twice
+    // in saveCheckpoints, the second silently discarding the first's edits —
+    // never legitimate from this app's own client, so treated the same as
+    // any other malformed payload rather than let through.
+    if (id !== null) {
+      if (seenIds.has(id)) return null
+      seenIds.add(id)
+    }
     if (typeof title !== 'string' || title.length > TITLE_MAX_LENGTH) return null
     if (typeof deadlineAt !== 'string') return null
     if (typeof autograderId !== 'string' || autograderId.length > AUTOGRADER_ID_MAX_LENGTH) {
@@ -67,6 +76,26 @@ function parseCheckpointsField(value: FormDataEntryValue | null): CheckpointInpu
   return rows
 }
 
+/**
+ * The companion hidden field: the checkpoint ids `CheckpointsField` actually
+ * had loaded, frozen at mount — see `saveCheckpoints`'s `knownIds` jsdoc.
+ * `null` (missing or malformed) is treated as "no snapshot to check against",
+ * the same as omitting the argument — this field did not exist before this
+ * change, so an old cached form (or a hand-crafted POST) without it still
+ * saves, just without the concurrency guard.
+ */
+function parseKnownCheckpointIds(value: FormDataEntryValue | null): number[] | null {
+  if (typeof value !== 'string') return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'number')) return null
+  return parsed as number[]
+}
+
 /** Port of AssignmentsController#update */
 export async function updateAssignmentAction(
   _previous: EditAssignmentState,
@@ -85,6 +114,7 @@ export async function updateAssignmentAction(
   if (checkpointInputs === null) {
     return { error: 'No entendimos la lista de entregas.', field: 'base' }
   }
+  const knownCheckpointIds = parseKnownCheckpointIds(formData.get('checkpoints_known_ids'))
 
   const result = await updateAssignment(session, classroomSlug, assignmentSlug, {
     title: String(formData.get('title') ?? ''),
@@ -104,7 +134,13 @@ export async function updateAssignmentAction(
   // Last on purpose: the failures that are actually common here are the title
   // and the prefix, and this way one of those leaves everything untouched. The
   // slug is the one the update just settled on, which may have been renamed.
-  const checkpoints = await saveCheckpoints(session, classroomSlug, result.slug, checkpointInputs)
+  const checkpoints = await saveCheckpoints(
+    session,
+    classroomSlug,
+    result.slug,
+    checkpointInputs,
+    knownCheckpointIds ?? undefined,
+  )
 
   if (!checkpoints.success) return { error: checkpoints.error, field: 'base' }
 

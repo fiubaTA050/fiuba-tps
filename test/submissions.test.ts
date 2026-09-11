@@ -613,18 +613,23 @@ describe('findSubmissionPanels', () => {
   })
 })
 
+/** Finds one checkpoint's summary in the result by id — order is asserted separately */
+function checkpointResult(
+  result: Awaited<ReturnType<typeof listAssignmentSubmissions>>,
+  checkpointId: number,
+) {
+  return result?.checkpoints.find((c) => c.id === checkpointId)
+}
+
 /**
  * The cohort-wide read for the teacher dashboard: every repo's current
- * submission on the assignment's single checkpoint, in one query. No spec to
- * port — this is new. Serves the `distinct on` that
- * `index_submissions_on_repo_and_checkpoint`'s comment anticipates.
- *
- * Still single-checkpoint on purpose: the dashboard hasn't migrated to the
- * per-entrega selector yet, so this keeps reading the assignment's one
- * unnamed checkpoint, same as before.
+ * submission on every entrega, in one query, for the per-checkpoint tabs. No
+ * spec to port — this is new. Serves the `distinct on` that
+ * `index_submissions_on_repo_and_checkpoint`'s comment anticipates, one
+ * distinct group per (repo, checkpoint).
  */
 describe('listAssignmentSubmissions', () => {
-  it('keys the map by the github repo id, leaving out repos that never confirmed', async () => {
+  it('keys each checkpoint\'s map by the github repo id, leaving out repos that never confirmed', async () => {
     const profe = await student('profe')
     const alumna1 = await student('alumna1')
     const alumna2 = await student('alumna2')
@@ -636,9 +641,13 @@ describe('listAssignmentSubmissions', () => {
     await submit(repo1.repoId, checkpointId, alumna1, 'a'.repeat(40))
 
     const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
+    const checkpoint = checkpointResult(result, checkpointId)
 
-    expect(result?.byRepoId.get(repo1.githubRepoId)).toMatchObject({ sha: 'a'.repeat(40), late: false })
-    expect(result?.byRepoId.has(repo2.githubRepoId)).toBe(false)
+    expect(checkpoint?.byRepoId.get(repo1.githubRepoId)).toMatchObject({
+      sha: 'a'.repeat(40),
+      late: false,
+    })
+    expect(checkpoint?.byRepoId.has(repo2.githubRepoId)).toBe(false)
   })
 
   it("marks late by comparing to the checkpoint's own deadline", async () => {
@@ -653,7 +662,7 @@ describe('listAssignmentSubmissions', () => {
 
     const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
 
-    expect(result?.byRepoId.get(githubRepoId)?.late).toBe(true)
+    expect(checkpointResult(result, checkpointId)?.byRepoId.get(githubRepoId)?.late).toBe(true)
   })
 
   it('keeps the latest row by id on a re-submission, not by submitted_at', async () => {
@@ -670,16 +679,41 @@ describe('listAssignmentSubmissions', () => {
 
     const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
 
-    expect(result?.byRepoId.get(githubRepoId)?.sha).toBe('b'.repeat(40))
+    expect(checkpointResult(result, checkpointId)?.byRepoId.get(githubRepoId)?.sha).toBe('b'.repeat(40))
   })
 
-  it('reports no checkpoint as an empty map, not an error', async () => {
+  it('keeps every checkpoint separate — a confirmation on one never leaks into another', async () => {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const [checkpointA] = await db
+      .insert(checkpoints)
+      .values({ assignmentId, title: '2A', position: 0 })
+      .returning({ id: checkpoints.id })
+    const [checkpointB] = await db
+      .insert(checkpoints)
+      .values({ assignmentId, title: '2B', position: 1 })
+      .returning({ id: checkpoints.id })
+    const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+
+    await submit(repoId, checkpointA.id, alumna, 'a'.repeat(40))
+
+    const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
+
+    expect(result?.checkpoints.map((c) => c.title)).toEqual(['2A', '2B'])
+    expect(checkpointResult(result, checkpointA.id)?.byRepoId.get(githubRepoId)).toMatchObject({
+      sha: 'a'.repeat(40),
+    })
+    expect(checkpointResult(result, checkpointB.id)?.byRepoId.has(githubRepoId)).toBe(false)
+  })
+
+  it('reports no checkpoints as an empty array, not an error', async () => {
     const profe = await student('profe')
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
 
-    expect(result).toEqual({ checkpoint: null, byRepoId: new Map() })
+    expect(result).toEqual({ checkpoints: [] })
   })
 
   it('does not let a teacher of another classroom read it', async () => {
@@ -693,8 +727,8 @@ describe('listAssignmentSubmissions', () => {
 
 /**
  * The per-row read for the teacher dashboard's "Ver entregas anteriores"
- * disclosure — fetched on demand for one repo, not eagerly for the whole
- * cohort. No spec to port — this is new.
+ * disclosure — fetched on demand for one repo on one entrega, not eagerly for
+ * the whole cohort. No spec to port — this is new.
  */
 describe('findSubmissionHistory', () => {
   it('returns every confirmation for that repo, newest first, with late marked', async () => {
@@ -708,7 +742,13 @@ describe('findSubmissionHistory', () => {
     await submit(repoId, checkpointId, alumna, 'a'.repeat(40), new Date('2026-09-10T00:00:00Z'))
     await submit(repoId, checkpointId, alumna, 'b'.repeat(40), new Date('2026-09-12T00:00:00Z'))
 
-    const history = await findSubmissionHistory(profe, classroomSlug, assignmentSlug, githubRepoId)
+    const history = await findSubmissionHistory(
+      profe,
+      classroomSlug,
+      assignmentSlug,
+      githubRepoId,
+      checkpointId,
+    )
 
     expect(history).toMatchObject([
       { sha: 'b'.repeat(40), late: true },
@@ -716,15 +756,45 @@ describe('findSubmissionHistory', () => {
     ])
   })
 
+  it("does not mix in another checkpoint's confirmations", async () => {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const [checkpointA] = await db
+      .insert(checkpoints)
+      .values({ assignmentId, title: '2A', position: 0 })
+      .returning({ id: checkpoints.id })
+    const [checkpointB] = await db
+      .insert(checkpoints)
+      .values({ assignmentId, title: '2B', position: 1 })
+      .returning({ id: checkpoints.id })
+    const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+
+    await submit(repoId, checkpointA.id, alumna, 'a'.repeat(40))
+    await submit(repoId, checkpointB.id, alumna, 'b'.repeat(40))
+
+    const history = await findSubmissionHistory(
+      profe,
+      classroomSlug,
+      assignmentSlug,
+      githubRepoId,
+      checkpointA.id,
+    )
+
+    expect(history).toMatchObject([{ sha: 'a'.repeat(40) }])
+  })
+
   it('returns an empty list for a repo that never confirmed', async () => {
     const profe = await student('profe')
     const alumna = await student('alumna')
     const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
     // A repo exists and a checkpoint is open, but nobody confirmed anything
-    await openCheckpoint(assignmentId)
+    const checkpointId = await openCheckpoint(assignmentId)
     const { githubRepoId } = await repoFor(assignmentId, alumna)
 
-    expect(await findSubmissionHistory(profe, classroomSlug, assignmentSlug, githubRepoId)).toEqual([])
+    expect(
+      await findSubmissionHistory(profe, classroomSlug, assignmentSlug, githubRepoId, checkpointId),
+    ).toEqual([])
   })
 
   it('returns an empty list when the assignment has no entrega at all', async () => {
@@ -733,15 +803,38 @@ describe('findSubmissionHistory', () => {
     const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
     const { githubRepoId } = await repoFor(assignmentId, alumna)
 
-    expect(await findSubmissionHistory(profe, classroomSlug, assignmentSlug, githubRepoId)).toEqual([])
+    expect(
+      await findSubmissionHistory(profe, classroomSlug, assignmentSlug, githubRepoId, 999_999_999),
+    ).toEqual([])
   })
 
   it('returns an empty list for a repo id that is not this assignment\'s', async () => {
     const profe = await student('profe')
-    const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await openCheckpoint(assignmentId)
 
     expect(
-      await findSubmissionHistory(profe, classroomSlug, assignmentSlug, 999_999_999),
+      await findSubmissionHistory(profe, classroomSlug, assignmentSlug, 999_999_999, checkpointId),
+    ).toEqual([])
+  })
+
+  it("returns an empty list for a checkpoint id that is not this assignment's", async () => {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const { githubRepoId } = await repoFor(assignmentId, alumna)
+    // A checkpoint that exists, just on a different assignment
+    const otherAssignment = await classroomWithAssignment(profe)
+    const foreignCheckpointId = await openCheckpoint(otherAssignment.assignmentId)
+
+    expect(
+      await findSubmissionHistory(
+        profe,
+        classroomSlug,
+        assignmentSlug,
+        githubRepoId,
+        foreignCheckpointId,
+      ),
     ).toEqual([])
   })
 
@@ -754,7 +847,9 @@ describe('findSubmissionHistory', () => {
     const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
     await submit(repoId, checkpointId, alumna, 'a'.repeat(40))
 
-    expect(await findSubmissionHistory(ajeno, classroomSlug, assignmentSlug, githubRepoId)).toBeNull()
+    expect(
+      await findSubmissionHistory(ajeno, classroomSlug, assignmentSlug, githubRepoId, checkpointId),
+    ).toBeNull()
   })
 })
 

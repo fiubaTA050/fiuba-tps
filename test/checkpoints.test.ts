@@ -171,6 +171,24 @@ describe('listCheckpoints', () => {
     expect(found?.map((row) => row.title)).toEqual(['2A', '2B'])
   })
 
+  it('breaks a tie on position by id, so two equal positions still order deterministically', async () => {
+    const profe = await teacher()
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+
+    // Both at position 0 — not something saveCheckpoints itself produces, but
+    // index_submissions_on_repo_and_checkpoint's sibling ordering has to cope
+    // with it regardless (e.g. a stale concurrent save landing two rows on
+    // the same index — see the knownIds tests on saveCheckpoints)
+    await db.insert(checkpoints).values([
+      { assignmentId, title: '2B', position: 0 },
+      { assignmentId, title: '2A', position: 0 },
+    ])
+
+    const found = await listCheckpoints(profe, classroomSlug, assignmentSlug)
+    // Insertion order — the lower id — wins the tie, not title or chance
+    expect(found?.map((row) => row.title)).toEqual(['2B', '2A'])
+  })
+
   it('counts submissions per entrega', async () => {
     const profe = await teacher()
     const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
@@ -471,5 +489,101 @@ describe('saveCheckpoints', () => {
 
     expect(result).toMatchObject({ success: false })
     expect(await db.select().from(checkpoints)).toHaveLength(0)
+  })
+
+  /**
+   * `knownIds` — the edit screen's snapshot of what it actually had loaded,
+   * so a second teacher's concurrent edit turns into a refused save instead
+   * of a silent overwrite. Optional: every test above omits it and keeps
+   * behaving exactly as before.
+   */
+  describe('knownIds', () => {
+    it('is ignored when omitted, same as before this existed', async () => {
+      const profe = await teacher()
+      const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+
+      const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      ])
+
+      expect(result).toEqual({ success: true })
+    })
+
+    it('saves when it matches exactly what is in the database', async () => {
+      const profe = await teacher()
+      const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+      await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      ])
+      const [a] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
+
+      const result = await saveCheckpoints(
+        profe,
+        classroomSlug,
+        assignmentSlug,
+        [{ id: a.id, title: '2A', deadlineAt: null, autograderId: 'tp1', closed: false }],
+        [a.id],
+      )
+
+      expect(result).toEqual({ success: true })
+    })
+
+    it('refuses a save that would delete an entrega it never saw', async () => {
+      const profe = await teacher()
+      const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+      // The teacher's screen loaded with just 2A ...
+      await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      ])
+      const [a] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
+      // ... but by the time they save, someone else added 2B
+      await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+        { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+        { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+      ])
+
+      // The stale form only ever knew about 2A, so resubmitting just that
+      // would otherwise delete 2B with nobody having asked for it
+      const result = await saveCheckpoints(
+        profe,
+        classroomSlug,
+        assignmentSlug,
+        [{ id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false }],
+        [a.id],
+      )
+
+      expect(result).toMatchObject({ success: false })
+      const found = await listCheckpoints(profe, classroomSlug, assignmentSlug)
+      expect(found?.map((row) => row.title)).toEqual(['2A', '2B'])
+    })
+
+    it('refuses a save when an entrega it knew about is already gone', async () => {
+      const profe = await teacher()
+      const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+      await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+        { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+      ])
+      const [a, b] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
+      // Someone else already removed 2B
+      await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+        { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      ])
+
+      const result = await saveCheckpoints(
+        profe,
+        classroomSlug,
+        assignmentSlug,
+        [
+          { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+          { id: b.id, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+        ],
+        [a.id, b.id],
+      )
+
+      expect(result).toMatchObject({ success: false })
+      const found = await listCheckpoints(profe, classroomSlug, assignmentSlug)
+      expect(found?.map((row) => row.title)).toEqual(['2A'])
+    })
   })
 })

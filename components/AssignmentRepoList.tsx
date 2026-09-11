@@ -14,8 +14,14 @@ import {
 import Link from 'next/link'
 import { type ComponentProps, useMemo, useRef, useState } from 'react'
 
-import { hasSubmitted, type RepoRow, type SubmissionTone } from '@/lib/assignment-rows'
-import type { SubmissionRow } from '@/lib/data/submissions'
+import {
+  hasSubmitted,
+  submissionLabel,
+  type RepoRow,
+  type SubmissionLabel,
+  type SubmissionTone,
+} from '@/lib/assignment-rows'
+import type { CheckpointSubmissions, SubmissionRow } from '@/lib/data/submissions'
 import { formatArgentina } from '@/lib/dates'
 
 import { CheckboxMenu } from './CheckboxMenu'
@@ -108,15 +114,32 @@ export type LinkToStudent = Omit<
   'userId' | 'login'
 >
 
+/** A `RepoRow` once `label` (and, where checkpoints are tracked, `submission`)
+ *  is resolved against the active tab — what every row below actually renders */
+type DisplayRow = RepoRow & { label: SubmissionLabel }
+
 export function AssignmentRepoList({
   title,
   rows,
+  checkpoints,
   classroomSlug,
   assignmentSlug,
   linkToStudent,
 }: {
   title: string
   rows: RepoRow[]
+  /**
+   * Every entrega of the assignment, individually. Undefined on a dashboard
+   * with no checkpoint concept at all (the group one, for now — group
+   * checkpoints do not exist yet), which leaves `rows` exactly as given, the
+   * way this component behaved before checkpoints existed. Passed as `[]`
+   * means checkpoints are tracked but the teacher hasn't opened any yet — the
+   * common single-TP case once one exists is a one-item array, which hides
+   * the tab bar and reads no differently than the single-checkpoint days.
+   * With more than one, each row's submission and label are resolved against
+   * whichever tab is open, not baked in by the caller — see `resolvedRows`.
+   */
+  checkpoints?: CheckpointSubmissions[]
   /** Only used to build the submission-history request of a confirmed row */
   classroomSlug: string
   assignmentSlug: string
@@ -129,13 +152,43 @@ export function AssignmentRepoList({
   const [unlinked, setUnlinked] = useState<Set<UnlinkedFilter>>(new Set())
   const [sort, setSort] = useState<Sort>('az')
   const [page, setPage] = useState(1)
+  const [activeCheckpointId, setActiveCheckpointId] = useState<number | null>(
+    checkpoints?.[0]?.id ?? null,
+  )
   const listTop = useRef<HTMLDivElement>(null)
+
+  const tracksCheckpoints = checkpoints !== undefined
+  const activeCheckpoint = checkpoints?.find((c) => c.id === activeCheckpointId) ?? null
+
+  // What every row actually shows: `rows` is built once by the caller and
+  // does not know which tab is open, so a row with no fixed `label` (not
+  // "not joined", not "didn't accept") gets its submission — and from that,
+  // its label — filled in here. `activeCheckpoint` is null both when no
+  // entrega is open yet (submission reads as "not confirmed", same as an
+  // assignment with a single checkpoint always did before this component
+  // supported more than one) and on a dashboard that does not track
+  // checkpoints at all, where `!tracksCheckpoints` skips this and every row
+  // passes through exactly as given — the group dashboard, unchanged, whose
+  // rows always set a fixed `label` of their own (`teamLabel`).
+  const resolvedRows = useMemo((): DisplayRow[] => {
+    if (!tracksCheckpoints) return rows as DisplayRow[]
+
+    return rows.map((row): DisplayRow => {
+      const submission =
+        row.repoId === null ? null : (activeCheckpoint?.byRepoId.get(row.repoId) ?? null)
+      return {
+        ...row,
+        submission,
+        label: row.label ?? submissionLabel(row.repoId !== null, row.snapshot, submission),
+      }
+    })
+  }, [rows, tracksCheckpoints, activeCheckpoint])
 
   const filtered = useMemo(() => {
     // "the student's GitHub handle, their identifier, or the team's name"
     const needle = query.trim().toLowerCase()
 
-    const kept = rows.filter((row) => {
+    const kept = resolvedRows.filter((row) => {
       if (
         needle &&
         !row.name.toLowerCase().includes(needle) &&
@@ -174,7 +227,7 @@ export function AssignmentRepoList({
     })
 
     return [...kept].sort(compareBy(sort))
-  }, [rows, query, submission, timing, accepted, unlinked, sort])
+  }, [resolvedRows, query, submission, timing, accepted, unlinked, sort])
 
   // Back to the first page whenever the list underneath changes — a filter, a
   // sort or a search. `filtered` is a memo, so its identity is that change.
@@ -212,12 +265,25 @@ export function AssignmentRepoList({
     setSort('az')
   }
 
-  // Only the individual dashboard's rows carry submission data today — the
-  // group one always leaves `submission` undefined (no group checkpoints yet)
-  const hasTimingData = rows.some((row) => row.submission !== undefined)
+  // Only a dashboard that tracks checkpoints carries submission data — the
+  // group one does not (no group checkpoints yet), whatever rows it has
+  const hasTimingData = tracksCheckpoints
 
   return (
     <>
+      {/* One tab per entrega, hidden with zero or one — see the `checkpoints`
+          jsdoc above on why that keeps today's single-TP dashboard identical.
+          `AssignmentRepoList`'s own rows below are untouched by the switch:
+          only `resolvedRows`, computed from `activeCheckpointId`, changes. */}
+      {checkpoints !== undefined && checkpoints.length > 1 && (
+        <CheckpointTabs
+          checkpoints={checkpoints}
+          totalRows={rows.filter((row) => row.repoId !== null).length}
+          activeCheckpointId={activeCheckpointId}
+          onSelect={setActiveCheckpointId}
+        />
+      )}
+
       <h2 className="sr-only">Filtrar el listado</h2>
 
       {/* The live bar: "Filters" and the search field joined in a BtnGroup on
@@ -376,9 +442,9 @@ export function AssignmentRepoList({
           <div className="d-table col-12">
             <div className="Box-title col-6 d-table-cell">{title}</div>
             <div className="col-6 d-table-cell text-right color-fg-muted text-small">
-              {filtered.length === rows.length
-                ? `${rows.length}`
-                : `${filtered.length} de ${rows.length}`}
+              {filtered.length === resolvedRows.length
+                ? `${resolvedRows.length}`
+                : `${filtered.length} de ${resolvedRows.length}`}
             </div>
           </div>
         </div>
@@ -394,6 +460,7 @@ export function AssignmentRepoList({
                 <RepoListItem
                   key={row.key}
                   row={row}
+                  checkpointId={activeCheckpointId}
                   classroomSlug={classroomSlug}
                   assignmentSlug={assignmentSlug}
                   linkToStudent={linkToStudent}
@@ -407,6 +474,50 @@ export function AssignmentRepoList({
       {/* Outside the Box, where the live site puts it */}
       <Pagination page={page} pageCount={pageCount} onChange={goToPage} label={title} />
     </>
+  )
+}
+
+/**
+ * The entrega selector for TP2-style assignments (2A-2D): pestañas
+ * `UnderlineNav`, the same markup and CSS `ClassroomNav` uses for the
+ * classroom's own tab bar — the one difference is these switch a client-side
+ * selection instead of navigating, since every tab reads the same
+ * server-fetched cohort, just scoped to a different checkpoint. No saved copy
+ * of a live equivalent to port: TP2's several entregas are new here (see
+ * db/schema.ts's `checkpoints` and AGENTS.md).
+ */
+function CheckpointTabs({
+  checkpoints,
+  totalRows,
+  activeCheckpointId,
+  onSelect,
+}: {
+  checkpoints: CheckpointSubmissions[]
+  /** Rows with a repository, the same denominator for every entrega's fraction */
+  totalRows: number
+  activeCheckpointId: number | null
+  onSelect: (id: number) => void
+}) {
+  return (
+    <nav aria-label="Filtrar por entrega" className="UnderlineNav mb-3">
+      <ul className="UnderlineNav-body list-style-none">
+        {checkpoints.map((checkpoint) => (
+          <li className="d-inline-flex" key={checkpoint.id}>
+            <button
+              type="button"
+              className="UnderlineNav-item"
+              aria-current={activeCheckpointId === checkpoint.id ? 'page' : undefined}
+              onClick={() => onSelect(checkpoint.id)}
+            >
+              <span>{checkpoint.title ?? 'Entrega'}</span>
+              <span title={`${checkpoint.byRepoId.size}/${totalRows}`} className="Counter">
+                {checkpoint.byRepoId.size}/{totalRows}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
   )
 }
 
@@ -438,11 +549,15 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
 
 function RepoListItem({
   row,
+  checkpointId,
   classroomSlug,
   assignmentSlug,
   linkToStudent,
 }: {
-  row: RepoRow
+  row: DisplayRow
+  /** Which entrega's history "Ver entregas anteriores" asks for — null when
+   *  this dashboard doesn't track checkpoints, or none is open yet */
+  checkpointId: number | null
   classroomSlug: string
   assignmentSlug: string
   linkToStudent?: LinkToStudent
@@ -529,6 +644,7 @@ function RepoListItem({
 
             <SubmissionHistoryDetails
               row={row}
+              checkpointId={checkpointId}
               classroomSlug={classroomSlug}
               assignmentSlug={assignmentSlug}
             />
@@ -577,17 +693,19 @@ type RawSubmissionRow = Omit<SubmissionRow, 'committedAt' | 'submittedAt'> & {
  */
 function SubmissionHistoryDetails({
   row,
+  checkpointId,
   classroomSlug,
   assignmentSlug,
 }: {
-  row: RepoRow
+  row: DisplayRow
+  checkpointId: number | null
   classroomSlug: string
   assignmentSlug: string
 }) {
   const [state, setState] = useState<'closed' | 'loading' | 'error' | SubmissionRow[]>('closed')
 
-  // Nothing confirmed, nothing to show — and no repo id to ask about anyway
-  if (row.submission == null || row.repoId === null) return null
+  // Nothing confirmed, nothing to show — and no repo id or checkpoint to ask about anyway
+  if (row.submission == null || row.repoId === null || checkpointId === null) return null
 
   return (
     <details
@@ -595,7 +713,9 @@ function SubmissionHistoryDetails({
       onToggle={(event) => {
         if (!event.currentTarget.open || state !== 'closed') return
         setState('loading')
-        fetch(`/api/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}`)
+        fetch(
+          `/api/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}?checkpointId=${checkpointId}`,
+        )
           .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
           .then(({ history }: { history: RawSubmissionRow[] }) =>
             setState(

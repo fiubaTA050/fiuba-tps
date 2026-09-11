@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
@@ -69,22 +69,32 @@ export type CurrentSubmission = {
   late: boolean
 }
 
-export type AssignmentSubmissions = {
-  /** Null when the teacher has not opened entregas — nothing to confirm yet */
-  checkpoint: { id: number; deadlineAt: Date | null } | null
+export type CheckpointSubmissions = {
+  id: number
+  /** "2A". Null is the single unnamed entrega of an assignment with no parts */
+  title: string | null
+  deadlineAt: Date | null
   /** Keyed by the GitHub repo id — the same key `listRepositorySnapshots` and
    *  `AssignmentAcceptances` use, not the internal `assignment_repos.id` */
   byRepoId: Map<number, CurrentSubmission>
 }
 
+export type AssignmentSubmissions = {
+  /** Empty when the teacher has not opened entregas at all — nothing to
+   *  confirm yet. Ordered by `position`, the same order the edit screen and
+   *  the student's own panel use, so the dashboard's tabs read left to right
+   *  the same way. */
+  checkpoints: CheckpointSubmissions[]
+}
+
 /**
- * The current submission of every repository on an assignment's single
- * checkpoint, for the teacher dashboard.
+ * The current submission of every repository, on every entrega of the
+ * assignment, for the teacher dashboard's per-checkpoint tabs.
  *
  * "Current" is the literal latest row by id, late or not — the same reading
  * `findSubmissionPanels` gives the student as `current`. Serves the
  * `distinct on` that `index_submissions_on_repo_and_checkpoint`'s comment
- * anticipates.
+ * anticipates, one distinct group per (repo, checkpoint) instead of per repo.
  *
  * DA-4: verifies the caller teaches this classroom independently, the same
  * way `setClassroomArchived` does, rather than trusting a sibling call in the
@@ -98,8 +108,8 @@ export async function listAssignmentSubmissions(
   const classroom = await findTeachingClassroom(session, classroomSlug)
   if (!classroom) return null
 
-  const [checkpoint] = await db
-    .select({ id: checkpoints.id, deadlineAt: checkpoints.deadlineAt })
+  const checkpointRows = await db
+    .select({ id: checkpoints.id, title: checkpoints.title, deadlineAt: checkpoints.deadlineAt })
     .from(checkpoints)
     .innerJoin(assignments, eq(assignments.id, checkpoints.assignmentId))
     .where(
@@ -107,36 +117,49 @@ export async function listAssignmentSubmissions(
         eq(assignments.organizationId, classroom.id),
         eq(assignments.slug, assignmentSlug),
         isNull(assignments.deletedAt),
-        isNull(checkpoints.title),
       ),
     )
+    // `id` breaks a tie on `position` — see the same comment on listCheckpoints
+    .orderBy(checkpoints.position, checkpoints.id)
 
-  if (!checkpoint) return { checkpoint: null, byRepoId: new Map() }
+  if (checkpointRows.length === 0) return { checkpoints: [] }
+
+  const checkpointIds = checkpointRows.map((row) => row.id)
+  const deadlineById = new Map(checkpointRows.map((row) => [row.id, row.deadlineAt]))
 
   const rows = await db
-    .selectDistinctOn([submissions.assignmentRepoId], {
+    .selectDistinctOn([submissions.assignmentRepoId, submissions.checkpointId], {
+      checkpointId: submissions.checkpointId,
       githubRepoId: assignmentRepos.githubRepoId,
       sha: submissions.sha,
       submittedAt: submissions.submittedAt,
     })
     .from(submissions)
     .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissions.assignmentRepoId))
-    .where(eq(submissions.checkpointId, checkpoint.id))
-    .orderBy(submissions.assignmentRepoId, desc(submissions.id))
+    .where(inArray(submissions.checkpointId, checkpointIds))
+    .orderBy(submissions.assignmentRepoId, submissions.checkpointId, desc(submissions.id))
 
-  const byRepoId = new Map(
-    rows.map((row) => [
-      row.githubRepoId,
-      {
-        sha: row.sha,
-        submittedAt: row.submittedAt,
-        late:
-          checkpoint.deadlineAt !== null && row.submittedAt.getTime() > checkpoint.deadlineAt.getTime(),
-      },
-    ]),
+  const byCheckpoint = new Map<number, Map<number, CurrentSubmission>>(
+    checkpointIds.map((id) => [id, new Map()]),
   )
 
-  return { checkpoint, byRepoId }
+  for (const row of rows) {
+    const deadlineAt = deadlineById.get(row.checkpointId)!
+    byCheckpoint.get(row.checkpointId)!.set(row.githubRepoId, {
+      sha: row.sha,
+      submittedAt: row.submittedAt,
+      late: deadlineAt !== null && row.submittedAt.getTime() > deadlineAt.getTime(),
+    })
+  }
+
+  return {
+    checkpoints: checkpointRows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      deadlineAt: row.deadlineAt,
+      byRepoId: byCheckpoint.get(row.id)!,
+    })),
+  }
 }
 
 /**
@@ -209,17 +232,22 @@ export async function findSubmissionPanels(
 }
 
 /**
- * One repo's full submission history, teacher-facing — fetched on demand
- * when a dashboard row is expanded, not eagerly for the whole cohort. A
- * single repo can carry many confirmations (the cooldown limits the rate,
- * not the count — see docs/entregas.md), which would otherwise inflate
- * every teacher's page load for rows nobody opens.
+ * One repo's full submission history on one entrega, teacher-facing —
+ * fetched on demand when a dashboard row is expanded, not eagerly for the
+ * whole cohort. A single repo can carry many confirmations (the cooldown
+ * limits the rate, not the count — see docs/entregas.md), which would
+ * otherwise inflate every teacher's page load for rows nobody opens.
+ *
+ * `checkpointId` picks which entrega — the dashboard shows one tab at a
+ * time (`listAssignmentSubmissions`), and this mirrors that scoping rather
+ * than assuming the assignment's single unnamed checkpoint.
  */
 export async function findSubmissionHistory(
   session: Session,
   classroomSlug: string,
   assignmentSlug: string,
   githubRepoId: number,
+  checkpointId: number,
 ): Promise<SubmissionRow[] | null> {
   const classroom = await findTeachingClassroom(session, classroomSlug)
   if (!classroom) return null
@@ -227,7 +255,6 @@ export async function findSubmissionHistory(
   const [row] = await db
     .select({
       repoId: assignmentRepos.id,
-      checkpointId: checkpoints.id,
       deadlineAt: checkpoints.deadlineAt,
     })
     .from(assignmentRepos)
@@ -237,7 +264,7 @@ export async function findSubmissionHistory(
     )
     .innerJoin(
       checkpoints,
-      and(eq(checkpoints.assignmentId, assignments.id), isNull(checkpoints.title)),
+      and(eq(checkpoints.id, checkpointId), eq(checkpoints.assignmentId, assignments.id)),
     )
     .where(
       and(
@@ -247,11 +274,12 @@ export async function findSubmissionHistory(
       ),
     )
 
-  // No checkpoint, or this repo isn't this assignment's — nothing to show,
-  // never "not yours to see" (that classroom check already happened above)
+  // No such checkpoint on this assignment, or this repo isn't this
+  // assignment's — nothing to show, never "not yours to see" (that
+  // classroom check already happened above)
   if (!row) return []
 
-  return listSubmissions(row.repoId, row.checkpointId, row.deadlineAt)
+  return listSubmissions(row.repoId, checkpointId, row.deadlineAt)
 }
 
 export type GradingRunRow = {
@@ -551,7 +579,8 @@ async function loadContext(session: Session, key: string) {
     )
     .leftJoin(checkpoints, eq(checkpoints.assignmentId, assignments.id))
     .where(and(eq(assignmentInvitations.key, key), isNull(assignmentInvitations.deletedAt)))
-    .orderBy(checkpoints.position)
+    // `id` breaks a tie on `position` — see the same comment on listCheckpoints
+    .orderBy(checkpoints.position, checkpoints.id)
 
   const [first] = rows
   if (!first) return null

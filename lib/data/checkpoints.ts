@@ -75,7 +75,11 @@ export async function listCheckpoints(
     .leftJoin(submissions, eq(submissions.checkpointId, checkpoints.id))
     .where(eq(checkpoints.assignmentId, assignment.id))
     .groupBy(checkpoints.id)
-    .orderBy(checkpoints.position)
+    // `id` breaks a tie on `position` — two rows can share one, e.g. right
+    // after the race saveCheckpoints' jsdoc describes, and without a
+    // deterministic tiebreaker Postgres is free to order them differently
+    // across this query and the two below.
+    .orderBy(checkpoints.position, checkpoints.id)
 }
 
 /**
@@ -100,12 +104,27 @@ export async function listCheckpoints(
  * pass write everyone's real target values. The upfront duplicate check above
  * already guarantees those targets are distinct, so the second pass is safe
  * in any order.
+ *
+ * `knownIds`, when passed, is the set of checkpoint ids the caller's form was
+ * actually built from — the edit screen's own snapshot from the moment it
+ * loaded, untouched by whatever the teacher added, removed or reordered
+ * locally afterwards. Two teachers editing the same assignment at once, or
+ * one teacher with two tabs open, would otherwise resolve silently: `rows`
+ * with no `id` for an entrega a second teacher just created reads as "not
+ * mine to know about" and lands in `removed`, deleting it with no warning.
+ * Comparing this snapshot against what's in the database right now turns
+ * that into a refused save instead. Optional, and checked against the same
+ * `existing` read the diff already does — no extra query, no hard lock — so
+ * every caller that does not pass it (every test, and any future write path
+ * that does not carry the notion of "what the form last saw") keeps working
+ * exactly as before.
  */
 export async function saveCheckpoints(
   session: Session,
   classroomSlug: string,
   assignmentSlug: string,
   rows: CheckpointInput[],
+  knownIds?: number[],
 ): Promise<CheckpointResult> {
   const classroom = await findTeachingClassroom(session, classroomSlug)
   if (!classroom) return { success: false, error: 'No encontramos ese classroom.' }
@@ -161,6 +180,19 @@ export async function saveCheckpoints(
     .groupBy(checkpoints.id)
 
   const existingById = new Map(existing.map((row) => [row.id, row]))
+
+  if (knownIds !== undefined) {
+    const existingIds = new Set(existing.map((row) => row.id))
+    const knownIdSet = new Set(knownIds)
+    const drifted =
+      existing.some((row) => !knownIdSet.has(row.id)) || knownIds.some((id) => !existingIds.has(id))
+    if (drifted) {
+      return {
+        success: false,
+        error: 'Alguien más modificó las entregas mientras editabas esta pantalla. Recargá la página y volvé a intentar.',
+      }
+    }
+  }
 
   for (const row of normalized) {
     if (row.id !== null && !existingById.has(row.id)) {

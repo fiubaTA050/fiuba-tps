@@ -39,6 +39,15 @@ export function CheckpointsField({ initial }: { initial: CheckpointFieldValue[] 
     initial.map((row) => ({ ...row, key: String(nextKey++) })),
   )
 
+  // A snapshot of the ids this screen actually loaded, frozen at mount —
+  // never touched by later local adds/removes/reorders. saveCheckpoints
+  // compares it against the database at save time, so a second teacher (or a
+  // second tab) who added or removed an entrega after this screen loaded
+  // turns into a refused save instead of a silent overwrite.
+  const [knownIds] = useState<number[]>(() =>
+    initial.flatMap((row) => (row.id !== null ? [row.id] : [])),
+  )
+
   function update(key: string, patch: Partial<CheckpointFieldValue>) {
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)))
   }
@@ -85,6 +94,7 @@ export function CheckpointsField({ initial }: { initial: CheckpointFieldValue[] 
   return (
     <div>
       <input type="hidden" name="checkpoints" value={JSON.stringify(payload)} />
+      <input type="hidden" name="checkpoints_known_ids" value={JSON.stringify(knownIds)} />
 
       {rows.length === 0 ? (
         <p className="note">
