@@ -9,12 +9,63 @@ import {
   updateAssignment,
   type AssignmentField,
 } from '@/lib/data/assignments'
-import { saveAssignmentCheckpoint } from '@/lib/data/checkpoints'
+import { saveCheckpoints, type CheckpointInput } from '@/lib/data/checkpoints'
 import { parseArgentinaDateTime } from '@/lib/dates'
-import { optionalText } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
 export type EditAssignmentState = { error: string | null; field: AssignmentField | null }
+
+// Mirrors checkpoints.title/autograderId in db/schema.ts. The client already
+// enforces title's maxLength, but this field crosses the request boundary —
+// a hand-crafted POST skips that — so the length still has to be checked
+// here, or a too-long value reaches Postgres as an uncaught column-width error.
+const TITLE_MAX_LENGTH = 60
+const AUTOGRADER_ID_MAX_LENGTH = 255
+
+/**
+ * What `CheckpointsField` serializes into the hidden `checkpoints` field: one
+ * row per entrega, in the order the teacher arranged them. Parsed defensively
+ * since it is still form input crossing the request boundary, even though it
+ * came from this app's own client component.
+ */
+function parseCheckpointsField(value: FormDataEntryValue | null): CheckpointInput[] | null {
+  if (typeof value !== 'string') return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+
+  const rows: CheckpointInput[] = []
+  for (const item of parsed) {
+    if (typeof item !== 'object' || item === null) return null
+    const { id, title, deadlineAt, autograderId, closed } = item as Record<string, unknown>
+    if (id !== null && typeof id !== 'number') return null
+    if (typeof title !== 'string' || title.length > TITLE_MAX_LENGTH) return null
+    if (typeof deadlineAt !== 'string') return null
+    if (typeof autograderId !== 'string' || autograderId.length > AUTOGRADER_ID_MAX_LENGTH) {
+      return null
+    }
+    if (typeof closed !== 'boolean') return null
+
+    const rawDeadline = deadlineAt.trim()
+    const parsedDeadline = rawDeadline === '' ? null : parseArgentinaDateTime(rawDeadline)
+    if (rawDeadline !== '' && parsedDeadline === null) return null
+
+    rows.push({
+      id,
+      title,
+      deadlineAt: parsedDeadline,
+      autograderId: autograderId.trim() === '' ? null : autograderId.trim(),
+      closed,
+    })
+  }
+
+  return rows
+}
 
 /** Port of AssignmentsController#update */
 export async function updateAssignmentAction(
@@ -27,15 +78,12 @@ export async function updateAssignmentAction(
   const classroomSlug = String(formData.get('classroom_slug') ?? '')
   const assignmentSlug = String(formData.get('assignment_slug') ?? '')
 
-  // The entrega and its date, which live in `checkpoints` and not in the
-  // assignment row — one assignment can have several entregas with a date each.
-  // Parsed before anything is written so a malformed date costs no round trip.
-  const submissionsEnabled = formData.get('submissions_enabled') === 'on'
-  const rawDeadline = String(formData.get('deadline_at') ?? '').trim()
-  const deadlineAt = rawDeadline === '' ? null : parseArgentinaDateTime(rawDeadline)
-
-  if (rawDeadline !== '' && deadlineAt === null) {
-    return { error: 'Esa fecha de entrega no se entiende.', field: 'base' }
+  // The entregas, which live in `checkpoints` and not in the assignment row —
+  // one assignment can have several, each with its own date. Parsed before
+  // anything is written so a malformed payload costs no round trip.
+  const checkpointInputs = parseCheckpointsField(formData.get('checkpoints'))
+  if (checkpointInputs === null) {
+    return { error: 'No entendimos la lista de entregas.', field: 'base' }
   }
 
   const result = await updateAssignment(session, classroomSlug, assignmentSlug, {
@@ -56,14 +104,9 @@ export async function updateAssignmentAction(
   // Last on purpose: the failures that are actually common here are the title
   // and the prefix, and this way one of those leaves everything untouched. The
   // slug is the one the update just settled on, which may have been renamed.
-  const checkpoint = await saveAssignmentCheckpoint(session, classroomSlug, result.slug, {
-    enabled: submissionsEnabled,
-    deadlineAt,
-    autograderId: optionalText(formData.get('autograder_id')),
-    closed: formData.get('checkpoint_closed') === 'on',
-  })
+  const checkpoints = await saveCheckpoints(session, classroomSlug, result.slug, checkpointInputs)
 
-  if (!checkpoint.success) return { error: checkpoint.error, field: 'base' }
+  if (!checkpoints.success) return { error: checkpoints.error, field: 'base' }
 
   revalidatePath(`/classrooms/${classroomSlug}`)
   // The slug is what the URL carries, so a renamed prefix moves the page

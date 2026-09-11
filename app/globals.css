@@ -1187,3 +1187,40 @@
     display: inline-block;
   }
 }
+
+/*
+ * CheckpointsField's list of entregas. A real CSS grid, not flexbox with
+ * per-row widths: with flex, each row wraps its inputs independently, so
+ * nothing lines up once titles or dates differ in length. `display: contents`
+ * on `.checkpoint-row` hands its children straight to `.checkpoints-grid`, so
+ * every row shares the exact same column tracks as the header — the columns
+ * line up by construction instead of by guessing widths.
+ */
+.checkpoints-grid {
+  display: grid;
+  grid-template-columns: 28px minmax(90px, 150px) minmax(215px, 280px) minmax(140px, 1fr) 52px 32px;
+  align-items: center;
+  column-gap: var(--base-size-12, 12px);
+}
+
+.checkpoints-grid-header {
+  padding-bottom: var(--base-size-4, 4px);
+  font-size: var(--text-body-size-small, 12px);
+  font-weight: var(--base-text-weight-semibold, 600);
+  color: var(--fgColor-muted);
+}
+
+.checkpoint-row {
+  display: contents;
+}
+
+/* Spans every column, so the rule sits at the row's actual top edge instead
+   of wherever the tallest cell in that row happens to end */
+.checkpoint-row-separator {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--borderColor-muted);
+}
+
+.checkpoints-grid-cell {
+  padding-block: var(--base-size-8, 8px);
+}
