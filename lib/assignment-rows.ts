@@ -31,17 +31,27 @@ export type RepoRow = {
   visual: 'account' | 'no-account' | 'none'
   /** Set on a team row, for the stacked member avatars */
   members?: { githubLogin: string | null; githubAvatarUrl: string | null }[]
-  label: SubmissionLabel
+  /**
+   * Undefined means "derive with `submissionLabel`, against whichever
+   * checkpoint is the active tab" — the individual dashboard's normal rows.
+   * Set only for states that hold regardless of any checkpoint: a roster
+   * identifier nobody joined, an account that has not accepted, a team still
+   * building its repo.
+   */
+  label?: SubmissionLabel
   snapshot: RepositorySnapshot | null
   /** The GitHub repo id `snapshot` was read with — null when there is no repo.
    *  Kept separately from `snapshot` because it's needed even when the repo
    *  is unreachable (fetching the submission history by repo id). */
   repoId: number | null
   /**
-   * The repo's current confirmed submission. `undefined` on a dashboard with
-   * no checkpoint concept at all (the group one, for now — group checkpoints
-   * do not exist yet); `null` once a checkpoint is tracked but this repo
-   * has not confirmed.
+   * The repo's current confirmed submission, on whichever checkpoint is the
+   * active tab. `undefined` on a dashboard with no checkpoint concept at all
+   * (the group one, for now — group checkpoints do not exist yet); `null`
+   * once a checkpoint is tracked but this repo has not confirmed. Built here
+   * server-side only for that group case — on the individual dashboard it is
+   * filled in by `AssignmentRepoList` itself, since which checkpoint is
+   * "current" is chosen client-side by the tab the teacher has open.
    */
   submission?: RepoSubmission | null
   /** Accepted the assignment, whatever came of the repository afterwards */
