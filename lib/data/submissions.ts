@@ -47,12 +47,13 @@ export type SubmissionRow = {
   late: boolean
 }
 
-export type SubmissionPanel = {
-  /** Null when the teacher has not opened entregas: no checkpoint, nothing to hand in */
+export type CheckpointPanel = {
+  checkpointId: number
+  /** "2A". Null is the single unnamed entrega of an assignment with no parts */
+  title: string | null
   deadlineAt: Date | null
   /** Read on the server: the screen must not decide "late" off the viewer's clock */
   overdue: boolean
-  hasCheckpoint: boolean
   /** False when the assignment is Inactive/archived, or this entrega itself was closed */
   enabled: boolean
   disabledReason: string | null
@@ -81,7 +82,7 @@ export type AssignmentSubmissions = {
  * checkpoint, for the teacher dashboard.
  *
  * "Current" is the literal latest row by id, late or not — the same reading
- * `findSubmissionPanel` gives the student as `current`. Serves the
+ * `findSubmissionPanels` gives the student as `current`. Serves the
  * `distinct on` that `index_submissions_on_repo_and_checkpoint`'s comment
  * anticipates.
  *
@@ -156,41 +157,55 @@ const MAX_REF_LENGTH = 255
 
 const MAX_AI_DECLARATION_LENGTH = 2000
 
-/** What the setup screen needs, in one query plus the submissions of this repo */
-export async function findSubmissionPanel(
+/**
+ * What the setup screen needs, one panel per entrega — 2A to 2D for TP2, or
+ * a list of one for a TP with a single date. Empty means the teacher has not
+ * opened entregas at all: nothing to hand in.
+ */
+export async function findSubmissionPanels(
   session: Session,
   key: string,
-): Promise<SubmissionPanel | null> {
+): Promise<CheckpointPanel[] | null> {
   const context = await loadContext(session, key)
   if (!context) return null
 
-  let { enabled, disabledReason } = disabledState(context.invitationsEnabled, context.archivedAt)
+  const base = disabledState(context.invitationsEnabled, context.archivedAt)
 
-  // A closed entrega is a second, independent reason confirmations are
-  // refused — checked after the assignment-level one so an Inactive/archived
-  // message still wins if both apply
-  if (enabled && context.closedAt !== null) {
-    enabled = false
-    disabledReason = CHECKPOINT_CLOSED
+  const panels: CheckpointPanel[] = []
+  for (const checkpoint of context.checkpoints) {
+    let { enabled, disabledReason } = base
+
+    // A closed entrega is a second, independent reason confirmations are
+    // refused — checked after the assignment-level one so an Inactive/archived
+    // message still wins if both apply
+    if (enabled && checkpoint.closedAt !== null) {
+      enabled = false
+      disabledReason = CHECKPOINT_CLOSED
+    }
+
+    const panel: CheckpointPanel = {
+      checkpointId: checkpoint.id,
+      title: checkpoint.title,
+      deadlineAt: checkpoint.deadlineAt,
+      overdue: checkpoint.deadlineAt !== null && checkpoint.deadlineAt.getTime() < Date.now(),
+      enabled,
+      disabledReason,
+      current: null,
+      history: [],
+    }
+
+    if (context.repoId === null) {
+      panels.push(panel)
+      continue
+    }
+
+    const history = await listSubmissions(context.repoId, checkpoint.id, checkpoint.deadlineAt)
+    // Append-only: the current submission is the last row, and the serial id
+    // is what breaks the tie — `submitted_at` can repeat
+    panels.push({ ...panel, current: history[0] ?? null, history })
   }
 
-  const base: SubmissionPanel = {
-    deadlineAt: context.deadlineAt,
-    overdue: context.deadlineAt !== null && context.deadlineAt.getTime() < Date.now(),
-    hasCheckpoint: context.checkpointId !== null,
-    enabled,
-    disabledReason,
-    current: null,
-    history: [],
-  }
-
-  if (context.repoId === null || context.checkpointId === null) return base
-
-  const history = await listSubmissions(context.repoId, context.checkpointId, context.deadlineAt)
-
-  // Append-only: the current submission is the last row, and the serial id is
-  // what breaks the tie — `submitted_at` can repeat
-  return { ...base, current: history[0] ?? null, history }
+  return panels
 }
 
 /**
@@ -345,6 +360,7 @@ export async function findSubmissionDetail(
 export async function confirmSubmission(
   session: Session,
   key: string,
+  checkpointId: number,
   ref: string,
   aiDeclaration: string,
 ): Promise<ConfirmSubmissionResult> {
@@ -377,11 +393,16 @@ export async function confirmSubmission(
   const { enabled, disabledReason } = disabledState(context.invitationsEnabled, context.archivedAt)
   if (!enabled) return { success: false, error: disabledReason! }
 
-  if (context.checkpointId === null) {
+  if (context.checkpoints.length === 0) {
     return { success: false, error: 'El docente todavía no habilitó las entregas.' }
   }
 
-  if (context.closedAt !== null) {
+  const checkpoint = context.checkpoints.find((row) => row.id === checkpointId)
+  if (!checkpoint) {
+    return { success: false, error: 'No encontramos esa entrega.' }
+  }
+
+  if (checkpoint.closedAt !== null) {
     return { success: false, error: CHECKPOINT_CLOSED }
   }
 
@@ -399,7 +420,7 @@ export async function confirmSubmission(
     .where(
       and(
         eq(submissions.assignmentRepoId, context.repoId),
-        eq(submissions.checkpointId, context.checkpointId),
+        eq(submissions.checkpointId, checkpoint.id),
       ),
     )
     .orderBy(desc(submissions.id))
@@ -435,7 +456,7 @@ export async function confirmSubmission(
 
   await db.insert(submissions).values({
     assignmentRepoId: context.repoId,
-    checkpointId: context.checkpointId,
+    checkpointId: checkpoint.id,
     sha,
     ref: trimmed,
     aiDeclaration: trimmedDeclaration,
@@ -492,17 +513,18 @@ async function listSubmissions(
 }
 
 /**
- * The invitation, the assignment's single entrega and this student's own
- * repository row, in one query.
+ * The invitation, every one of the assignment's entregas and this student's
+ * own repository row, in one query — one result row per entrega, since
+ * `checkpoints` is left-joined on the assignment alone.
  *
- * The repository and the checkpoint are left joins on purpose: "no repository
- * yet" and "the teacher has not opened entregas" are different answers, and
- * both have their own message on the screen.
+ * The repository and the checkpoints are left joins on purpose: "no
+ * repository yet" and "the teacher has not opened entregas" are different
+ * answers, and both have their own message on the screen.
  */
 async function loadContext(session: Session, key: string) {
   const userId = Number(session.user.id)
 
-  const [row] = await db
+  const rows = await db
     .select({
       repoId: assignmentRepos.id,
       githubRepoId: assignmentRepos.githubRepoId,
@@ -510,6 +532,7 @@ async function loadContext(session: Session, key: string) {
       invitationsEnabled: assignments.invitationsEnabled,
       archivedAt: organizations.archivedAt,
       checkpointId: checkpoints.id,
+      title: checkpoints.title,
       deadlineAt: checkpoints.deadlineAt,
       closedAt: checkpoints.closedAt,
     })
@@ -526,11 +549,26 @@ async function loadContext(session: Session, key: string) {
       assignmentRepos,
       and(eq(assignmentRepos.assignmentId, assignments.id), eq(assignmentRepos.userId, userId)),
     )
-    .leftJoin(
-      checkpoints,
-      and(eq(checkpoints.assignmentId, assignments.id), isNull(checkpoints.title)),
-    )
+    .leftJoin(checkpoints, eq(checkpoints.assignmentId, assignments.id))
     .where(and(eq(assignmentInvitations.key, key), isNull(assignmentInvitations.deletedAt)))
+    .orderBy(checkpoints.position)
 
-  return row ?? null
+  const [first] = rows
+  if (!first) return null
+
+  return {
+    repoId: first.repoId,
+    githubRepoId: first.githubRepoId,
+    installationId: first.installationId,
+    invitationsEnabled: first.invitationsEnabled,
+    archivedAt: first.archivedAt,
+    checkpoints: rows
+      .filter((row) => row.checkpointId !== null)
+      .map((row) => ({
+        id: row.checkpointId!,
+        title: row.title,
+        deadlineAt: row.deadlineAt,
+        closedAt: row.closedAt,
+      })),
+  }
 }
