@@ -279,6 +279,35 @@ describe('createAssignment — checkpoints', () => {
     expect(await db.select().from(assignments)).toHaveLength(0)
   })
 
+  // Code review finding: title/autograderId length was only checked by
+  // parseCheckpointsField at the form boundary, not by createAssignment
+  // itself — a caller that reaches it directly (like this test) skipped that
+  // check entirely and would have hit a raw Postgres column-width error.
+  it('rejects a checkpoint title that is too long, even bypassing the form parser', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    const result = await createAssignment(session, classroom.slug, {
+      ...VALID,
+      checkpoints: [
+        {
+          id: null,
+          title: 'x'.repeat(61),
+          deadlineAt: null,
+          autograderId: null,
+          closed: false,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      success: false,
+      error: 'El título de una entrega es demasiado largo.',
+      field: 'base',
+    })
+    expect(await db.select().from(assignments)).toHaveLength(0)
+  })
+
   it('defaults to no entregas when checkpoints is omitted', async () => {
     const session = await classroomTeacher()
     const classroom = await classroomOrg(session)

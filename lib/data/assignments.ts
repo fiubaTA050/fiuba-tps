@@ -15,6 +15,7 @@ import {
 } from '@/lib/data/assignment-fields'
 import {
   normalizeCheckpointRows,
+  validateCheckpointLengths,
   validateCheckpointTitles,
   type CheckpointInput,
 } from '@/lib/data/checkpoints'
@@ -270,6 +271,10 @@ export async function createAssignment(
     return { success: false, error: 'No entendimos la lista de entregas.', field: 'base' }
   }
   const normalizedCheckpoints = normalizeCheckpointRows(checkpointRows)
+  const checkpointLengthError = validateCheckpointLengths(normalizedCheckpoints)
+  if (checkpointLengthError) {
+    return { success: false, error: checkpointLengthError, field: 'base' }
+  }
   const checkpointTitleError = validateCheckpointTitles(normalizedCheckpoints)
   if (checkpointTitleError) {
     return { success: false, error: checkpointTitleError, field: 'base' }

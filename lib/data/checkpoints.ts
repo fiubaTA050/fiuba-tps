@@ -49,6 +49,12 @@ export type CheckpointInput = {
 export const CHECKPOINT_TITLE_MAX_LENGTH = 60
 export const CHECKPOINT_AUTOGRADER_ID_MAX_LENGTH = 255
 
+// No real assignment needs more than a handful of entregas (TP2's 2A-2D is
+// the known extreme). A hand-crafted POST with thousands of rows would still
+// pass per-row validation and turn into that many sequential inserts inside
+// one transaction, inside one request — capped well above any real use.
+export const CHECKPOINT_MAX_ROWS = 50
+
 /**
  * What `CheckpointsField` serializes into the hidden `checkpoints` field: one
  * row per entrega, in the order the teacher arranged them. Parsed defensively
@@ -65,7 +71,7 @@ export function parseCheckpointsField(value: FormDataEntryValue | null): Checkpo
   } catch {
     return null
   }
-  if (!Array.isArray(parsed)) return null
+  if (!Array.isArray(parsed) || parsed.length > CHECKPOINT_MAX_ROWS) return null
 
   const rows: CheckpointInput[] = []
   const seenIds = new Set<number>()
@@ -148,6 +154,29 @@ export function validateCheckpointTitles(rows: CheckpointInput[]): string | null
     return title
       ? `Dos entregas no pueden llamarse "${title}".`
       : 'Sólo una entrega puede quedar sin título.'
+  }
+  return null
+}
+
+/**
+ * Defense in depth, shared by `saveCheckpoints` and `createAssignment`:
+ * `parseCheckpointsField` already rejects an over-length title/autograderId
+ * at the request boundary, but both of those are exported functions a caller
+ * could reach directly — a test, a future path — without going through that
+ * parser, so the same check runs again here rather than letting an
+ * over-length value reach Postgres as an uncaught column-width error.
+ */
+export function validateCheckpointLengths(rows: CheckpointInput[]): string | null {
+  for (const row of rows) {
+    if (row.title !== null && row.title.length > CHECKPOINT_TITLE_MAX_LENGTH) {
+      return 'El título de una entrega es demasiado largo.'
+    }
+    if (
+      row.autograderId !== null &&
+      row.autograderId.length > CHECKPOINT_AUTOGRADER_ID_MAX_LENGTH
+    ) {
+      return 'El identificador de corrección automática de una entrega es demasiado largo.'
+    }
   }
   return null
 }
@@ -260,6 +289,9 @@ export async function saveCheckpoints(
   if (!assignment) return { success: false, error: 'No encontramos ese trabajo práctico.' }
 
   const normalized = normalizeCheckpointRows(rows)
+
+  const lengthError = validateCheckpointLengths(normalized)
+  if (lengthError) return { success: false, error: lengthError }
 
   const titleError = validateCheckpointTitles(normalized)
   if (titleError) return { success: false, error: titleError }
