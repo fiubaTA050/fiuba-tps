@@ -12,9 +12,22 @@ import 'server-only'
  * trace.
  */
 export function isUniqueViolation(error: unknown): boolean {
+  return hasPostgresCode(error, '23505')
+}
+
+/**
+ * Postgres foreign key violation — a delete raced a concurrent insert that
+ * added the row the delete's caller believed had nothing pointing at it.
+ * Same race shape as `isUniqueViolation`, same backstop-after-a-check pattern.
+ */
+export function isForeignKeyViolation(error: unknown): boolean {
+  return hasPostgresCode(error, '23503')
+}
+
+function hasPostgresCode(error: unknown, code: string): boolean {
   for (let current = error; current; current = (current as { cause?: unknown }).cause) {
     if (typeof current !== 'object') return false
-    if ((current as { code?: string }).code === '23505') return true
+    if ((current as { code?: string }).code === code) return true
   }
   return false
 }

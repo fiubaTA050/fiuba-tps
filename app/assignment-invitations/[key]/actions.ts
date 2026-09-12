@@ -82,9 +82,15 @@ export async function confirmSubmissionAction(
   const session = await auth()
   if (!isUsableSession(session)) redirect(`/assignment-invitations/${key}`)
 
+  const checkpointId = positiveInteger(formData.get('checkpoint_id'))
+  if (checkpointId === null) {
+    return { error: 'No encontramos esa entrega.', notice: null }
+  }
+
   const result = await confirmSubmission(
     session,
     key,
+    checkpointId,
     String(formData.get('ref') ?? ''),
     String(formData.get('ai_declaration') ?? ''),
   )

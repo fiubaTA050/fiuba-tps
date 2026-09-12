@@ -46,9 +46,10 @@ export default async function AssignmentPage(
     // than when the dialog opens, the way the live site does it: the list is
     // small, and the page is force-dynamic so it is as fresh as the rows.
     listUnlinkedEntries(session, slug),
-    // Each repo's current confirmed submission — null checkpoint means the
-    // teacher hasn't opened entregas, which every row below reads correctly
-    // as "sin confirmar" without a special case here.
+    // Every entrega's current confirmed submission, per repo — an empty
+    // `checkpoints` array means the teacher hasn't opened entregas, which
+    // every row below reads correctly as "sin confirmar" without a special
+    // case here.
     listAssignmentSubmissions(session, slug, assignmentSlug),
   ])
 
@@ -101,7 +102,11 @@ export default async function AssignmentPage(
       ? await readGitHub(installationId)
       : reads
 
-  const submitted = repoIds.filter((id) => submissions.byRepoId.has(id)).length
+  // The overview tile counts a repo once it confirmed *any* entrega, whatever
+  // tab the dashboard below happens to have open — each checkpoint's own tab
+  // carries its own count (AssignmentRepoList).
+  const confirmedRepoIds = new Set(submissions.checkpoints.flatMap((c) => [...c.byRepoId.keys()]))
+  const submitted = repoIds.filter((id) => confirmedRepoIds.has(id)).length
   const students = acceptances.entries.length + acceptances.unlinkedAccounts.length
 
   return (
@@ -191,7 +196,7 @@ export default async function AssignmentPage(
           acceptances={acceptances}
           assignmentTitle={assignment.title}
           snapshots={snapshots}
-          submissions={submissions.byRepoId}
+          submissions={submissions}
           classroomSlug={classroom.slug}
           assignmentSlug={assignment.slug}
           unlinkedEntries={unlinkedEntries}

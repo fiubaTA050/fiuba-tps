@@ -13,6 +13,7 @@ import {
   updateAssignmentAction,
   type EditAssignmentState,
 } from './actions'
+import { CheckpointsField, type CheckpointFieldValue } from './CheckpointsField'
 
 const EMPTY: EditAssignmentState = { error: null, field: null }
 
@@ -37,25 +38,18 @@ export function EditAssignmentForm({
   assignment,
   templates,
   starterCodeFullName,
-  entrega,
+  entregas,
 }: {
   classroomSlug: string
   assignment: AssignmentListItem
   templates: GitHubRepository[]
   /** `owner/name` read from GitHub, or '' when there is none or it is gone */
   starterCodeFullName: string
-  /** The assignment's single checkpoint, already in Argentine time */
-  entrega: {
-    enabled: boolean
-    deadlineInput: string
-    submissionCount: number
-    autograderId: string | null
-    closed: boolean
-  }
+  /** The assignment's entregas, already in Argentine time. Empty is legal */
+  entregas: CheckpointFieldValue[]
 }) {
   const [title, setTitle] = useState(assignment.title)
   const [slug, setSlug] = useState(assignment.slug)
-  const [submissionsEnabled, setSubmissionsEnabled] = useState(entrega.enabled)
 
   const [state, formAction, pending] = useActionState<EditAssignmentState, FormData>(
     updateAssignmentAction,
@@ -198,96 +192,22 @@ export function EditAssignmentForm({
               </p>
             </div>
 
-            {/* The entrega. No equivalent in the archived original, which hangs
+            {/* The entregas. No equivalent in the archived original, which hangs
                 one `deadline` off the assignment and freezes submissions with a
-                Sidekiq job; here the entrega is a row of its own and the
+                Sidekiq job; here each entrega is a row of its own and the
                 student is the one who confirms. See docs/entregas.md. */}
             <h3 className="h5 mt-5 pt-4 border-top">Entregas</h3>
+            <p className="note mt-0 mb-3">
+              Cada alumno elige una rama, un tag o un commit de su repositorio y confirma. Eso
+              congela el árbol que vas a corregir. Un trabajo práctico con una sola fecha es una
+              entrega sola; agregá más filas para varias entregas del mismo repositorio, como
+              2A, 2B, 2C y 2D. Sin ninguna fila no hay nada que entregar. La fecha de cada una{' '}
+              <strong>no la cierra</strong>: lo que llegue después se acepta y queda marcado
+              tarde — para frenar una entrega puntual marcá &quot;Cerrar&quot;, y para frenar todo
+              el trabajo práctico ponelo en Inactivo.
+            </p>
 
-            <div className="form-group mt-3">
-              <div className="form-checkbox">
-                <label>
-                  <input
-                    type="checkbox"
-                    name="submissions_enabled"
-                    checked={submissionsEnabled}
-                    onChange={(event) => setSubmissionsEnabled(event.target.checked)}
-                  />
-                  Los alumnos pueden confirmar su entrega
-                </label>
-                <p className="note">
-                  Cada alumno elige una rama, un tag o un commit de su repositorio y confirma. Eso
-                  congela el árbol que vas a corregir. Sin esto, no hay nada que entregar.
-                </p>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <div className="form-group-header">
-                <label htmlFor="deadline_at">Fecha de entrega</label>
-              </div>
-              <div className="form-group-body">
-                <input
-                  type="datetime-local"
-                  id="deadline_at"
-                  name="deadline_at"
-                  className="form-control"
-                  defaultValue={entrega.deadlineInput}
-                  disabled={!submissionsEnabled}
-                />
-              </div>
-              <p className="note">
-                Opcional, y en hora de Argentina. La fecha <strong>no cierra la entrega</strong>:
-                las que lleguen después se aceptan y quedan marcadas como tarde. Para que nadie
-                entregue más, cerrala más abajo, o poné el trabajo práctico entero en Inactivo.
-              </p>
-              {entrega.submissionCount > 0 && (
-                <p className="note">
-                  Ya hay {entrega.submissionCount}{' '}
-                  {entrega.submissionCount === 1 ? 'entrega confirmada' : 'entregas confirmadas'}.
-                  Mientras existan no se pueden apagar las entregas.
-                </p>
-              )}
-            </div>
-
-            <div className="form-group">
-              <div className="form-group-header">
-                <label htmlFor="autograder_id">Corrección automática</label>
-              </div>
-              <div className="form-group-body">
-                <input
-                  id="autograder_id"
-                  name="autograder_id"
-                  type="text"
-                  defaultValue={entrega.autograderId ?? ''}
-                  autoComplete="off"
-                  className="form-control input-block"
-                  disabled={!submissionsEnabled}
-                />
-              </div>
-              <p className="note">
-                El id que el corrector externo usa para elegir cómo corregir esta entrega. Dejalo
-                vacío si no tiene corrección automática.
-              </p>
-            </div>
-
-            <div className="form-group">
-              <div className="form-checkbox">
-                <label>
-                  <input
-                    type="checkbox"
-                    name="checkpoint_closed"
-                    defaultChecked={entrega.closed}
-                    disabled={!submissionsEnabled}
-                  />
-                  Cerrar esta entrega
-                </label>
-                <p className="note">
-                  Frena confirmaciones nuevas para esta entrega y, si tiene corrección automática,
-                  la habilita para que el corrector la pida. Se puede reabrir en cualquier momento.
-                </p>
-              </div>
-            </div>
+            <CheckpointsField initial={entregas} />
 
             <h3 className="h5 mt-5 pt-4 border-top">Opcional</h3>
 
