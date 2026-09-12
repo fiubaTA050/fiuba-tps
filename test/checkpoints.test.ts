@@ -32,7 +32,8 @@ vi.mock('@/lib/db', () => ({
   },
 }))
 
-const { listCheckpoints, saveCheckpoints } = await import('@/lib/data/checkpoints')
+const { listCheckpoints, saveCheckpoints, parseCheckpointsField, CHECKPOINT_MAX_ROWS } =
+  await import('@/lib/data/checkpoints')
 
 let nextUid = 1
 let nextGithubId = 1000
@@ -585,5 +586,24 @@ describe('saveCheckpoints', () => {
       const found = await listCheckpoints(profe, classroomSlug, assignmentSlug)
       expect(found?.map((row) => row.title)).toEqual(['2A'])
     })
+  })
+})
+
+/**
+ * Code review finding: an array with no cap on the number of rows would
+ * still pass per-row validation and turn into that many sequential inserts
+ * inside one transaction, inside one request.
+ */
+describe('parseCheckpointsField — row cap', () => {
+  const row = { id: null, title: '', deadlineAt: '', autograderId: '', closed: false }
+
+  it('accepts exactly the maximum number of rows', () => {
+    const rows = Array.from({ length: CHECKPOINT_MAX_ROWS }, () => row)
+    expect(parseCheckpointsField(JSON.stringify(rows))).toHaveLength(CHECKPOINT_MAX_ROWS)
+  })
+
+  it('rejects one row over the maximum', () => {
+    const rows = Array.from({ length: CHECKPOINT_MAX_ROWS + 1 }, () => row)
+    expect(parseCheckpointsField(JSON.stringify(rows))).toBeNull()
   })
 })

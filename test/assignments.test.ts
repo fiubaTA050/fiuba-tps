@@ -6,6 +6,7 @@ import {
   assignmentInvitations,
   assignmentRepos,
   assignments,
+  checkpoints,
   groupAssignments,
   groupings,
   organizations,
@@ -201,6 +202,124 @@ describe('createAssignment — successful creation', () => {
 
     const [row] = await db.select().from(assignments)
     expect(row.publicRepo).toBe(true)
+  })
+})
+
+/**
+ * `input.checkpoints` lets the teacher create entregas in the same submission
+ * as the assignment — see docs/entregas.md and the jsdoc on `createAssignment`.
+ * No original spec to port: the archived app has no entrega of its own.
+ */
+describe('createAssignment — checkpoints', () => {
+  it('creates the entregas alongside the assignment, in array order', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+    const deadlineAt = new Date('2026-11-01T23:59:00Z')
+
+    const result = await createAssignment(session, classroom.slug, {
+      ...VALID,
+      checkpoints: [
+        { id: null, title: '2A', deadlineAt, autograderId: 'tp2a', closed: false },
+        { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: true },
+      ],
+    })
+
+    expect(result).toEqual({ success: true, slug: 'tp1' })
+
+    const [assignment] = await db.select().from(assignments)
+    const rows = await db
+      .select()
+      .from(checkpoints)
+      .where(eq(checkpoints.assignmentId, assignment.id))
+      .orderBy(checkpoints.position)
+
+    expect(rows).toMatchObject([
+      { title: '2A', deadlineAt, autograderId: 'tp2a', position: 0, closedAt: null },
+      { title: '2B', deadlineAt: null, autograderId: null, position: 1 },
+    ])
+    expect(rows[1].closedAt).not.toBeNull()
+  })
+
+  it('creates no assignment when two entregas share a title', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    const result = await createAssignment(session, classroom.slug, {
+      ...VALID,
+      checkpoints: [
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      ],
+    })
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Dos entregas no pueden llamarse "2A".',
+      field: 'base',
+    })
+    // The point of the transaction: a rejected checkpoint leaves nothing
+    // behind for a resubmit to collide with.
+    expect(await db.select().from(assignments)).toHaveLength(0)
+  })
+
+  it('rejects a checkpoint with an id, which cannot exist yet', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    const result = await createAssignment(session, classroom.slug, {
+      ...VALID,
+      checkpoints: [{ id: 1, title: '2A', deadlineAt: null, autograderId: null, closed: false }],
+    })
+
+    expect(result).toEqual({
+      success: false,
+      error: 'No entendimos la lista de entregas.',
+      field: 'base',
+    })
+    expect(await db.select().from(assignments)).toHaveLength(0)
+  })
+
+  // Code review finding: title/autograderId length was only checked by
+  // parseCheckpointsField at the form boundary, not by createAssignment
+  // itself — a caller that reaches it directly (like this test) skipped that
+  // check entirely and would have hit a raw Postgres column-width error.
+  it('rejects a checkpoint title that is too long, even bypassing the form parser', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    const result = await createAssignment(session, classroom.slug, {
+      ...VALID,
+      checkpoints: [
+        {
+          id: null,
+          title: 'x'.repeat(61),
+          deadlineAt: null,
+          autograderId: null,
+          closed: false,
+        },
+      ],
+    })
+
+    expect(result).toEqual({
+      success: false,
+      error: 'El título de una entrega es demasiado largo.',
+      field: 'base',
+    })
+    expect(await db.select().from(assignments)).toHaveLength(0)
+  })
+
+  it('defaults to no entregas when checkpoints is omitted', async () => {
+    const session = await classroomTeacher()
+    const classroom = await classroomOrg(session)
+
+    await createAssignment(session, classroom.slug, VALID)
+
+    const [assignment] = await db.select().from(assignments)
+    const rows = await db
+      .select()
+      .from(checkpoints)
+      .where(eq(checkpoints.assignmentId, assignment.id))
+    expect(rows).toHaveLength(0)
   })
 })
 

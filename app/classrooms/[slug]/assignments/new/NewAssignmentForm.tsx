@@ -8,16 +8,21 @@ import { StarterCodeField } from '@/components/StarterCodeField'
 import { parameterize } from '@/lib/data/slug'
 import type { GitHubRepository } from '@/lib/github/repositories'
 
+import { CheckpointsField } from '../[assignmentSlug]/edit/CheckpointsField'
 import { createAssignmentAction, type CreateAssignmentState } from './actions'
 
 /**
  * Port of assignments/new.html.erb and its
  * assignments/_assignment_form_options.html.erb partial.
  *
- * Everything of the original's partial is here except the deadline, which only
- * does anything paired with a job runner that Vercel does not give us, and the
- * template-vs-importer radios, which have nothing left to choose between since
- * GitHub retired the Source Imports API.
+ * Everything of the original's partial is here except the template-vs-importer
+ * radios, which have nothing left to choose between since GitHub retired the
+ * Source Imports API. The original's single assignment-level `deadline` is
+ * also gone, but not replaced by nothing: the entregas section below creates
+ * `checkpoints` rows, which is where a deadline lives now. That field only
+ * ever did anything paired with a Sidekiq job Vercel cannot run — the
+ * checkpoint deadline needs no such job, it is just read at submit and render
+ * time. See docs/entregas.md.
  */
 export function NewAssignmentForm({
   classroomSlug,
@@ -150,6 +155,26 @@ export function NewAssignmentForm({
             </label>
           </div>
         </div>
+
+          {/* The entregas. No equivalent in the archived original, which hangs
+              one `deadline` off the assignment and freezes submissions with a
+              Sidekiq job; here each entrega is a row of its own and the
+              student is the one who confirms. See docs/entregas.md. Same
+              section, same copy and the same CheckpointsField as Editar
+              (EditAssignmentForm.tsx) — a teacher can also leave this empty
+              and add entregas later from there. */}
+          <h3 className="h5 mt-5 pt-4 border-top">Entregas</h3>
+          <p className="note mt-0 mb-3">
+            Cada alumno elige una rama, un tag o un commit de su repositorio y confirma. Eso
+            congela el árbol que vas a corregir. Un trabajo práctico con una sola fecha es una
+            entrega sola; agregá más filas para varias entregas del mismo repositorio, como
+            2A, 2B, 2C y 2D. Sin ninguna fila no hay nada que entregar. La fecha de cada una{' '}
+            <strong>no la cierra</strong>: lo que llegue después se acepta y queda marcado
+            tarde — para frenar una entrega puntual marcá &quot;Cerrar&quot;, y para frenar todo
+            el trabajo práctico ponelo en Inactivo.
+          </p>
+
+          <CheckpointsField initial={[]} />
 
           <h3 className="h5 mt-5 pt-4 border-top">Opcional</h3>
 

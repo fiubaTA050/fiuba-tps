@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { createAssignment, type AssignmentField } from '@/lib/data/assignments'
+import { parseCheckpointsField } from '@/lib/data/checkpoints'
 import { isUsableSession } from '@/lib/session'
 
 export type CreateAssignmentState = { error: string | null; field: AssignmentField | null }
@@ -19,6 +20,15 @@ export async function createAssignmentAction(
 
   const classroomSlug = String(formData.get('classroom_slug') ?? '')
 
+  // The entregas, which live in `checkpoints` and not in the assignment row —
+  // see docs/entregas.md. Parsed before anything is written so a malformed
+  // payload costs no round trip. No `checkpoints_known_ids` here: unlike
+  // Editar, there is nothing existing yet to guard against drifting from.
+  const checkpointInputs = parseCheckpointsField(formData.get('checkpoints'))
+  if (checkpointInputs === null) {
+    return { error: 'No entendimos la lista de entregas.', field: 'base' }
+  }
+
   const result = await createAssignment(session, classroomSlug, {
     title: String(formData.get('title') ?? ''),
     slug: String(formData.get('slug') ?? ''),
@@ -30,6 +40,7 @@ export async function createAssignmentAction(
     studentsAreRepoAdmins: formData.get('students_are_repo_admins') === 'on',
     // `repo_name` in the original's new_assignment_params
     starterCodeRepo: String(formData.get('repo_name') ?? ''),
+    checkpoints: checkpointInputs,
   })
 
   // render :new — the form comes back with the message
