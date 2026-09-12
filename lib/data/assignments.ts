@@ -3,7 +3,7 @@ import 'server-only'
 import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
-import { assignmentInvitations, assignments, groupAssignments } from '@/db/schema'
+import { assignmentInvitations, assignments, checkpoints, groupAssignments } from '@/db/schema'
 import {
   findSlugClash,
   invitationKey,
@@ -13,6 +13,11 @@ import {
   validateTitleAndSlug,
   type AssignmentField,
 } from '@/lib/data/assignment-fields'
+import {
+  normalizeCheckpointRows,
+  validateCheckpointTitles,
+  type CheckpointInput,
+} from '@/lib/data/checkpoints'
 import { findTeachingClassroom } from '@/lib/data/organizations'
 import { isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
@@ -60,6 +65,14 @@ export type NewAssignmentInput = {
   studentsAreRepoAdmins: boolean
   /** `owner/name` of the template repo, or empty for no starter code */
   starterCodeRepo: string
+  /**
+   * The entregas to create alongside the assignment — see docs/entregas.md.
+   * Every row's `id` must be `null`: nothing can already exist for an
+   * assignment that has not been created yet. Optional so every existing
+   * caller that has nothing to say about entregas — every test included —
+   * keeps working; defaults to none.
+   */
+  checkpoints?: CheckpointInput[]
 }
 
 /**
@@ -190,7 +203,11 @@ export async function findAssignment(
  * Steps 1 to 3 carry over as they are; step 4 does not exist here — this
  * assignment-level `deadline` was never ported. What exists instead is a
  * per-checkpoint `deadline_at` (`db/schema.ts`, `lib/data/checkpoints.ts`), a
- * deliberately different concept: see docs/entregas.md.
+ * deliberately different concept: see docs/entregas.md. `input.checkpoints`
+ * lets the teacher create entregas in the same submission instead of a
+ * separate trip through Editar — inserted in the same transaction as the
+ * assignment and its invitation, so a rejected checkpoint (a repeated title)
+ * leaves no orphaned assignment behind.
  */
 export async function createAssignment(
   session: Session,
@@ -243,6 +260,21 @@ export async function createAssignment(
     return { success: false, error: slugClashMessage(slug, clash, classroom.id), field: 'slug' }
   }
 
+  // Checkpoints cost no GitHub calls, so this validates before starter code
+  // for the same reason starter code validates before the transaction: cheap
+  // checks first. Every row must be a fresh entrega — there is nothing yet to
+  // reference by id — which is only reachable with a hand-crafted POST, same
+  // defensive stance as the rest of parseCheckpointsField.
+  const checkpointRows = input.checkpoints ?? []
+  if (checkpointRows.some((row) => row.id !== null)) {
+    return { success: false, error: 'No entendimos la lista de entregas.', field: 'base' }
+  }
+  const normalizedCheckpoints = normalizeCheckpointRows(checkpointRows)
+  const checkpointTitleError = validateCheckpointTitles(normalizedCheckpoints)
+  if (checkpointTitleError) {
+    return { success: false, error: checkpointTitleError, field: 'base' }
+  }
+
   // Last, because it is the only step that costs GitHub API calls: a
   // submission that repeats a title is rejected without spending any. Rails
   // ran every validation on every save and did not have that option.
@@ -252,7 +284,9 @@ export async function createAssignment(
   try {
     // `build_assignment_invitation` + autosave: the original saves both records
     // in one transaction. It has to — an assignment without an invitation is
-    // invalid, and it would still be holding the title and the slug.
+    // invalid, and it would still be holding the title and the slug. The
+    // entregas join them here for the same reason: a checkpoint failure must
+    // not leave a bare assignment behind that a resubmit then collides with.
     await db.transaction(async (tx) => {
       const [row] = await tx
         .insert(assignments)
@@ -273,6 +307,17 @@ export async function createAssignment(
         key: invitationKey(),
         shortKey: invitationShortKey(),
       })
+
+      for (const [position, checkpoint] of normalizedCheckpoints.entries()) {
+        await tx.insert(checkpoints).values({
+          assignmentId: row.id,
+          title: checkpoint.title,
+          deadlineAt: checkpoint.deadlineAt,
+          autograderId: checkpoint.autograderId,
+          closedAt: checkpoint.closed ? new Date() : null,
+          position,
+        })
+      }
     })
   } catch (error) {
     // The checks above race: two teachers can submit the same name at once.

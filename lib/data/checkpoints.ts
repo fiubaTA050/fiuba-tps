@@ -4,6 +4,7 @@ import { and, count, eq, isNull } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import { assignments, checkpoints, submissions } from '@/db/schema'
+import { parseArgentinaDateTime } from '@/lib/dates'
 import { findTeachingClassroom } from '@/lib/data/organizations'
 import { isForeignKeyViolation, isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
@@ -39,6 +40,116 @@ export type CheckpointInput = {
   deadlineAt: Date | null
   autograderId: string | null
   closed: boolean
+}
+
+// Mirrors checkpoints.title/autograderId in db/schema.ts. The client already
+// enforces title's maxLength, but this field crosses the request boundary —
+// a hand-crafted POST skips that — so the length still has to be checked
+// here, or a too-long value reaches Postgres as an uncaught column-width error.
+export const CHECKPOINT_TITLE_MAX_LENGTH = 60
+export const CHECKPOINT_AUTOGRADER_ID_MAX_LENGTH = 255
+
+/**
+ * What `CheckpointsField` serializes into the hidden `checkpoints` field: one
+ * row per entrega, in the order the teacher arranged them. Parsed defensively
+ * since it is still form input crossing the request boundary, even though it
+ * came from this app's own client component. Shared by the edit and the
+ * create screens' server actions.
+ */
+export function parseCheckpointsField(value: FormDataEntryValue | null): CheckpointInput[] | null {
+  if (typeof value !== 'string') return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+
+  const rows: CheckpointInput[] = []
+  const seenIds = new Set<number>()
+  for (const item of parsed) {
+    if (typeof item !== 'object' || item === null) return null
+    const { id, title, deadlineAt, autograderId, closed } = item as Record<string, unknown>
+    if (id !== null && typeof id !== 'number') return null
+    // Two rows sharing an existing id would UPDATE the same checkpoint twice
+    // in saveCheckpoints, the second silently discarding the first's edits —
+    // never legitimate from this app's own client, so treated the same as
+    // any other malformed payload rather than let through.
+    if (id !== null) {
+      if (seenIds.has(id)) return null
+      seenIds.add(id)
+    }
+    if (typeof title !== 'string' || title.length > CHECKPOINT_TITLE_MAX_LENGTH) return null
+    if (typeof deadlineAt !== 'string') return null
+    if (
+      typeof autograderId !== 'string' ||
+      autograderId.length > CHECKPOINT_AUTOGRADER_ID_MAX_LENGTH
+    ) {
+      return null
+    }
+    if (typeof closed !== 'boolean') return null
+
+    const rawDeadline = deadlineAt.trim()
+    const parsedDeadline = rawDeadline === '' ? null : parseArgentinaDateTime(rawDeadline)
+    if (rawDeadline !== '' && parsedDeadline === null) return null
+
+    rows.push({
+      id,
+      title,
+      deadlineAt: parsedDeadline,
+      autograderId: autograderId.trim() === '' ? null : autograderId.trim(),
+      closed,
+    })
+  }
+
+  return rows
+}
+
+/**
+ * The companion hidden field: the checkpoint ids `CheckpointsField` actually
+ * had loaded, frozen at mount — see `saveCheckpoints`'s `knownIds` jsdoc.
+ * `null` (missing or malformed) is treated as "no snapshot to check against",
+ * the same as omitting the argument.
+ */
+export function parseKnownCheckpointIds(value: FormDataEntryValue | null): number[] | null {
+  if (typeof value !== 'string') return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'number')) return null
+  return parsed as number[]
+}
+
+/** Blank means the same as null — a title cleared back to "no name" — same
+ * normalisation optionalText() does for other free-text fields. */
+export function normalizeCheckpointRows(rows: CheckpointInput[]): CheckpointInput[] {
+  return rows.map((row) => ({ ...row, title: row.title?.trim() || null }))
+}
+
+/**
+ * Pure check shared by `saveCheckpoints` and `createAssignment`: two entregas
+ * of the same assignment cannot share a title, including the unnamed one
+ * (two rows both `null`). Callers pass already-`normalizeCheckpointRows`d
+ * rows.
+ */
+export function validateCheckpointTitles(rows: CheckpointInput[]): string | null {
+  const titleCounts = new Map<string, number>()
+  for (const row of rows) {
+    const key = row.title ?? ''
+    titleCounts.set(key, (titleCounts.get(key) ?? 0) + 1)
+  }
+  for (const [title, n] of titleCounts) {
+    if (n <= 1) continue
+    return title
+      ? `Dos entregas no pueden llamarse "${title}".`
+      : 'Sólo una entrega puede quedar sin título.'
+  }
+  return null
 }
 
 /** All of an assignment's entregas, in the order the teacher arranged them */
@@ -148,24 +259,10 @@ export async function saveCheckpoints(
     )
   if (!assignment) return { success: false, error: 'No encontramos ese trabajo práctico.' }
 
-  // Blank means the same as null — a title cleared back to "no name" — same
-  // normalisation optionalText() does for other free-text fields
-  const normalized = rows.map((row) => ({ ...row, title: row.title?.trim() || null }))
+  const normalized = normalizeCheckpointRows(rows)
 
-  const titleCounts = new Map<string, number>()
-  for (const row of normalized) {
-    const key = row.title ?? ''
-    titleCounts.set(key, (titleCounts.get(key) ?? 0) + 1)
-  }
-  for (const [title, n] of titleCounts) {
-    if (n <= 1) continue
-    return {
-      success: false,
-      error: title
-        ? `Dos entregas no pueden llamarse "${title}".`
-        : 'Sólo una entrega puede quedar sin título.',
-    }
-  }
+  const titleError = validateCheckpointTitles(normalized)
+  if (titleError) return { success: false, error: titleError }
 
   const existing = await db
     .select({
