@@ -884,6 +884,20 @@
 }
 
 /*
+ * A `BtnGroup` inside an `input-group` cell, which Primer never pairs itself.
+ * `.input-group` is `display: table` and `.input-group-button` is
+ * `width: 1%`, so the cell lays out at its min-content width — and the
+ * min-content of a container of floats is the widest float, not their sum, so
+ * the second button wraps below the first. `BtnGroup` floats its items
+ * (buttons/button-group.scss), hence flex here: a nowrap flex row's
+ * min-content *is* the sum, so the cell sizes to both buttons. The radii keep
+ * coming from `.BtnGroup-item`, which does not care how the row is laid out.
+ */
+.input-group-button .BtnGroup {
+  display: flex;
+}
+
+/*
  * The copy button of the invitation field, named after the live site's own
  * class. There it is a `Button--small`, which pads to
  * --control-small-paddingInline-condensed; `.btn-sm` pads to the 12px a button
