@@ -1,8 +1,9 @@
 'use client'
 
-import { BellIcon, CheckIcon, CopyIcon, KeyIcon } from '@primer/octicons-react'
+import { BellIcon, CheckIcon, CopyIcon, DownloadIcon, KeyIcon } from '@primer/octicons-react'
 import { useActionState, useEffect, useState } from 'react'
 
+import { apiKeyFileContents, apiKeyFileName } from '@/lib/api-key-file'
 import type { ApiKeyListItem } from '@/lib/data/api-keys'
 
 import { consumeRevealedKeyAction, deleteApiKeyAction } from './actions'
@@ -79,7 +80,13 @@ export function ApiKeyRow({
                 className="form-control color-bg-inset text-mono text-small"
               />
               <span className="input-group-button">
-                <CopyButton value={shownKey} />
+                {/* A BtnGroup, not two buttons loose in the cell, which
+                    would wrap — see `.input-group-button .BtnGroup` in
+                    app/globals.css for why the group needs flex here. */}
+                <div className="BtnGroup">
+                  <CopyButton value={shownKey} />
+                  <DownloadButton apiKey={apiKey} value={shownKey} />
+                </div>
               </span>
             </div>
           </div>
@@ -89,13 +96,36 @@ export function ApiKeyRow({
   )
 }
 
+/** The raw value as a file the worker can be pointed at — see lib/api-key-file.ts */
+function DownloadButton({ apiKey, value }: { apiKey: ApiKeyListItem; value: string }) {
+  return (
+    <button
+      type="button"
+      className="btn BtnGroup-item"
+      aria-label="Descargar key"
+      onClick={() => {
+        // Read on click, not at render: `location.origin` has no value during
+        // SSR, so an href computed up there would not survive hydration.
+        const contents = apiKeyFileContents(apiKey, value, window.location.origin)
+
+        const link = document.createElement('a')
+        link.href = `data:application/json;charset=utf-8,${encodeURIComponent(contents)}`
+        link.download = apiKeyFileName(apiKey)
+        link.click()
+      }}
+    >
+      <DownloadIcon />
+    </button>
+  )
+}
+
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
 
   return (
     <button
       type="button"
-      className="btn"
+      className="btn BtnGroup-item"
       aria-label="Copiar key"
       onClick={() => {
         void navigator.clipboard.writeText(value)
