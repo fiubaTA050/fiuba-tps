@@ -10,6 +10,7 @@ import {
   gradingRuns,
   organizations,
   organizationsUsers,
+  submissionExemptions,
   submissions,
   users,
 } from '@/db/schema'
@@ -73,6 +74,7 @@ const {
   findSubmissionHistory,
   findSubmissionDetail,
   listAssignmentSubmissions,
+  setSubmissionExemption,
 } = await import('@/lib/data/submissions')
 
 let nextUid = 1
@@ -928,5 +930,242 @@ describe('findSubmissionDetail', () => {
     expect(
       await findSubmissionDetail(ajeno, classroomSlug, assignmentSlug, githubRepoId, submissionId),
     ).toBeNull()
+  })
+})
+
+/**
+ * The live site's per-row "Extend …'s assignment deadline", ported as an
+ * exemption from the entrega's close — see `submissionExemptions` in
+ * db/schema.ts. No spec to port: the archived Rails code has no equivalent.
+ */
+describe('submission exemptions', () => {
+  async function exempt(repoId: number, checkpointId: number, by: Session, revokedAt: Date | null = null) {
+    await db.insert(submissionExemptions).values({
+      checkpointId,
+      assignmentRepoId: repoId,
+      createdByUserId: Number(by.user.id),
+      revokedAt,
+    })
+  }
+
+  async function closedCheckpoint(assignmentId: number, title: string | null = null): Promise<number> {
+    const [checkpoint] = await db
+      .insert(checkpoints)
+      .values({ assignmentId, title, closedAt: new Date() })
+      .returning({ id: checkpoints.id })
+
+    return checkpoint.id
+  }
+
+  it('lets an exempted student confirm on a closed entrega', async () => {
+    const alumna = await student('alumna')
+    const { key, repoId, checkpointId } = await assignmentWithRepo(alumna, { closedAt: new Date() })
+    await exempt(repoId, checkpointId!, alumna)
+
+    const result = await confirmSubmission(alumna, key, checkpointId!, 'main', 'No usé herramientas de IA.')
+
+    expect(result).toMatchObject({ success: true })
+    const [panel] = (await findSubmissionPanels(alumna, key))!
+    expect(panel).toMatchObject({ enabled: true, exempt: true, disabledReason: null })
+  })
+
+  it('refuses again once the exemption is revoked', async () => {
+    const alumna = await student('alumna')
+    const { key, repoId, checkpointId } = await assignmentWithRepo(alumna, { closedAt: new Date() })
+    await exempt(repoId, checkpointId!, alumna, new Date())
+
+    const result = await confirmSubmission(alumna, key, checkpointId!, 'main', 'No usé herramientas de IA.')
+
+    expect(result).toMatchObject({ success: false })
+    const [panel] = (await findSubmissionPanels(alumna, key))!
+    expect(panel).toMatchObject({ enabled: false, exempt: false })
+  })
+
+  it('does not reach another student of the same assignment', async () => {
+    const alumna = await student('alumna')
+    const otra = await student('otra')
+    const { key, assignmentId, checkpointId } = await assignmentWithRepo(alumna, {
+      closedAt: new Date(),
+    })
+    const other = await repoFor(assignmentId, otra)
+    await exempt(other.repoId, checkpointId!, alumna)
+
+    const result = await confirmSubmission(alumna, key, checkpointId!, 'main', 'No usé herramientas de IA.')
+
+    expect(result).toMatchObject({ success: false })
+  })
+
+  it('does not reach another entrega of the same repository', async () => {
+    const alumna = await student('alumna')
+    const { key, assignmentId, repoId, checkpointId } = await assignmentWithRepo(alumna, {
+      closedAt: new Date(),
+    })
+    const other = await closedCheckpoint(assignmentId, '2B')
+    await exempt(repoId, other, alumna)
+
+    const result = await confirmSubmission(alumna, key, checkpointId!, 'main', 'No usé herramientas de IA.')
+
+    expect(result).toMatchObject({ success: false })
+  })
+
+  it('is not reported on an inactive assignment, where the form stays disabled', async () => {
+    const alumna = await student('alumna')
+    const { key, repoId, checkpointId } = await assignmentWithRepo(alumna, {
+      closedAt: new Date(),
+      invitationsEnabled: false,
+    })
+    await exempt(repoId, checkpointId!, alumna)
+
+    const [panel] = (await findSubmissionPanels(alumna, key))!
+    expect(panel).toMatchObject({ enabled: false, exempt: false })
+  })
+
+  it('does not lift an inactive assignment, only the close', async () => {
+    const alumna = await student('alumna')
+    const { key, repoId, checkpointId } = await assignmentWithRepo(alumna, {
+      closedAt: new Date(),
+      invitationsEnabled: false,
+    })
+    await exempt(repoId, checkpointId!, alumna)
+
+    const result = await confirmSubmission(alumna, key, checkpointId!, 'main', 'No usé herramientas de IA.')
+
+    expect(result).toMatchObject({ success: false })
+  })
+
+  it('is not reported on an open entrega, where it changes nothing', async () => {
+    const alumna = await student('alumna')
+    const { key, repoId, checkpointId } = await assignmentWithRepo(alumna)
+    await exempt(repoId, checkpointId!, alumna)
+
+    const [panel] = (await findSubmissionPanels(alumna, key))!
+    expect(panel).toMatchObject({ enabled: true, exempt: false })
+  })
+
+  it('shows the teacher which entrega is closed and who is exempt from it', async () => {
+    const profe = await student('profe')
+    const alumna1 = await student('alumna1')
+    const alumna2 = await student('alumna2')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await closedCheckpoint(assignmentId)
+    const repo1 = await repoFor(assignmentId, alumna1)
+    const repo2 = await repoFor(assignmentId, alumna2)
+    await exempt(repo1.repoId, checkpointId, profe)
+    await exempt(repo2.repoId, checkpointId, profe, new Date())
+
+    const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
+    const checkpoint = checkpointResult(result, checkpointId)
+
+    expect(checkpoint?.closed).toBe(true)
+    expect([...checkpoint!.exemptRepoIds]).toEqual([repo1.githubRepoId])
+  })
+
+  describe('setSubmissionExemption', () => {
+    it('exempts, revokes and exempts again on a single row', async () => {
+      const profe = await student('profe')
+      const alumna = await student('alumna')
+      const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+      const checkpointId = await closedCheckpoint(assignmentId)
+      const { githubRepoId } = await repoFor(assignmentId, alumna)
+
+      const set = (value: boolean) =>
+        setSubmissionExemption(profe, classroomSlug, assignmentSlug, checkpointId, githubRepoId, value)
+
+      expect(await set(true)).toEqual({ success: true })
+      expect(await set(false)).toEqual({ success: true })
+      expect((await db.select().from(submissionExemptions))[0].revokedAt).not.toBeNull()
+      expect(await set(true)).toEqual({ success: true })
+
+      const rows = await db.select().from(submissionExemptions)
+      expect(rows).toHaveLength(1)
+      expect(rows[0].revokedAt).toBeNull()
+    })
+
+    it('refuses on an open entrega', async () => {
+      const profe = await student('profe')
+      const alumna = await student('alumna')
+      const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+      const checkpointId = await openCheckpoint(assignmentId)
+      const { githubRepoId } = await repoFor(assignmentId, alumna)
+
+      const result = await setSubmissionExemption(
+        profe,
+        classroomSlug,
+        assignmentSlug,
+        checkpointId,
+        githubRepoId,
+        true,
+      )
+
+      expect(result).toMatchObject({ success: false })
+      expect(await db.select().from(submissionExemptions)).toHaveLength(0)
+    })
+
+    it('refuses in an archived classroom', async () => {
+      const profe = await student('profe')
+      const alumna = await student('alumna')
+      const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+      const checkpointId = await closedCheckpoint(assignmentId)
+      const { githubRepoId } = await repoFor(assignmentId, alumna)
+      await db.update(organizations).set({ archivedAt: new Date() }).where(eq(organizations.slug, classroomSlug))
+
+      const result = await setSubmissionExemption(
+        profe,
+        classroomSlug,
+        assignmentSlug,
+        checkpointId,
+        githubRepoId,
+        true,
+      )
+
+      expect(result).toMatchObject({ success: false })
+    })
+
+    it("refuses a repository or an entrega that are not this assignment's", async () => {
+      const profe = await student('profe')
+      const alumna = await student('alumna')
+      const mine = await classroomWithAssignment(profe)
+      const other = await classroomWithAssignment(profe)
+      const checkpointId = await closedCheckpoint(mine.assignmentId)
+      const otherCheckpointId = await closedCheckpoint(other.assignmentId)
+      const { githubRepoId } = await repoFor(mine.assignmentId, alumna)
+      const otherRepo = await repoFor(other.assignmentId, alumna)
+
+      expect(
+        await setSubmissionExemption(
+          profe,
+          mine.classroomSlug,
+          mine.assignmentSlug,
+          otherCheckpointId,
+          githubRepoId,
+          true,
+        ),
+      ).toMatchObject({ success: false })
+      expect(
+        await setSubmissionExemption(
+          profe,
+          mine.classroomSlug,
+          mine.assignmentSlug,
+          checkpointId,
+          otherRepo.githubRepoId,
+          true,
+        ),
+      ).toMatchObject({ success: false })
+      expect(await db.select().from(submissionExemptions)).toHaveLength(0)
+    })
+
+    it('does not let a teacher of another classroom touch it', async () => {
+      const profe = await student('profe')
+      const ajeno = await student('ajeno')
+      const alumna = await student('alumna')
+      const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+      const checkpointId = await closedCheckpoint(assignmentId)
+      const { githubRepoId } = await repoFor(assignmentId, alumna)
+
+      expect(
+        await setSubmissionExemption(ajeno, classroomSlug, assignmentSlug, checkpointId, githubRepoId, true),
+      ).toBeNull()
+      expect(await db.select().from(submissionExemptions)).toHaveLength(0)
+    })
   })
 })

@@ -9,6 +9,7 @@ import {
   gradingRuns,
   organizations,
   organizationsUsers,
+  submissionExemptions,
   submissions,
 } from '@/db/schema'
 import { db } from '@/lib/db'
@@ -73,7 +74,9 @@ type Candidate = {
  * 2. Among their current submissions (append-only: the last row per
  *    (assignmentRepo, checkpoint)) whose checkpoint has an `autograderId` and
  *    is closed, the oldest one that is not already graded, not already
- *    leased and active, and under the attempt cap.
+ *    leased and active, and under the attempt cap. A repository exempted
+ *    from the close is skipped while the exemption lasts: the student can
+ *    still replace what would be graded.
  * 3. GitHub is asked for the repo and the token **before** anything is
  *    written: if either fails (a deleted repository, a stale installation —
  *    see installation-id-goes-stale, not self-healed here since there is no
@@ -254,10 +257,19 @@ async function findOldestEligibleCandidate(orgIds: number[]): Promise<Candidate 
     )
     .innerJoin(organizations, eq(organizations.id, assignments.organizationId))
     .innerJoin(checkpoints, eq(checkpoints.id, submissions.checkpointId))
+    .leftJoin(
+      submissionExemptions,
+      and(
+        eq(submissionExemptions.checkpointId, submissions.checkpointId),
+        eq(submissionExemptions.assignmentRepoId, submissions.assignmentRepoId),
+        isNull(submissionExemptions.revokedAt),
+      ),
+    )
     .where(
       and(
         isNotNull(checkpoints.autograderId),
         isNotNull(checkpoints.closedAt),
+        isNull(submissionExemptions.id),
         inArray(organizations.id, orgIds),
       ),
     )

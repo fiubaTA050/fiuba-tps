@@ -101,6 +101,34 @@ hay corrección automática aunque el checkpoint tenga `autograder_id`. Se
 setea a mano desde un checkbox reversible en la pantalla de edición, nunca
 por un timer.
 
+## Reentrega por alumno
+
+Una entrega cerrada se puede reabrir para **un solo repositorio**: "Habilitar
+reentrega" en la fila del alumno, en el dashboard del docente, con la entrega
+cerrada abierta en su pestaña (`submission_exemptions`, agregado 2026-09-22).
+Es el port del "Extend …'s assignment deadline" del sitio vivo, que exime a
+un equipo del *cutoff* (el corte que le saca el permiso de push). Acá lo que
+corta es `closed_at`, así que la exención es de eso.
+
+- **No tiene fecha**, como la del sitio vivo: dura hasta que el docente la
+  revoca. Una fecha de vencimiento sería una divergencia sin pedido detrás, y
+  el cierre de la entrega ya es una palanca manual.
+- **Solo levanta el cierre de la entrega.** Si el assignment está Inactive o
+  el classroom archivado, la exención no alcanza.
+- **No toca "Tarde"**, que se sigue midiendo contra `deadline_at`. Una
+  reentrega después de la deadline queda marcada.
+- **El lease no ofrece el repositorio mientras la exención esté vigente**,
+  porque el alumno todavía puede cambiar lo que se corrige. Al revocarla, la
+  entrega vigente (la última fila, como siempre) queda elegible sin que el
+  docente vuelva a cerrar nada. Si el worker ya había corregido la entrega
+  anterior, esa corrida queda colgada de esa fila.
+- **Reabrir la entrega revoca sus reentregas.** Con la entrega abierta ya no
+  hay nada de qué eximir, y el dashboard no las muestra; si quedaran activas,
+  volverían solas al cerrar de nuevo, dejando a esos alumnos confirmando y
+  fuera del lease sin que nadie lo vea.
+- Revocar setea `revoked_at` en vez de borrar, así una entrega confirmada
+  después del cierre conserva el motivo por el que existe.
+
 ## Append-only
 
 **Reentregar es una fila nueva, nunca un `UPDATE`.** No hay índice único por

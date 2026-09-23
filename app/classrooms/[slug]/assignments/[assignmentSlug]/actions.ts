@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { linkAccountToEntry } from '@/lib/data/rosters'
+import { setSubmissionExemption } from '@/lib/data/submissions'
 import { positiveInteger } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
@@ -44,6 +45,45 @@ export async function linkAccountAction(
   // identifier row picks up the avatar.
   revalidatePath(`/classrooms/${classroomSlug}/assignments/${assignmentSlug}`)
   revalidatePath(`/classrooms/${classroomSlug}/roster`)
+
+  return EMPTY_STATE
+}
+
+/**
+ * "Habilitar reentrega" / "Revocar reentrega" on a dashboard row — the live
+ * site's "Extend …'s assignment deadline" and its revoke. See
+ * `submissionExemptions` in db/schema.ts.
+ */
+export async function setSubmissionExemptionAction(
+  _previous: RosterActionState,
+  formData: FormData,
+): Promise<RosterActionState> {
+  const session = await auth()
+  if (!isUsableSession(session)) redirect('/')
+
+  const classroomSlug = String(formData.get('classroom_slug') ?? '')
+  const assignmentSlug = String(formData.get('assignment_slug') ?? '')
+  const checkpointId = positiveInteger(formData.get('checkpoint_id'))
+  const githubRepoId = positiveInteger(formData.get('github_repo_id'))
+  const exempt = formData.get('exempt') === '1'
+
+  if (checkpointId === null || githubRepoId === null) {
+    return { error: 'No encontramos esa entrega.', notice: null }
+  }
+
+  const result = await setSubmissionExemption(
+    session,
+    classroomSlug,
+    assignmentSlug,
+    checkpointId,
+    githubRepoId,
+    exempt,
+  )
+
+  if (!result) return { error: 'No encontramos ese classroom.', notice: null }
+  if (!result.success) return { error: result.error, notice: null }
+
+  revalidatePath(`/classrooms/${classroomSlug}/assignments/${assignmentSlug}`)
 
   return EMPTY_STATE
 }

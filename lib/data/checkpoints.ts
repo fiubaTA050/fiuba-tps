@@ -3,7 +3,7 @@ import 'server-only'
 import { and, count, eq, isNull } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
-import { assignments, checkpoints, submissions } from '@/db/schema'
+import { assignments, checkpoints, submissionExemptions, submissions } from '@/db/schema'
 import { parseArgentinaDateTime } from '@/lib/dates'
 import { findTeachingClassroom } from '@/lib/data/organizations'
 import { isForeignKeyViolation, isUniqueViolation } from '@/lib/data/postgres'
@@ -388,6 +388,22 @@ export async function saveCheckpoints(
             updatedAt: new Date(),
           })
           .where(eq(checkpoints.id, row.id))
+
+        // Reopening lets everyone back in, so the per-repo reentregas have
+        // nothing left to exempt from. Left active they would silently come
+        // back on the next close, hidden while the entrega is open — revoke
+        // them here instead. See submissionExemptions in db/schema.ts.
+        if (current.closedAt !== null && !row.closed) {
+          await tx
+            .update(submissionExemptions)
+            .set({ revokedAt: new Date() })
+            .where(
+              and(
+                eq(submissionExemptions.checkpointId, row.id),
+                isNull(submissionExemptions.revokedAt),
+              ),
+            )
+        }
       }
     })
   } catch (error) {

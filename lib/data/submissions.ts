@@ -10,6 +10,7 @@ import {
   checkpoints,
   gradingRuns,
   organizations,
+  submissionExemptions,
   submissions,
 } from '@/db/schema'
 import { disabledState } from '@/lib/data/invitations'
@@ -56,6 +57,12 @@ export type CheckpointPanel = {
   overdue: boolean
   /** False when the assignment is Inactive/archived, or this entrega itself was closed */
   enabled: boolean
+  /**
+   * The entrega is closed but the teacher let this repository back in — see
+   * `submissionExemptions` in db/schema.ts. Only ever true on a closed entrega:
+   * on an open one the exemption changes nothing and is not reported.
+   */
+  exempt: boolean
   disabledReason: string | null
   current: SubmissionRow | null
   /** Every confirmation, newest first. The student argues with data, not memory */
@@ -74,6 +81,10 @@ export type CheckpointSubmissions = {
   /** "2A". Null is the single unnamed entrega of an assignment with no parts */
   title: string | null
   deadlineAt: Date | null
+  /** The teacher closed it by hand — what makes "Habilitar reentrega" mean something */
+  closed: boolean
+  /** Repositories with an active exemption from that close, by GitHub repo id */
+  exemptRepoIds: Set<number>
   /** Keyed by the GitHub repo id — the same key `listRepositorySnapshots` and
    *  `AssignmentAcceptances` use, not the internal `assignment_repos.id` */
   byRepoId: Map<number, CurrentSubmission>
@@ -109,7 +120,12 @@ export async function listAssignmentSubmissions(
   if (!classroom) return null
 
   const checkpointRows = await db
-    .select({ id: checkpoints.id, title: checkpoints.title, deadlineAt: checkpoints.deadlineAt })
+    .select({
+      id: checkpoints.id,
+      title: checkpoints.title,
+      deadlineAt: checkpoints.deadlineAt,
+      closedAt: checkpoints.closedAt,
+    })
     .from(checkpoints)
     .innerJoin(assignments, eq(assignments.id, checkpoints.assignmentId))
     .where(
@@ -152,11 +168,34 @@ export async function listAssignmentSubmissions(
     })
   }
 
+  const exemptions = await db
+    .select({
+      checkpointId: submissionExemptions.checkpointId,
+      githubRepoId: assignmentRepos.githubRepoId,
+    })
+    .from(submissionExemptions)
+    .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissionExemptions.assignmentRepoId))
+    .where(
+      and(
+        inArray(submissionExemptions.checkpointId, checkpointIds),
+        isNull(submissionExemptions.revokedAt),
+      ),
+    )
+
+  const exemptByCheckpoint = new Map<number, Set<number>>(
+    checkpointIds.map((id) => [id, new Set()]),
+  )
+  for (const row of exemptions) {
+    exemptByCheckpoint.get(row.checkpointId)!.add(row.githubRepoId)
+  }
+
   return {
     checkpoints: checkpointRows.map((row) => ({
       id: row.id,
       title: row.title,
       deadlineAt: row.deadlineAt,
+      closed: row.closedAt !== null,
+      exemptRepoIds: exemptByCheckpoint.get(row.id)!,
       byRepoId: byCheckpoint.get(row.id)!,
     })),
   }
@@ -200,8 +239,9 @@ export async function findSubmissionPanels(
 
     // A closed entrega is a second, independent reason confirmations are
     // refused — checked after the assignment-level one so an Inactive/archived
-    // message still wins if both apply
-    if (enabled && checkpoint.closedAt !== null) {
+    // message still wins if both apply. An exemption lifts this one only.
+    const closed = checkpoint.closedAt !== null
+    if (enabled && closed && !checkpoint.exempt) {
       enabled = false
       disabledReason = CHECKPOINT_CLOSED
     }
@@ -213,6 +253,9 @@ export async function findSubmissionPanels(
       overdue: checkpoint.deadlineAt !== null && checkpoint.deadlineAt.getTime() < Date.now(),
       enabled,
       disabledReason,
+      // Only when it is what lets them in: an Inactive/archived assignment
+      // refuses anyway, and the notice would contradict the disabled form
+      exempt: enabled && closed && checkpoint.exempt,
       current: null,
       history: [],
     }
@@ -377,6 +420,89 @@ export async function findSubmissionDetail(
   }
 }
 
+export type SubmissionExemptionResult = { success: true } | { success: false; error: string }
+
+/**
+ * Lets one repository back into a closed entrega, or takes that back — the
+ * live site's "Extend …'s assignment deadline" / "Revoke …'s deadline
+ * extension". See `submissionExemptions` in db/schema.ts.
+ *
+ * Refused on an open entrega: there is nothing to exempt from, and an
+ * exemption lying in wait would silently outlive the next close.
+ */
+export async function setSubmissionExemption(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  checkpointId: number,
+  githubRepoId: number,
+  exempt: boolean,
+): Promise<SubmissionExemptionResult | null> {
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+  if (!classroom) return null
+
+  if (classroom.archivedAt) {
+    return {
+      success: false,
+      error: 'No se pueden modificar trabajos prácticos en un classroom archivado.',
+    }
+  }
+
+  const [row] = await db
+    .select({ repoId: assignmentRepos.id, closedAt: checkpoints.closedAt })
+    .from(assignmentRepos)
+    .innerJoin(
+      assignments,
+      and(eq(assignments.id, assignmentRepos.assignmentId), isNull(assignments.deletedAt)),
+    )
+    .innerJoin(
+      checkpoints,
+      and(eq(checkpoints.id, checkpointId), eq(checkpoints.assignmentId, assignments.id)),
+    )
+    .where(
+      and(
+        eq(assignments.organizationId, classroom.id),
+        eq(assignments.slug, assignmentSlug),
+        eq(assignmentRepos.githubRepoId, githubRepoId),
+      ),
+    )
+
+  if (!row) return { success: false, error: 'No encontramos esa entrega.' }
+
+  if (exempt && row.closedAt === null) {
+    return { success: false, error: 'La entrega está abierta, no hace falta habilitar la reentrega.' }
+  }
+
+  if (exempt) {
+    await db
+      .insert(submissionExemptions)
+      .values({
+        checkpointId,
+        assignmentRepoId: row.repoId,
+        createdByUserId: Number(session.user.id),
+      })
+      .onConflictDoUpdate({
+        target: [submissionExemptions.checkpointId, submissionExemptions.assignmentRepoId],
+        set: { revokedAt: null, createdByUserId: Number(session.user.id), createdAt: new Date() },
+      })
+  } else {
+    // Revoking an exemption that does not exist is a no-op, not an error:
+    // the double click on "Revocar" lands here
+    await db
+      .update(submissionExemptions)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(submissionExemptions.checkpointId, checkpointId),
+          eq(submissionExemptions.assignmentRepoId, row.repoId),
+          isNull(submissionExemptions.revokedAt),
+        ),
+      )
+  }
+
+  return { success: true }
+}
+
 /**
  * The student confirms a ref as their submission.
  *
@@ -430,7 +556,7 @@ export async function confirmSubmission(
     return { success: false, error: 'No encontramos esa entrega.' }
   }
 
-  if (checkpoint.closedAt !== null) {
+  if (checkpoint.closedAt !== null && !checkpoint.exempt) {
     return { success: false, error: CHECKPOINT_CLOSED }
   }
 
@@ -563,6 +689,7 @@ async function loadContext(session: Session, key: string) {
       title: checkpoints.title,
       deadlineAt: checkpoints.deadlineAt,
       closedAt: checkpoints.closedAt,
+      exemptionId: submissionExemptions.id,
     })
     .from(assignmentInvitations)
     .innerJoin(
@@ -578,6 +705,15 @@ async function loadContext(session: Session, key: string) {
       and(eq(assignmentRepos.assignmentId, assignments.id), eq(assignmentRepos.userId, userId)),
     )
     .leftJoin(checkpoints, eq(checkpoints.assignmentId, assignments.id))
+    // At most one row per checkpoint: the index is unique on (checkpoint, repo)
+    .leftJoin(
+      submissionExemptions,
+      and(
+        eq(submissionExemptions.checkpointId, checkpoints.id),
+        eq(submissionExemptions.assignmentRepoId, assignmentRepos.id),
+        isNull(submissionExemptions.revokedAt),
+      ),
+    )
     .where(and(eq(assignmentInvitations.key, key), isNull(assignmentInvitations.deletedAt)))
     // `id` breaks a tie on `position` — see the same comment on listCheckpoints
     .orderBy(checkpoints.position, checkpoints.id)
@@ -598,6 +734,7 @@ async function loadContext(session: Session, key: string) {
         title: row.title,
         deadlineAt: row.deadlineAt,
         closedAt: row.closedAt,
+        exempt: row.exemptionId !== null,
       })),
   }
 }

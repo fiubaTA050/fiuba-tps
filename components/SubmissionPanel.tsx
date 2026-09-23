@@ -170,6 +170,14 @@ function PanelBody({
         </div>
       )}
 
+      {/* The entrega is closed for everyone else — see submissionExemptions in db/schema.ts */}
+      {panel.exempt && (
+        <div className="flash mb-3">
+          El docente te habilitó una reentrega aunque la entrega esté cerrada. Lo que confirmes
+          reemplaza tu entrega anterior.
+        </div>
+      )}
+
       {panel.enabled ? (
         <form action={formAction}>
           <input type="hidden" name="key" value={invitationKey} />

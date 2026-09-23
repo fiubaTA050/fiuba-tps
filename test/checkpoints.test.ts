@@ -8,6 +8,7 @@ import {
   checkpoints,
   organizations,
   organizationsUsers,
+  submissionExemptions,
   submissions,
   users,
 } from '@/db/schema'
@@ -393,6 +394,36 @@ describe('saveCheckpoints', () => {
     const [found] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
     expect(found.closedAt).toBeNull()
+  })
+
+  it('reopening revokes the reentregas, so they do not come back on the next close', async () => {
+    const profe = await teacher()
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+
+    await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: true },
+    ])
+    const [created] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
+    const [repo] = await db
+      .insert(assignmentRepos)
+      .values({ assignmentId, userId: Number(profe.user.id), githubRepoId: nextGithubId++ })
+      .returning({ id: assignmentRepos.id })
+    await db.insert(submissionExemptions).values({
+      checkpointId: created.id,
+      assignmentRepoId: repo.id,
+      createdByUserId: Number(profe.user.id),
+    })
+
+    // A re-save that keeps it closed leaves the reentrega alone
+    await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: true },
+    ])
+    expect((await db.select().from(submissionExemptions))[0].revokedAt).toBeNull()
+
+    await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+    ])
+    expect((await db.select().from(submissionExemptions))[0].revokedAt).not.toBeNull()
   })
 
   it('clears the date and leaves the entrega open', async () => {

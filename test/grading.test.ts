@@ -9,6 +9,7 @@ import {
   gradingRuns,
   organizations,
   organizationsUsers,
+  submissionExemptions,
   submissions,
   users,
 } from '@/db/schema'
@@ -333,6 +334,63 @@ describe('leaseSubmissionForGrading', () => {
     await submittedRepo(assignment, alumna)
 
     expect(await leaseSubmissionForGrading(profeA, 1)).toBeNull()
+  })
+
+  describe('with a repository exempted from the close', () => {
+    /** Exempts the repo and entrega behind `submissionId`, returning both ids */
+    async function exempt(submissionId: number, by: number) {
+      const [row] = await db
+        .select({ repoId: submissions.assignmentRepoId, checkpointId: submissions.checkpointId })
+        .from(submissions)
+        .where(eq(submissions.id, submissionId))
+      await db
+        .insert(submissionExemptions)
+        .values({ checkpointId: row.checkpointId, assignmentRepoId: row.repoId, createdByUserId: by })
+      return row
+    }
+
+    async function revoke() {
+      await db.update(submissionExemptions).set({ revokedAt: new Date() })
+    }
+
+    it('skips it while the student can still replace the submission', async () => {
+      const profe = await teacher()
+      const alumna = await student()
+      const org = await classroom(profe)
+      const assignment = await gradableAssignment(org, profe)
+      const { submissionId } = await submittedRepo(assignment, alumna)
+      await exempt(submissionId, profe)
+
+      expect(await leaseSubmissionForGrading(profe, 1)).toBeNull()
+    })
+
+    it('grades the submission confirmed during the exemption once it is revoked', async () => {
+      const profe = await teacher()
+      const alumna = await student()
+      const org = await classroom(profe)
+      const assignment = await gradableAssignment(org, profe)
+      const { submissionId } = await submittedRepo(assignment, alumna, { sha: 'a'.repeat(40) })
+      const { repoId, checkpointId } = await exempt(submissionId, profe)
+
+      const [resubmission] = await db
+        .insert(submissions)
+        .values({
+          assignmentRepoId: repoId,
+          checkpointId,
+          sha: 'b'.repeat(40),
+          ref: 'main',
+          committedAt: new Date(),
+          submittedByUserId: alumna,
+        })
+        .returning({ id: submissions.id })
+      await revoke()
+
+      const lease = await leaseSubmissionForGrading(profe, await apiKey(profe))
+
+      expect(lease).toMatchObject({ sha: 'b'.repeat(40) })
+      const [run] = await db.select().from(gradingRuns).where(eq(gradingRuns.id, lease!.leaseId))
+      expect(run.submissionId).toBe(resubmission.id)
+    })
   })
 
   it('writes nothing when the repository cannot be resolved on GitHub', async () => {

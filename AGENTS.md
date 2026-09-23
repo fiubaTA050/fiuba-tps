@@ -73,8 +73,9 @@ reference code without mental translation. The confusing one:
   propagates to existing repos, see below), autograding, Reuse assignment, and
   the `gh classroom clone` command. The live "Late" label is not on the
   dashboard yet — the deadline it needs exists now (see entregas below), the
-  row that reads it does not — and the per-team deadline extension is not
-  ported. The commit data for the whole cohort comes from
+  row that reads it does not. The per-team deadline extension is ported as an
+  exemption from the entrega's close, with no date like the live one — see
+  "Reentrega por alumno" in `docs/entregas.md`. The commit data for the whole cohort comes from
   `listRepositorySnapshots`, which asks
   GitHub for the repositories **by id** — GraphQL `nodes(ids:)` over node ids
   derived from the stored `databaseId` — in parallel batches of five, never one

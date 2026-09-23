@@ -822,6 +822,49 @@ export const submissions = pgTable(
 )
 
 /**
+ * One repository let back into an entrega the teacher already closed.
+ *
+ * Port of the live site's per-row "Extend …'s assignment deadline" / "Revoke
+ * …'s deadline extension" (saved capture of the group dashboard; the archived
+ * Rails code has no equivalent). There it exempts a team from the *cutoff*
+ * deadline, which revokes push access; here what cuts is `checkpoints.closed_at`,
+ * so the exemption is from that. Like the live one it has no date of its own:
+ * the teacher revokes it by hand, the same lever `closed_at` already is.
+ *
+ * While active, `confirmSubmission` accepts this repository's confirmations and
+ * the grading lease skips it — the student can still change what gets graded.
+ * Revoking sets `revoked_at` instead of deleting, and exempting again clears it,
+ * so a submission confirmed after the close keeps the reason it exists.
+ *
+ * It changes nothing about "Tarde": that still reads against `deadline_at`.
+ * Individual only, because only individual assignments have entregas yet.
+ */
+export const submissionExemptions = pgTable(
+  'submission_exemptions',
+  {
+    id: serial('id').primaryKey(),
+    checkpointId: integer('checkpoint_id')
+      .notNull()
+      .references(() => checkpoints.id, { onDelete: 'cascade' }),
+    assignmentRepoId: integer('assignment_repo_id')
+      .notNull()
+      .references(() => assignmentRepos.id, { onDelete: 'cascade' }),
+    createdByUserId: integer('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Null while the exemption is active */
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('index_submission_exemptions_on_checkpoint_and_repo').on(
+      table.checkpointId,
+      table.assignmentRepoId,
+    ),
+  ],
+)
+
+/**
  * A credential for a non-browser client of the API — the grading worker
  * today, and whatever else gets built on top of this later, which is why the
  * table is generic rather than named after that one caller.
@@ -913,5 +956,6 @@ export type GroupAssignmentRepo = typeof groupAssignmentRepos.$inferSelect
 export type GroupInviteStatus = typeof groupInviteStatuses.$inferSelect
 export type Checkpoint = typeof checkpoints.$inferSelect
 export type Submission = typeof submissions.$inferSelect
+export type SubmissionExemption = typeof submissionExemptions.$inferSelect
 export type ApiKey = typeof apiKeys.$inferSelect
 export type GradingRun = typeof gradingRuns.$inferSelect

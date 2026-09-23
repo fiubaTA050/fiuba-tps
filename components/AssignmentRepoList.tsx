@@ -27,6 +27,7 @@ import { formatArgentina } from '@/lib/dates'
 import { CheckboxMenu } from './CheckboxMenu'
 import { LinkToStudentDialog } from './LinkToStudentDialog'
 import { Pagination } from './Pagination'
+import { SubmissionExemptionDialog } from './SubmissionExemptionDialog'
 
 /**
  * The list of repositories on an assignment dashboard, with the filter bar the
@@ -461,6 +462,7 @@ export function AssignmentRepoList({
                   key={row.key}
                   row={row}
                   checkpointId={activeCheckpointId}
+                  checkpoint={activeCheckpoint}
                   classroomSlug={classroomSlug}
                   assignmentSlug={assignmentSlug}
                   linkToStudent={linkToStudent}
@@ -550,6 +552,7 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
 function RepoListItem({
   row,
   checkpointId,
+  checkpoint,
   classroomSlug,
   assignmentSlug,
   linkToStudent,
@@ -558,11 +561,14 @@ function RepoListItem({
   /** Which entrega's history "Ver entregas anteriores" asks for — null when
    *  this dashboard doesn't track checkpoints, or none is open yet */
   checkpointId: number | null
+  /** The open tab's entrega, for "Habilitar reentrega" — null as `checkpointId` is */
+  checkpoint: CheckpointSubmissions | null
   classroomSlug: string
   assignmentSlug: string
   linkToStudent?: LinkToStudent
 }) {
   const { snapshot } = row
+  const exempt = row.repoId !== null && checkpoint?.exemptRepoIds.has(row.repoId) === true
 
   return (
     <div className="d-table col-12 assignment-repo-list-item">
@@ -594,6 +600,12 @@ function RepoListItem({
               {row.submission?.late && (
                 <span className="IssueLabel IssueLabel--big mr-2 color-bg-danger">Tarde</span>
               )}
+
+              {checkpoint?.closed && exempt && (
+                <span className="IssueLabel IssueLabel--big mr-2 color-bg-attention">
+                  Reentrega habilitada
+                </span>
+              )}
             </div>
 
             <div className="d-flex flex-items-baseline flex-wrap">
@@ -616,6 +628,20 @@ function RepoListItem({
                   {...linkToStudent}
                   userId={row.userId}
                   login={row.githubLogin}
+                />
+              )}
+
+              {/* Only on a closed entrega: on an open one there is nothing to
+                  exempt from, and setSubmissionExemption refuses it */}
+              {checkpoint?.closed && row.repoId !== null && (
+                <SubmissionExemptionDialog
+                  name={row.name}
+                  entrega={checkpoint.title ?? 'la entrega'}
+                  exempt={exempt}
+                  classroomSlug={classroomSlug}
+                  assignmentSlug={assignmentSlug}
+                  checkpointId={checkpoint.id}
+                  githubRepoId={row.repoId}
                 />
               )}
 
