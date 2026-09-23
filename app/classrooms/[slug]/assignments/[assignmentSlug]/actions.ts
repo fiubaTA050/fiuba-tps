@@ -50,7 +50,7 @@ export async function linkAccountAction(
 }
 
 /**
- * "Habilitar reentrega" / "Revocar reentrega" on a dashboard row — the live
+ * "Extender entrega" / "Revocar extensión" on a dashboard row — the live
  * site's "Extend …'s assignment deadline" and its revoke. See
  * `submissionExemptions` in db/schema.ts.
  */

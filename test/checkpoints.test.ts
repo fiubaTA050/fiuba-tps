@@ -396,7 +396,7 @@ describe('saveCheckpoints', () => {
     expect(found.closedAt).toBeNull()
   })
 
-  it('reopening revokes the reentregas, so they do not come back on the next close', async () => {
+  it('reopening revokes the extensions, so they do not come back on the next close', async () => {
     const profe = await teacher()
     const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
 
@@ -414,7 +414,7 @@ describe('saveCheckpoints', () => {
       createdByUserId: Number(profe.user.id),
     })
 
-    // A re-save that keeps it closed leaves the reentrega alone
+    // A re-save that keeps it closed leaves the extension alone
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
       { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: true },
     ])

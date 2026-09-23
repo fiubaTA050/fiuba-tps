@@ -27,7 +27,7 @@ import { formatArgentina } from '@/lib/dates'
 import { CheckboxMenu } from './CheckboxMenu'
 import { LinkToStudentDialog } from './LinkToStudentDialog'
 import { Pagination } from './Pagination'
-import { SubmissionExemptionDialog } from './SubmissionExemptionDialog'
+import { SubmissionExtensionMenu } from './SubmissionExtensionMenu'
 
 /**
  * The list of repositories on an assignment dashboard, with the filter bar the
@@ -561,14 +561,14 @@ function RepoListItem({
   /** Which entrega's history "Ver entregas anteriores" asks for — null when
    *  this dashboard doesn't track checkpoints, or none is open yet */
   checkpointId: number | null
-  /** The open tab's entrega, for "Habilitar reentrega" — null as `checkpointId` is */
+  /** The open tab's entrega, for "Extender entrega" — null as `checkpointId` is */
   checkpoint: CheckpointSubmissions | null
   classroomSlug: string
   assignmentSlug: string
   linkToStudent?: LinkToStudent
 }) {
   const { snapshot } = row
-  const exempt = row.repoId !== null && checkpoint?.exemptRepoIds.has(row.repoId) === true
+  const extended = row.repoId !== null && checkpoint?.exemptRepoIds.has(row.repoId) === true
 
   return (
     <div className="d-table col-12 assignment-repo-list-item">
@@ -601,9 +601,11 @@ function RepoListItem({
                 <span className="IssueLabel IssueLabel--big mr-2 color-bg-danger">Tarde</span>
               )}
 
-              {checkpoint?.closed && exempt && (
+              {/* The live "Deadline extended" (GitHub Docs); its colour is not
+                  documented, attention keeps it apart from Entregado and Tarde */}
+              {checkpoint?.closed && extended && (
                 <span className="IssueLabel IssueLabel--big mr-2 color-bg-attention">
-                  Reentrega habilitada
+                  Entrega extendida
                 </span>
               )}
             </div>
@@ -628,20 +630,6 @@ function RepoListItem({
                   {...linkToStudent}
                   userId={row.userId}
                   login={row.githubLogin}
-                />
-              )}
-
-              {/* Only on a closed entrega: on an open one there is nothing to
-                  exempt from, and setSubmissionExemption refuses it */}
-              {checkpoint?.closed && row.repoId !== null && (
-                <SubmissionExemptionDialog
-                  name={row.name}
-                  entrega={checkpoint.title ?? 'la entrega'}
-                  exempt={exempt}
-                  classroomSlug={classroomSlug}
-                  assignmentSlug={assignmentSlug}
-                  checkpointId={checkpoint.id}
-                  githubRepoId={row.repoId}
                 />
               )}
 
@@ -696,6 +684,21 @@ function RepoListItem({
               </a>
             )}
           </div>
+
+          {/* Only on a closed entrega: on an open one there is nothing to
+              extend, the menu would be empty, and setSubmissionExemption
+              refuses it */}
+          {checkpoint?.closed && row.repoId !== null && (
+            <SubmissionExtensionMenu
+              name={row.name}
+              entrega={checkpoint.title ?? 'la entrega'}
+              extended={extended}
+              classroomSlug={classroomSlug}
+              assignmentSlug={assignmentSlug}
+              checkpointId={checkpoint.id}
+              githubRepoId={row.repoId}
+            />
+          )}
         </div>
       </div>
     </div>

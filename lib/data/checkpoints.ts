@@ -389,7 +389,7 @@ export async function saveCheckpoints(
           })
           .where(eq(checkpoints.id, row.id))
 
-        // Reopening lets everyone back in, so the per-repo reentregas have
+        // Reopening lets everyone back in, so the per-repo extensions have
         // nothing left to exempt from. Left active they would silently come
         // back on the next close, hidden while the entrega is open — revoke
         // them here instead. See submissionExemptions in db/schema.ts.

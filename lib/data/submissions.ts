@@ -81,7 +81,7 @@ export type CheckpointSubmissions = {
   /** "2A". Null is the single unnamed entrega of an assignment with no parts */
   title: string | null
   deadlineAt: Date | null
-  /** The teacher closed it by hand — what makes "Habilitar reentrega" mean something */
+  /** The teacher closed it by hand — what makes "Extender entrega" mean something */
   closed: boolean
   /** Repositories with an active exemption from that close, by GitHub repo id */
   exemptRepoIds: Set<number>
@@ -470,7 +470,7 @@ export async function setSubmissionExemption(
   if (!row) return { success: false, error: 'No encontramos esa entrega.' }
 
   if (exempt && row.closedAt === null) {
-    return { success: false, error: 'La entrega está abierta, no hace falta habilitar la reentrega.' }
+    return { success: false, error: 'La entrega está abierta, no hace falta extenderla.' }
   }
 
   if (exempt) {
