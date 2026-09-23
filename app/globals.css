@@ -622,6 +622,28 @@
   line-height: 1.25;
 }
 
+/* The bar of the "Aprobados" tile, from the live site's application CSS */
+.Progress {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  background-color: var(--bgColor-neutral-muted);
+  border-radius: 6px;
+  outline: 1px solid transparent;
+}
+
+.Progress--small {
+  height: 5px;
+}
+
+.Progress-item {
+  outline: 2px solid transparent;
+}
+
+.Progress-item + .Progress-item {
+  margin-left: 2px;
+}
+
 .Box--condensed .Box-header,
 .Box--condensed .Box-body,
 .Box--condensed .Box-footer,

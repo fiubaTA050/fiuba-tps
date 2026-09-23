@@ -46,12 +46,11 @@ import { SubmissionExtensionMenu } from './SubmissionExtensionMenu'
  * filters in the URL would re-run that query on every keystroke. The whole
  * cohort is already in the browser; filtering it there is instant and free.
  *
- * One of the live filters has nothing behind it: "Passing/Failing" is
- * autograding and is not ported. The "On-time/Late" halves of the submission
- * filter needed deadlines, which checkpoints now give the individual
- * dashboard — its own `CheckboxMenu` below only renders when a row actually
- * carries submission data, which the group dashboard's rows do not yet (no
- * group checkpoints).
+ * "Passing/Failing" reads the automated grading of the open tab's entrega,
+ * and only shows on a tab whose entrega has an autograder. The "On-time/Late"
+ * options of the submission filter need deadlines, which checkpoints give the
+ * individual dashboard — they are left out of the menu on the group one,
+ * whose rows carry no submission data yet (no group checkpoints).
  *
  * **Pagination is client-side for the same reason**, over the rows the filters
  * left. The live site puts it in the URL, as Kaminari does — see
@@ -65,14 +64,10 @@ import { SubmissionExtensionMenu } from './SubmissionExtensionMenu'
  */
 const PER_PAGE = 30
 
-/** The live "Filter by submission" */
-type SubmissionFilter = 'submitted' | 'not_submitted'
-/**
- * The live "On-time/Late" halves of the submission filter, split into their
- * own menu here rather than merged into `SubmissionFilter`'s checkboxes,
- * since a row can be late only once it has confirmed at all.
- */
-type TimingFilter = 'on_time' | 'late'
+/** The live "Filter by submission", On-time and Late included */
+type SubmissionFilter = 'submitted' | 'on_time' | 'late' | 'not_submitted'
+/** The live "Filter by passing" */
+type PassingFilter = 'passing' | 'failing'
 /** The live "Filter by accepted" */
 type AcceptedFilter = 'accepted' | 'unaccepted'
 /** The live "Filter by unlinked" */
@@ -89,11 +84,12 @@ const SORT_LABEL: Record<Sort, string> = {
 
 /**
  * The dots the live submission menu puts beside each option, with its own
- * inline colours: the subtle green of "Submitted" and the subtle red of "Not
- * submitted". They are hardcoded there too, and they are the same two shades
- * the `IssueLabel` of a row lands on.
+ * inline colours: the subtle green of "Submitted", blue of "On-time", yellow
+ * of "Late" and red of "Not submitted". They are hardcoded there too.
  */
 const DOT_SUBMITTED = '#DAFBE1'
+const DOT_ON_TIME = '#DDF4FF'
+const DOT_LATE = '#FFF8C5'
 const DOT_NOT_SUBMITTED = '#FFEBE9'
 
 const TONE_CLASS: Record<SubmissionTone, string> = {
@@ -148,7 +144,7 @@ export function AssignmentRepoList({
 }) {
   const [query, setQuery] = useState('')
   const [submission, setSubmission] = useState<Set<SubmissionFilter>>(new Set())
-  const [timing, setTiming] = useState<Set<TimingFilter>>(new Set())
+  const [passing, setPassing] = useState<Set<PassingFilter>>(new Set())
   const [accepted, setAccepted] = useState<Set<AcceptedFilter>>(new Set())
   const [unlinked, setUnlinked] = useState<Set<UnlinkedFilter>>(new Set())
   const [sort, setSort] = useState<Sort>('az')
@@ -201,15 +197,20 @@ export function AssignmentRepoList({
       // Each group is a set of checkboxes: empty means "no opinion", and two
       // boxes of the same group are an OR, the way the live menus behave
       if (submission.size > 0) {
-        const state: SubmissionFilter = hasSubmitted(row) ? 'submitted' : 'not_submitted'
-        if (!submission.has(state)) return false
+        // A confirmed row matches both "submitted" and one of on-time/late;
+        // nothing is on-time or late without a confirmation
+        const states: SubmissionFilter[] = hasSubmitted(row) ? ['submitted'] : ['not_submitted']
+        if (row.submission) states.push(row.submission.late ? 'late' : 'on_time')
+        if (!states.some((state) => submission.has(state))) return false
       }
 
-      if (timing.size > 0) {
-        // Nothing to be on-time or late about without a confirmation
-        if (row.submission == null) return false
-        const state: TimingFilter = row.submission.late ? 'late' : 'on_time'
-        if (!timing.has(state)) return false
+      if (passing.size > 0) {
+        // Not graded yet is neither: the live "Failing" would lump it in with
+        // a real failure, but here grading only starts once the entrega
+        // closes, and an open one would read as a whole cohort failing
+        const verdict = row.submission?.passed
+        if (verdict == null) return false
+        if (!passing.has(verdict ? 'passing' : 'failing')) return false
       }
 
       if (accepted.size > 0) {
@@ -228,7 +229,7 @@ export function AssignmentRepoList({
     })
 
     return [...kept].sort(compareBy(sort))
-  }, [resolvedRows, query, submission, timing, accepted, unlinked, sort])
+  }, [resolvedRows, query, submission, passing, accepted, unlinked, sort])
 
   // Back to the first page whenever the list underneath changes — a filter, a
   // sort or a search. `filtered` is a memo, so its identity is that change.
@@ -252,7 +253,7 @@ export function AssignmentRepoList({
   const dirty =
     query !== '' ||
     submission.size > 0 ||
-    timing.size > 0 ||
+    passing.size > 0 ||
     accepted.size > 0 ||
     unlinked.size > 0 ||
     sort !== 'az'
@@ -260,7 +261,7 @@ export function AssignmentRepoList({
   function clear() {
     setQuery('')
     setSubmission(new Set())
-    setTiming(new Set())
+    setPassing(new Set())
     setAccepted(new Set())
     setUnlinked(new Set())
     setSort('az')
@@ -269,6 +270,9 @@ export function AssignmentRepoList({
   // Only a dashboard that tracks checkpoints carries submission data — the
   // group one does not (no group checkpoints yet), whatever rows it has
   const hasTimingData = tracksCheckpoints
+  // The verdict is read off the open tab's entrega, so on one without an
+  // autograder the menu could only ever empty the list
+  const hasGrading = activeCheckpoint?.autograded ?? false
 
   return (
     <>
@@ -281,7 +285,12 @@ export function AssignmentRepoList({
           checkpoints={checkpoints}
           totalRows={rows.filter((row) => row.repoId !== null).length}
           activeCheckpointId={activeCheckpointId}
-          onSelect={setActiveCheckpointId}
+          onSelect={(id) => {
+            setActiveCheckpointId(id)
+            // Hidden on a tab without an autograder, so it must not keep
+            // filtering there unseen
+            setPassing(new Set())
+          }}
         />
       )}
 
@@ -303,6 +312,22 @@ export function AssignmentRepoList({
                 description: 'Subieron algún commit propio',
                 dot: DOT_SUBMITTED,
               },
+              ...(hasTimingData
+                ? [
+                    {
+                      value: 'on_time' as const,
+                      label: 'A tiempo',
+                      description: 'Confirmaron antes del vencimiento',
+                      dot: DOT_ON_TIME,
+                    },
+                    {
+                      value: 'late' as const,
+                      label: 'Tarde',
+                      description: 'Confirmaron después del vencimiento',
+                      dot: DOT_LATE,
+                    },
+                  ]
+                : []),
               {
                 value: 'not_submitted',
                 label: 'Sin entregar',
@@ -368,19 +393,18 @@ export function AssignmentRepoList({
             onToggle={(value) => setAccepted(toggle(accepted, value))}
           />
 
-          {/* Only where entregas are tracked — the individual dashboard, for
-              now. Without a confirmation there is nothing to be on-time or
-              late about, so this stays hidden on the group one. */}
-          {hasTimingData && (
+          {/* Where the live site puts "Filter by passing": after "Filter by
+              accepted", before "Sort" */}
+          {hasGrading && (
             <CheckboxMenu
-              label="Filtrar por vencimiento"
-              heading="Filtrar por vencimiento:"
+              label="Filtrar por aprobación"
+              heading="Filtrar por aprobación:"
               options={[
-                { value: 'on_time', label: 'A tiempo' },
-                { value: 'late', label: 'Tarde' },
+                { value: 'passing', label: 'Aprobados' },
+                { value: 'failing', label: 'Desaprobados' },
               ]}
-              selected={timing}
-              onToggle={(value) => setTiming(toggle(timing, value))}
+              selected={passing}
+              onToggle={(value) => setPassing(toggle(passing, value))}
             />
           )}
 

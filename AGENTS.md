@@ -98,10 +98,12 @@ reference code without mental translation. The confusing one:
   in the URL — its "Clear current search query, filters, and sorts" is a plain
   link back to the assignment path, because Rails re-renders from the database.
   Here the page is `force-dynamic` and its rows cost a GitHub query, so a filter
-  in the URL would re-run that query on every keystroke. Of the live filters,
-  "Passing/Failing" (autograding) has nothing behind it and is dropped; the
-  "On-time/Late" halves of the submission one now have a deadline to read and
-  are simply not built yet.
+  in the URL would re-run that query on every keystroke. The live
+  "Passing/Failing" reads the grading worker's verdict on the open entrega —
+  every test `passed` — and, with the "Passed students" tile, only appears
+  where an entrega has an autograder; a submission not graded yet is neither,
+  where the live site would call it failing — the tile's bar leaves it grey
+  instead of red, since grading here only starts once an entrega closes.
 - **Its pagination runs in the browser too**, over the rows the filters left.
   The original paginates with Kaminari (`shared/_pagination` over the
   `app/views/kaminari/` partials) and the live site still does, 30 rows to a

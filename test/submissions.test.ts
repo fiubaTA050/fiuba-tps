@@ -709,6 +709,48 @@ describe('listAssignmentSubmissions', () => {
     expect(checkpointResult(result, checkpointB.id)?.byRepoId.has(githubRepoId)).toBe(false)
   })
 
+  it('reads passed off the succeeded run: every test passed, one failed, or not graded yet', async () => {
+    const profe = await student('profe')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const [{ id: checkpointId }] = await db
+      .insert(checkpoints)
+      .values({ assignmentId, autograderId: 'tp1' })
+      .returning({ id: checkpoints.id })
+
+    const grade = async (name: string, runs: { status: 'succeeded' | 'failed'; tests?: unknown }[]) => {
+      const alumna = await student(name)
+      const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+      const submissionId = await submit(repoId, checkpointId, alumna, 'a'.repeat(40))
+      for (const run of runs) {
+        await db.insert(gradingRuns).values({ submissionId, expiresAt: new Date(), ...run })
+      }
+      return githubRepoId
+    }
+
+    const passing = await grade('aprobada', [
+      // A worker failure before the real run says nothing about the tests
+      { status: 'failed' },
+      { status: 'succeeded', tests: [{ status: 'passed' }, { status: 'passed' }] },
+    ])
+    const failing = await grade('desaprobada', [
+      { status: 'succeeded', tests: [{ status: 'passed' }, { status: 'failed' }] },
+    ])
+    // A build that broke before any test ran
+    const noTests = await grade('sin-tests', [{ status: 'succeeded', tests: [] }])
+    const ungraded = await grade('sin-corregir', [{ status: 'failed' }])
+
+    const checkpoint = checkpointResult(
+      await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug),
+      checkpointId,
+    )
+
+    expect(checkpoint?.autograded).toBe(true)
+    expect(checkpoint?.byRepoId.get(passing)?.passed).toBe(true)
+    expect(checkpoint?.byRepoId.get(failing)?.passed).toBe(false)
+    expect(checkpoint?.byRepoId.get(noTests)?.passed).toBe(false)
+    expect(checkpoint?.byRepoId.get(ungraded)?.passed).toBeNull()
+  })
+
   it('reports no checkpoints as an empty array, not an error', async () => {
     const profe = await student('profe')
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)

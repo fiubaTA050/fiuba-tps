@@ -109,6 +109,20 @@ export default async function AssignmentPage(
   const submitted = repoIds.filter((id) => confirmedRepoIds.has(id)).length
   const students = acceptances.entries.length + acceptances.unlinkedAccounts.length
 
+  // The live "Passed students". A repo passes when it passed every entrega
+  // that has an autograder — with a single one, the common case, simply that
+  // one. An entrega not graded yet is not passed, so on TP2 the count only
+  // climbs once the last part is graded, which is what "passed the TP" means.
+  // It failed once any of them came back failing; everyone else is not graded
+  // yet and stays off the bar's red (StatTiles).
+  const autograded = submissions.checkpoints.filter((c) => c.autograded)
+  const passed = repoIds.filter((id) =>
+    autograded.every((c) => c.byRepoId.get(id)?.passed === true),
+  ).length
+  const failed = repoIds.filter((id) =>
+    autograded.some((c) => c.byRepoId.get(id)?.passed === false),
+  ).length
+
   return (
     <>
       <Breadcrumb
@@ -154,10 +168,11 @@ export default async function AssignmentPage(
 
         <h2 className="mb-2">Detalle del trabajo práctico</h2>
 
-        {/* The live "Students total", "Accepted assignments" and "Assignment
-            submissions" — the third redefined here as confirmations, not
-            commits, now that entregas exist. Its fourth tile, "Passing
-            students", is autograding and is not ported. */}
+        {/* The live "Students total", "Accepted assignments", "Assignment
+            submissions" and "Passed students" — the third redefined here as
+            confirmations, not commits, now that entregas exist. The fourth
+            only where an entrega has an autograder: without one it would be a
+            permanent 0 that reads as everyone failing. */}
         <StatTiles
           tiles={[
             {
@@ -189,6 +204,19 @@ export default async function AssignmentPage(
                 { value: acceptances.acceptedCount - submitted, label: 'sin confirmar' },
               ],
             },
+            ...(autograded.length === 0
+              ? []
+              : [
+                  {
+                    label: 'Alumnos aprobados',
+                    progress: {
+                      value: passed,
+                      failed,
+                      of: acceptances.acceptedCount,
+                      label: 'aprobados',
+                    },
+                  },
+                ]),
           ]}
         />
 

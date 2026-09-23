@@ -74,6 +74,13 @@ export type CurrentSubmission = {
   submittedAt: Date
   /** `submitted_at` past the checkpoint's deadline. Accepted anyway — it closes nothing */
   late: boolean
+  /**
+   * What the automated grading made of this SHA: true when every test of its
+   * succeeded run passed, false when one did not, null when no run has
+   * succeeded yet — the entrega has no autograder, is still open, or the
+   * worker has not reached it. See `passedAllTests`.
+   */
+  passed: boolean | null
 }
 
 export type CheckpointSubmissions = {
@@ -83,6 +90,8 @@ export type CheckpointSubmissions = {
   deadlineAt: Date | null
   /** The teacher closed it by hand — what makes "Extender entrega" mean something */
   closed: boolean
+  /** Has an `autograderId`: its submissions get a `passed` once graded */
+  autograded: boolean
   /** Repositories with an active exemption from that close, by GitHub repo id */
   exemptRepoIds: Set<number>
   /** Keyed by the GitHub repo id — the same key `listRepositorySnapshots` and
@@ -125,6 +134,7 @@ export async function listAssignmentSubmissions(
       title: checkpoints.title,
       deadlineAt: checkpoints.deadlineAt,
       closedAt: checkpoints.closedAt,
+      autograderId: checkpoints.autograderId,
     })
     .from(checkpoints)
     .innerJoin(assignments, eq(assignments.id, checkpoints.assignmentId))
@@ -145,6 +155,7 @@ export async function listAssignmentSubmissions(
 
   const rows = await db
     .selectDistinctOn([submissions.assignmentRepoId, submissions.checkpointId], {
+      id: submissions.id,
       checkpointId: submissions.checkpointId,
       githubRepoId: assignmentRepos.githubRepoId,
       sha: submissions.sha,
@@ -154,6 +165,29 @@ export async function listAssignmentSubmissions(
     .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissions.assignmentRepoId))
     .where(inArray(submissions.checkpointId, checkpointIds))
     .orderBy(submissions.assignmentRepoId, submissions.checkpointId, desc(submissions.id))
+
+  // Only the current submissions' runs, and only the succeeded ones: a
+  // `failed` run is the worker failing, not the student, and says nothing
+  // about the tests. The lease never hands out a submission that already has
+  // a succeeded run (`isEligible` in lib/data/grading.ts), so there is at
+  // most one per submission.
+  const runs =
+    rows.length === 0
+      ? []
+      : await db
+          .select({ submissionId: gradingRuns.submissionId, tests: gradingRuns.tests })
+          .from(gradingRuns)
+          .where(
+            and(
+              inArray(
+                gradingRuns.submissionId,
+                rows.map((row) => row.id),
+              ),
+              eq(gradingRuns.status, 'succeeded'),
+            ),
+          )
+
+  const passedBySubmission = new Map(runs.map((run) => [run.submissionId, passedAllTests(run.tests)]))
 
   const byCheckpoint = new Map<number, Map<number, CurrentSubmission>>(
     checkpointIds.map((id) => [id, new Map()]),
@@ -165,6 +199,7 @@ export async function listAssignmentSubmissions(
       sha: row.sha,
       submittedAt: row.submittedAt,
       late: deadlineAt !== null && row.submittedAt.getTime() > deadlineAt.getTime(),
+      passed: passedBySubmission.get(row.id) ?? null,
     })
   }
 
@@ -195,10 +230,26 @@ export async function listAssignmentSubmissions(
       title: row.title,
       deadlineAt: row.deadlineAt,
       closed: row.closedAt !== null,
+      autograded: row.autograderId !== null,
       exemptRepoIds: exemptByCheckpoint.get(row.id)!,
       byRepoId: byCheckpoint.get(row.id)!,
     })),
   }
+}
+
+/**
+ * The live site's "Passing": a student passes when the autograder awarded
+ * every point. Here the run's `tests` are Gradescope's `results.json` array,
+ * so that reads as every test `passed` — the per-test status the autograder
+ * runner (~/fiuba/autograder, cmd/runner) writes, rather than comparing
+ * `score` to a maximum the run does not store. A run with no tests passes
+ * nothing: a build that broke before any test ran reads as failing.
+ */
+export function passedAllTests(tests: unknown): boolean {
+  if (!Array.isArray(tests) || tests.length === 0) return false
+  return tests.every(
+    (test) => typeof test === 'object' && test !== null && (test as { status?: unknown }).status === 'passed',
+  )
 }
 
 /**

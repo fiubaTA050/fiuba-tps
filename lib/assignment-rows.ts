@@ -18,6 +18,8 @@ export type SubmissionLabel = {
 export type RepoSubmission = {
   sha: string
   late: boolean
+  /** Automated grading's verdict; null until a run succeeds — see `CurrentSubmission` */
+  passed?: boolean | null
 }
 
 /** One student or one team, with everything the filters need to decide on it */
