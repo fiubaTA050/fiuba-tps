@@ -219,8 +219,8 @@ describe('createAssignment — checkpoints', () => {
     const result = await createAssignment(session, classroom.slug, {
       ...VALID,
       checkpoints: [
-        { id: null, title: '2A', deadlineAt, autograderId: 'tp2a', closed: false },
-        { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: true },
+        { id: null, title: '2A', deadlineAt, autograderId: 'tp2a', closed: false, resultsPublished: false },
+        { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: true, resultsPublished: false },
       ],
     })
 
@@ -247,8 +247,8 @@ describe('createAssignment — checkpoints', () => {
     const result = await createAssignment(session, classroom.slug, {
       ...VALID,
       checkpoints: [
-        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
-        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
       ],
     })
 
@@ -268,7 +268,7 @@ describe('createAssignment — checkpoints', () => {
 
     const result = await createAssignment(session, classroom.slug, {
       ...VALID,
-      checkpoints: [{ id: 1, title: '2A', deadlineAt: null, autograderId: null, closed: false }],
+      checkpoints: [{ id: 1, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false }],
     })
 
     expect(result).toEqual({
@@ -295,7 +295,7 @@ describe('createAssignment — checkpoints', () => {
           title: 'x'.repeat(61),
           deadlineAt: null,
           autograderId: null,
-          closed: false,
+          closed: false, resultsPublished: false,
         },
       ],
     })

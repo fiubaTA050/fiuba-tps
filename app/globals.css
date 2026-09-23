@@ -1234,7 +1234,7 @@
  */
 .checkpoints-grid {
   display: grid;
-  grid-template-columns: 28px minmax(90px, 150px) minmax(215px, 280px) minmax(140px, 1fr) 52px 32px;
+  grid-template-columns: 28px minmax(90px, 150px) minmax(215px, 280px) minmax(100px, 1fr) 44px 56px 32px;
   align-items: center;
   column-gap: var(--base-size-12, 12px);
 }

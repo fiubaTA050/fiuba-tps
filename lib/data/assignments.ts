@@ -320,6 +320,7 @@ export async function createAssignment(
           deadlineAt: checkpoint.deadlineAt,
           autograderId: checkpoint.autograderId,
           closedAt: checkpoint.closed ? new Date() : null,
+          resultsPublishedAt: checkpoint.resultsPublished ? new Date() : null,
           position,
         })
       }

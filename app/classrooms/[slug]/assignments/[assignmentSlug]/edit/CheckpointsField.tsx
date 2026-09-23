@@ -12,6 +12,7 @@ export type CheckpointFieldValue = {
   deadlineAt: string
   autograderId: string
   closed: boolean
+  resultsPublished: boolean
   /** What blocks removing this row — see saveCheckpoints */
   submissionCount: number
 }
@@ -62,6 +63,7 @@ export function CheckpointsField({ initial }: { initial: CheckpointFieldValue[] 
         deadlineAt: '',
         autograderId: '',
         closed: false,
+        resultsPublished: false,
         submissionCount: 0,
       },
     ])
@@ -88,6 +90,7 @@ export function CheckpointsField({ initial }: { initial: CheckpointFieldValue[] 
     deadlineAt: row.deadlineAt,
     autograderId: row.autograderId,
     closed: row.closed,
+    resultsPublished: row.resultsPublished,
     submissionCount: row.submissionCount,
   }))
 
@@ -108,6 +111,12 @@ export function CheckpointsField({ initial }: { initial: CheckpointFieldValue[] 
             <div className="checkpoints-grid-header">Fecha límite</div>
             <div className="checkpoints-grid-header">Corrección automática</div>
             <div className="checkpoints-grid-header text-center">Cerrar</div>
+            <div
+              className="checkpoints-grid-header text-center"
+              title="Los alumnos ven la corrección automática recién cuando la publicás"
+            >
+              Publicar
+            </div>
             <div className="checkpoints-grid-header" aria-hidden="true" />
 
             {rows.map((row, index) => {
@@ -176,6 +185,17 @@ export function CheckpointsField({ initial }: { initial: CheckpointFieldValue[] 
                       aria-label={`Cerrar ${label}`}
                       checked={row.closed}
                       onChange={(event) => update(row.key, { closed: event.target.checked })}
+                    />
+                  </div>
+
+                  <div className="checkpoints-grid-cell d-flex flex-justify-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`Publicar los resultados de ${label}`}
+                      checked={row.resultsPublished}
+                      onChange={(event) =>
+                        update(row.key, { resultsPublished: event.target.checked })
+                      }
                     />
                   </div>
 

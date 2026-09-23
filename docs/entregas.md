@@ -265,3 +265,44 @@ integrante que confirma agrega una fila por encima de la del primero, con el
 nombre del anterior a la vista antes de apretar. Sin lock: es una corrección
 deliberada, no una carrera como la creación del repositorio, y con append-only
 nadie pierde lo que había.
+
+## Resultados de la corrección automática para el alumno
+
+Se muestran en la misma pantalla, debajo de la entrega vigente
+(`studentGradingView` en `lib/data/submissions.ts`). Solo se muestra la
+corrección de la **entrega vigente**. Las anteriores no llevan resultado.
+
+**Las reglas son las de Gradescope**, que es el formato que ya escribe el
+autograder (`results.json`, ver
+[la spec](https://gradescope-autograders.readthedocs.io/en/latest/specs/)).
+Cada test trae una `visibility`:
+
+| `visibility` | Acá |
+|---|---|
+| `visible` | Se ve siempre |
+| `after_due_date` | Se ve cuando vence la entrega o cuando se cierra |
+| `after_published` | Se ve cuando el docente tilda "Publicar resultados" en la entrega (`checkpoints.results_published_at`), que es el "Publish Grades" de Gradescope |
+| `hidden` | No se ve nunca |
+
+Como Gradescope, si queda algún test sin mostrar **no se muestra el puntaje
+total**. La salida del container, que es el stdout de Gradescope, nunca llega
+a este servidor: queda en el worker. Si el worker falla (`failed`), el alumno
+ve un aviso fijo y no la salida, porque la falla no es suya.
+
+**Divergencia: un test sin `visibility` se trata como `after_published`**, no
+como `visible`. La salida general (el log de build) sigue la misma regla,
+porque todavía no guardamos una `visibility` general. En Gradescope el alumno
+espera el resultado de lo que acaba de subir. Acá la corrección recién arranca
+cuando se cierra la entrega, así que nadie está esperando y hay tiempo de
+revisar antes. TP1 mostró por qué hace falta esa revisión. En la corrida del
+21/09/2026, 78 de 80 entregas sacaron 100. De los dos ceros, uno era el repo
+de prueba de la cátedra y el otro era una entrega correcta: importaba
+`google/protobuf/empty.proto` y la imagen del autograder instala
+`protobuf-compiler` sin `libprotobuf-dev`, así que el ".proto" no compilaba
+ahí. Publicada sin revisar, esa entrega le habría dicho "el proyecto no
+compila, 0" a un alumno que no tenía nada que corregir.
+
+La salida que se le muestra al alumno es solo el final de cada texto, hasta
+16.000 caracteres (`STUDENT_OUTPUT_MAX_CHARS`). El runner guarda hasta 256 KB
+por test, y el error de `go test` queda al final. En TP1 la salida más larga
+fue de 33 KB, y el promedio de 1 KB.

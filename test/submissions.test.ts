@@ -15,6 +15,8 @@ import {
   users,
 } from '@/db/schema'
 
+import type { StudentGrading } from '@/lib/data/submissions'
+
 import { createTestDatabase } from './helpers/db'
 
 /**
@@ -69,6 +71,7 @@ vi.mock('@/lib/github/repositories', async (importOriginal) => {
 })
 
 const {
+  STUDENT_OUTPUT_MAX_CHARS,
   confirmSubmission,
   findSubmissionPanels,
   findSubmissionHistory,
@@ -612,6 +615,221 @@ describe('findSubmissionPanels', () => {
     expect(panels?.[1]).toMatchObject({ title: '2B', current: null })
     // Sanity: both entregas share the same repo, only the checkpoint differs
     expect(await db.select().from(submissions)).toMatchObject([{ assignmentRepoId: repoId }])
+  })
+})
+
+/**
+ * What the student sees of the automated grading. The rules are Gradescope's
+ * `visibility` (gradescope-autograders.readthedocs.io/en/latest/specs/), with
+ * the one divergence docs/entregas.md records: no `visibility` waits for the
+ * teacher to publish, instead of showing at once.
+ */
+describe('findSubmissionPanels grading', () => {
+  const passed = (name: string, extra: Record<string, unknown> = {}) => ({
+    name,
+    score: 50,
+    max_score: 50,
+    status: 'passed',
+    output: `--- PASS: ${name}`,
+    ...extra,
+  })
+
+  async function graded(
+    options: {
+      autograderId?: string | null
+      closed?: boolean
+      published?: boolean
+      runs?: { status: 'leased' | 'succeeded' | 'failed'; score?: number; output?: string; tests?: unknown }[]
+    } = {},
+  ) {
+    const alumna = await student('alumna')
+    const { key, checkpointId, repoId } = await assignmentWithRepo(alumna)
+    await db
+      .update(checkpoints)
+      .set({
+        autograderId: options.autograderId === undefined ? 'tp1' : options.autograderId,
+        closedAt: options.closed === false ? null : new Date(),
+        resultsPublishedAt: options.published ? new Date() : null,
+      })
+      .where(eq(checkpoints.id, checkpointId!))
+
+    const submissionId = await submit(repoId, checkpointId!, alumna, 'a'.repeat(40))
+    for (const run of options.runs ?? []) {
+      await db.insert(gradingRuns).values({ submissionId, expiresAt: new Date(), ...run })
+    }
+
+    const [panel] = (await findSubmissionPanels(alumna, key))!
+    return { panel, alumna, key, checkpointId: checkpointId!, repoId, submissionId }
+  }
+
+  it('says nothing about an entrega with no autograder', async () => {
+    const { panel } = await graded({
+      autograderId: null,
+      published: true,
+      runs: [{ status: 'succeeded', score: 100, tests: [passed('TestWc')] }],
+    })
+
+    expect(panel.grading).toBeNull()
+  })
+
+  it('says nothing about an open entrega nobody graded yet', async () => {
+    const { panel } = await graded({ closed: false })
+
+    expect(panel.grading).toBeNull()
+  })
+
+  it('is pending on a closed entrega the worker has not reached', async () => {
+    const { panel } = await graded()
+
+    expect(panel.grading).toEqual({ state: 'pending' })
+  })
+
+  it('keeps results with no visibility pending until the teacher publishes', async () => {
+    const { panel } = await graded({
+      runs: [{ status: 'succeeded', score: 0, output: 'make proto FALLÓ', tests: [passed('TestWc')] }],
+    })
+
+    expect(panel.grading).toEqual({ state: 'pending' })
+  })
+
+  it('shows the total, every test and the overall output once published', async () => {
+    const { panel } = await graded({
+      published: true,
+      runs: [
+        {
+          status: 'succeeded',
+          score: 50,
+          output: 'Build OK.',
+          tests: [passed('TestWc'), passed('TestIndexer', { score: 0, status: 'failed' })],
+        },
+      ],
+    })
+
+    expect(panel.grading).toEqual({
+      state: 'graded',
+      score: 50,
+      maxScore: 100,
+      output: 'Build OK.',
+      outputTruncated: false,
+      hiddenTests: 0,
+      tests: [
+        { name: 'TestWc', status: 'passed', score: 50, maxScore: 50, output: '--- PASS: TestWc', truncated: false },
+        { name: 'TestIndexer', status: 'failed', score: 0, maxScore: 50, output: '--- PASS: TestIndexer', truncated: false },
+      ],
+    })
+  })
+
+  // "If test cases are hidden, students will not be able to see their total score"
+  it('shows a visible test before publishing, without the total or the overall output', async () => {
+    const { panel } = await graded({
+      runs: [
+        {
+          status: 'succeeded',
+          score: 100,
+          output: 'Build OK.',
+          tests: [passed('TestWc', { visibility: 'visible' }), passed('TestIndexer')],
+        },
+      ],
+    })
+
+    expect(panel.grading).toMatchObject({
+      state: 'graded',
+      score: null,
+      maxScore: null,
+      output: null,
+      hiddenTests: 1,
+      tests: [{ name: 'TestWc' }],
+    })
+  })
+
+  it('never shows a hidden test, not even once published', async () => {
+    const { panel } = await graded({
+      published: true,
+      runs: [
+        {
+          status: 'succeeded',
+          score: 100,
+          tests: [passed('TestWc'), passed('TestSecreto', { visibility: 'hidden' })],
+        },
+      ],
+    })
+
+    expect(panel.grading).toMatchObject({ state: 'graded', score: null, hiddenTests: 1, tests: [{ name: 'TestWc' }] })
+  })
+
+  it('shows after_due_date once the entrega is closed, without publishing', async () => {
+    const { panel } = await graded({
+      runs: [{ status: 'succeeded', score: 50, tests: [passed('TestWc', { visibility: 'after_due_date' })] }],
+    })
+
+    expect(panel.grading).toMatchObject({ state: 'graded', score: 50, tests: [{ name: 'TestWc' }] })
+  })
+
+  it('reports a worker failure without its output, once published', async () => {
+    const failed = { status: 'failed' as const, output: 'clonando repo: git fetch: exit status 128' }
+
+    expect((await graded({ runs: [failed] })).panel.grading).toEqual({ state: 'pending' })
+    expect((await graded({ published: true, runs: [failed] })).panel.grading).toEqual({ state: 'failed' })
+  })
+
+  // What the runner writes when it fails before grading — see its `main`
+  it('treats a succeeded run with no tests as a worker failure, hiding its output', async () => {
+    const broken = {
+      status: 'succeeded' as const,
+      score: 0,
+      output: 'El autograder falló antes de poder corregir:\n\nconfig rota',
+      tests: [],
+    }
+
+    expect((await graded({ runs: [broken] })).panel.grading).toEqual({ state: 'pending' })
+    expect((await graded({ published: true, runs: [broken] })).panel.grading).toEqual({ state: 'failed' })
+  })
+
+  it('reads the succeeded run past an earlier worker failure', async () => {
+    const { panel } = await graded({
+      published: true,
+      runs: [
+        { status: 'failed', output: 'se cayó el worker' },
+        { status: 'succeeded', score: 50, tests: [passed('TestWc')] },
+      ],
+    })
+
+    expect(panel.grading).toMatchObject({ state: 'graded', score: 50 })
+  })
+
+  it('hands out only the tail of a long output', async () => {
+    const long = 'x'.repeat(STUDENT_OUTPUT_MAX_CHARS) + 'FAIL: TestWc'
+    const { panel } = await graded({
+      published: true,
+      runs: [{ status: 'succeeded', score: 0, tests: [passed('TestWc', { output: long })] }],
+    })
+
+    const grading = panel.grading as Extract<StudentGrading, { state: 'graded' }>
+    expect(grading.tests[0].truncated).toBe(true)
+    expect(grading.tests[0].output).toHaveLength(STUDENT_OUTPUT_MAX_CHARS)
+    expect(grading.tests[0].output?.endsWith('FAIL: TestWc')).toBe(true)
+  })
+
+  it('grades the current submission, not an earlier one', async () => {
+    const { alumna, key, repoId, checkpointId } = await graded({
+      published: true,
+      runs: [{ status: 'succeeded', score: 100, tests: [passed('TestWc')] }],
+    })
+    await submit(repoId, checkpointId, alumna, 'b'.repeat(40))
+
+    const [panel] = (await findSubmissionPanels(alumna, key))!
+    expect(panel.grading).toEqual({ state: 'pending' })
+  })
+
+  it('shows one student nothing of another\'s grading', async () => {
+    const { key } = await graded({
+      published: true,
+      runs: [{ status: 'succeeded', score: 100, tests: [passed('TestWc')] }],
+    })
+    const otro = await student('otro')
+
+    const [panel] = (await findSubmissionPanels(otro, key))!
+    expect(panel.grading).toBeNull()
   })
 })
 

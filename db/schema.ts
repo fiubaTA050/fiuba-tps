@@ -744,6 +744,14 @@ export const checkpoints = pgTable(
      * without touching any `grading_runs` already recorded.
      */
     closedAt: timestamp('closed_at', { withTimezone: true }),
+    /**
+     * Gradescope's "Publish Grades": set by hand once the teacher has
+     * reviewed the automated grading. Until then a student sees none of the
+     * results marked `after_published` — which, here, is also what a result
+     * with no `visibility` at all means. See "Resultados para el alumno" in
+     * docs/entregas.md. Reversible, like `closedAt`.
+     */
+    resultsPublishedAt: timestamp('results_published_at', { withTimezone: true }),
     position: integer('position').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

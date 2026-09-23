@@ -30,6 +30,7 @@ export type Checkpoint = {
   deadlineAt: Date | null
   autograderId: string | null
   closedAt: Date | null
+  resultsPublishedAt: Date | null
   submissionCount: number
 }
 
@@ -40,6 +41,8 @@ export type CheckpointInput = {
   deadlineAt: Date | null
   autograderId: string | null
   closed: boolean
+  /** The teacher's "Publicar resultados" — see checkpoints.resultsPublishedAt */
+  resultsPublished: boolean
 }
 
 // Mirrors checkpoints.title/autograderId in db/schema.ts. The client already
@@ -77,7 +80,7 @@ export function parseCheckpointsField(value: FormDataEntryValue | null): Checkpo
   const seenIds = new Set<number>()
   for (const item of parsed) {
     if (typeof item !== 'object' || item === null) return null
-    const { id, title, deadlineAt, autograderId, closed } = item as Record<string, unknown>
+    const { id, title, deadlineAt, autograderId, closed, resultsPublished } = item as Record<string, unknown>
     if (id !== null && typeof id !== 'number') return null
     // Two rows sharing an existing id would UPDATE the same checkpoint twice
     // in saveCheckpoints, the second silently discarding the first's edits —
@@ -96,6 +99,7 @@ export function parseCheckpointsField(value: FormDataEntryValue | null): Checkpo
       return null
     }
     if (typeof closed !== 'boolean') return null
+    if (typeof resultsPublished !== 'boolean') return null
 
     const rawDeadline = deadlineAt.trim()
     const parsedDeadline = rawDeadline === '' ? null : parseArgentinaDateTime(rawDeadline)
@@ -107,6 +111,7 @@ export function parseCheckpointsField(value: FormDataEntryValue | null): Checkpo
       deadlineAt: parsedDeadline,
       autograderId: autograderId.trim() === '' ? null : autograderId.trim(),
       closed,
+      resultsPublished,
     })
   }
 
@@ -209,6 +214,7 @@ export async function listCheckpoints(
       deadlineAt: checkpoints.deadlineAt,
       autograderId: checkpoints.autograderId,
       closedAt: checkpoints.closedAt,
+      resultsPublishedAt: checkpoints.resultsPublishedAt,
       submissionCount: count(submissions.id),
     })
     .from(checkpoints)
@@ -301,6 +307,7 @@ export async function saveCheckpoints(
       id: checkpoints.id,
       title: checkpoints.title,
       closedAt: checkpoints.closedAt,
+      resultsPublishedAt: checkpoints.resultsPublishedAt,
       submissionCount: count(submissions.id),
     })
     .from(checkpoints)
@@ -370,6 +377,7 @@ export async function saveCheckpoints(
             deadlineAt: row.deadlineAt,
             autograderId: row.autograderId,
             closedAt: row.closed ? new Date() : null,
+            resultsPublishedAt: row.resultsPublished ? new Date() : null,
             position,
           })
           continue
@@ -384,6 +392,9 @@ export async function saveCheckpoints(
             autograderId: row.autograderId,
             // Preserve the original close time across re-saves; only flip it
             closedAt: row.closed ? (current.closedAt ?? new Date()) : null,
+            resultsPublishedAt: row.resultsPublished
+              ? (current.resultsPublishedAt ?? new Date())
+              : null,
             position,
             updatedAt: new Date(),
           })

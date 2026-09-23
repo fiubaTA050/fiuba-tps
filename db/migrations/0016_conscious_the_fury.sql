@@ -1,0 +1,1 @@
+ALTER TABLE "checkpoints" ADD COLUMN "results_published_at" timestamp with time zone;

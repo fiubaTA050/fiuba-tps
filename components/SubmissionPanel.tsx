@@ -4,7 +4,7 @@ import { CheckCircleIcon, ClockIcon } from '@primer/octicons-react'
 import { useActionState } from 'react'
 
 import { confirmSubmissionAction } from '@/app/assignment-invitations/[key]/actions'
-import type { CheckpointPanel, SubmissionRow } from '@/lib/data/submissions'
+import type { CheckpointPanel, StudentGrading, SubmissionRow } from '@/lib/data/submissions'
 import { formatArgentina } from '@/lib/dates'
 import { EMPTY_STATE, type InvitationActionState } from '@/lib/form'
 
@@ -249,7 +249,115 @@ function PanelBody({
           </ul>
         </details>
       )}
+
+      {panel.grading && <GradingResult grading={panel.grading} />}
     </>
+  )
+}
+
+const TEST_STATUS: Record<string, { label: string; tone: string }> = {
+  passed: { label: 'Pasó', tone: 'color-bg-success' },
+  failed: { label: 'Falló', tone: 'color-bg-danger' },
+}
+
+/**
+ * The automated grading of the current submission, as far as the student may
+ * see it — `studentGradingView` in lib/data/submissions.ts has already dropped
+ * what is hidden or unpublished, so nothing here decides visibility. Laid out
+ * like Gradescope's results page: the total, then one row per test with its
+ * output behind a click, then the output for the whole submission.
+ */
+function GradingResult({ grading }: { grading: StudentGrading }) {
+  return (
+    <div className="mt-3 pt-3 border-top">
+      <h4 className="h5 mb-2">Corrección automática</h4>
+
+      {grading.state === 'pending' && (
+        <p className="color-fg-muted mb-0">
+          Todavía no hay resultados. Van a aparecer acá cuando la cátedra los publique.
+        </p>
+      )}
+
+      {grading.state === 'failed' && (
+        <div className="flash flash-warn mb-0">
+          La corrección automática no se pudo ejecutar sobre tu entrega. Avisale a la cátedra.
+        </div>
+      )}
+
+      {grading.state === 'graded' && (
+        <>
+          {grading.score !== null && (
+            <p className="mb-2">
+              <strong className="f3">{grading.score}</strong>
+              {grading.maxScore !== null && (
+                <span className="color-fg-muted"> / {grading.maxScore} puntos</span>
+              )}
+            </p>
+          )}
+          {grading.hiddenTests > 0 && (
+            <p className="color-fg-muted f6">
+              {grading.hiddenTests === 1
+                ? 'Hay 1 test que todavía no se muestra'
+                : `Hay ${grading.hiddenTests} tests que todavía no se muestran`}
+              , así que el puntaje total tampoco.
+            </p>
+          )}
+
+          {grading.tests.length > 0 && (
+            <ul className="list-style-none f6">
+              {grading.tests.map((test, index) => {
+                const status = test.status ? TEST_STATUS[test.status] : undefined
+                return (
+                  <li key={index} className="py-2 border-bottom">
+                    <div className="d-flex flex-items-center">
+                      <span className="text-mono flex-auto">{test.name}</span>
+                      {status ? (
+                        <span className={`IssueLabel ${status.tone} mr-2`}>{status.label}</span>
+                      ) : (
+                        test.status && <span className="color-fg-muted mr-2">{test.status}</span>
+                      )}
+                      <span className="color-fg-muted">
+                        {test.score ?? '—'}
+                        {test.maxScore !== null && ` / ${test.maxScore}`}
+                      </span>
+                    </div>
+                    {test.output && <OutputDetails output={test.output} truncated={test.truncated} />}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          {grading.output && (
+            <OutputDetails
+              label="Ver salida general"
+              output={grading.output}
+              truncated={grading.outputTruncated}
+            />
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function OutputDetails({
+  label = 'Ver salida',
+  output,
+  truncated,
+}: {
+  label?: string
+  output: string
+  truncated: boolean
+}) {
+  return (
+    <details className="mt-1">
+      <summary className="btn-link f6">{label}</summary>
+      {truncated && <p className="note mb-1">Se muestra solo el final de la salida.</p>}
+      <pre className="color-bg-subtle p-2 f6" style={{ whiteSpace: 'pre-wrap', overflowX: 'auto' }}>
+        {output}
+      </pre>
+    </details>
   )
 }
 

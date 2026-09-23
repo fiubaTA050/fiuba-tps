@@ -220,10 +220,10 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
-      { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false },
-      { id: null, title: '2C', deadlineAt: null, autograderId: null, closed: false },
-      { id: null, title: '2D', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: null, title: '2C', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: null, title: '2D', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     expect(result).toEqual({ success: true })
@@ -236,7 +236,7 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: null, deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: null, deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     const found = await listCheckpoints(profe, classroomSlug, assignmentSlug)
@@ -248,13 +248,13 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
     const [created] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
     const deadlineAt = new Date('2026-09-12T02:59:00Z')
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: created.id, title: '2A', deadlineAt, autograderId: 'tp1', closed: false },
+      { id: created.id, title: '2A', deadlineAt, autograderId: 'tp1', closed: false, resultsPublished: false },
     ])
 
     const found = await listCheckpoints(profe, classroomSlug, assignmentSlug)
@@ -267,14 +267,14 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
-      { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
     const [a, b] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: b.id, title: '2B', deadlineAt: null, autograderId: null, closed: false },
-      { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: b.id, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     const found = await listCheckpoints(profe, classroomSlug, assignmentSlug)
@@ -286,13 +286,13 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
-      { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
     const [a] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
     const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     expect(result).toEqual({ success: true })
@@ -305,14 +305,14 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
-      { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
     const [a, b] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
     await handIn(assignmentId, a.id, profe)
 
     const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: b.id, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+      { id: b.id, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     expect(result).toMatchObject({ success: false })
@@ -325,8 +325,8 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     expect(result).toMatchObject({ success: false })
@@ -338,8 +338,8 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: null, deadlineAt: null, autograderId: null, closed: false },
-      { id: null, title: '  ', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: null, deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: null, title: '  ', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     expect(result).toMatchObject({ success: false })
@@ -351,12 +351,12 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
     const other = await classroomWithAssignment(profe)
     await saveCheckpoints(profe, other.classroomSlug, other.assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
     const [foreign] = (await listCheckpoints(profe, other.classroomSlug, other.assignmentSlug))!
 
     const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: foreign.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: foreign.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     expect(result).toMatchObject({ success: false })
@@ -367,16 +367,40 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: true },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: true, resultsPublished: false },
     ])
     const [first] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: first.id, title: '2A', deadlineAt: null, autograderId: null, closed: true },
+      { id: first.id, title: '2A', deadlineAt: null, autograderId: null, closed: true, resultsPublished: false },
     ])
     const [second] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
     expect(second.closedAt).toEqual(first.closedAt)
+  })
+
+  it('publishing results keeps its time across re-saves, and unpublishing clears it', async () => {
+    const profe = await teacher()
+    const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
+    const row = { title: '2A', deadlineAt: null, autograderId: 'tp1', closed: true }
+
+    await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+      { id: null, ...row, resultsPublished: true },
+    ])
+    const [first] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
+    expect(first.resultsPublishedAt).toBeInstanceOf(Date)
+
+    await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+      { id: first.id, ...row, resultsPublished: true },
+    ])
+    const [second] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
+    expect(second.resultsPublishedAt).toEqual(first.resultsPublishedAt)
+
+    await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+      { id: first.id, ...row, resultsPublished: false },
+    ])
+    const [third] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
+    expect(third.resultsPublishedAt).toBeNull()
   })
 
   it('reopening clears closedAt', async () => {
@@ -384,12 +408,12 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: true },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: true, resultsPublished: false },
     ])
     const [created] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
     const [found] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
@@ -401,7 +425,7 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: true },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: true, resultsPublished: false },
     ])
     const [created] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
     const [repo] = await db
@@ -416,12 +440,12 @@ describe('saveCheckpoints', () => {
 
     // A re-save that keeps it closed leaves the extension alone
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: true },
+      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: true, resultsPublished: false },
     ])
     expect((await db.select().from(submissionExemptions))[0].revokedAt).toBeNull()
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
     expect((await db.select().from(submissionExemptions))[0].revokedAt).not.toBeNull()
   })
@@ -436,13 +460,13 @@ describe('saveCheckpoints', () => {
         title: '2A',
         deadlineAt: new Date('2026-09-12T02:59:00Z'),
         autograderId: null,
-        closed: false,
+        closed: false, resultsPublished: false,
       },
     ])
     const [created] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
     const [found] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
@@ -454,14 +478,14 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
-      { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
     const [a, b] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
     const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: a.id, title: '2B', deadlineAt: null, autograderId: null, closed: false },
-      { id: b.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: a.id, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+      { id: b.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     expect(result).toEqual({ success: true })
@@ -491,7 +515,7 @@ describe('saveCheckpoints', () => {
       .where(eq(assignments.id, assignmentId))
 
     const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     expect(result).toMatchObject({ success: false })
@@ -504,7 +528,7 @@ describe('saveCheckpoints', () => {
     })
 
     const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     expect(result).toMatchObject({ success: false })
@@ -516,7 +540,7 @@ describe('saveCheckpoints', () => {
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
     const result = await saveCheckpoints(ajeno, classroomSlug, assignmentSlug, [
-      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
     ])
 
     expect(result).toMatchObject({ success: false })
@@ -535,7 +559,7 @@ describe('saveCheckpoints', () => {
       const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
 
       const result = await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
       ])
 
       expect(result).toEqual({ success: true })
@@ -545,7 +569,7 @@ describe('saveCheckpoints', () => {
       const profe = await teacher()
       const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
       await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
       ])
       const [a] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
 
@@ -553,7 +577,7 @@ describe('saveCheckpoints', () => {
         profe,
         classroomSlug,
         assignmentSlug,
-        [{ id: a.id, title: '2A', deadlineAt: null, autograderId: 'tp1', closed: false }],
+        [{ id: a.id, title: '2A', deadlineAt: null, autograderId: 'tp1', closed: false, resultsPublished: false }],
         [a.id],
       )
 
@@ -565,13 +589,13 @@ describe('saveCheckpoints', () => {
       const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
       // The teacher's screen loaded with just 2A ...
       await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
       ])
       const [a] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
       // ... but by the time they save, someone else added 2B
       await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-        { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
-        { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+        { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+        { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
       ])
 
       // The stale form only ever knew about 2A, so resubmitting just that
@@ -580,7 +604,7 @@ describe('saveCheckpoints', () => {
         profe,
         classroomSlug,
         assignmentSlug,
-        [{ id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false }],
+        [{ id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false }],
         [a.id],
       )
 
@@ -593,13 +617,13 @@ describe('saveCheckpoints', () => {
       const profe = await teacher()
       const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)
       await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false },
-        { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+        { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+        { id: null, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
       ])
       const [a, b] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
       // Someone else already removed 2B
       await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
-        { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
+        { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
       ])
 
       const result = await saveCheckpoints(
@@ -607,8 +631,8 @@ describe('saveCheckpoints', () => {
         classroomSlug,
         assignmentSlug,
         [
-          { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false },
-          { id: b.id, title: '2B', deadlineAt: null, autograderId: null, closed: false },
+          { id: a.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+          { id: b.id, title: '2B', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
         ],
         [a.id, b.id],
       )
@@ -626,7 +650,7 @@ describe('saveCheckpoints', () => {
  * inside one transaction, inside one request.
  */
 describe('parseCheckpointsField — row cap', () => {
-  const row = { id: null, title: '', deadlineAt: '', autograderId: '', closed: false }
+  const row = { id: null, title: '', deadlineAt: '', autograderId: '', closed: false, resultsPublished: false }
 
   it('accepts exactly the maximum number of rows', () => {
     const rows = Array.from({ length: CHECKPOINT_MAX_ROWS }, () => row)

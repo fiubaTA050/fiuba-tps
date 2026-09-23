@@ -67,7 +67,45 @@ export type CheckpointPanel = {
   current: SubmissionRow | null
   /** Every confirmation, newest first. The student argues with data, not memory */
   history: SubmissionRow[]
+  /**
+   * What the student may see of the automated grading of `current`. Null
+   * when there is nothing to say: no autograder on this entrega, nothing
+   * confirmed, or an open entrega nobody has graded yet.
+   */
+  grading: StudentGrading | null
 }
+
+export type StudentGradingTest = {
+  name: string
+  status: string | null
+  score: number | null
+  maxScore: number | null
+  output: string | null
+  /** `output` was cut to its last STUDENT_OUTPUT_MAX_CHARS */
+  truncated: boolean
+}
+
+/**
+ * - `pending`: the entrega has an autograder but nothing is visible yet —
+ *   not graded, or graded and not published.
+ * - `failed`: published, and the only runs are the worker failing. The
+ *   student gets Gradescope's "the autograder failed to execute", never the
+ *   worker's own output: that failure is not theirs.
+ * - `graded`: `score` is null when some test is still hidden, as Gradescope
+ *   withholds the total then; `hiddenTests` says how many.
+ */
+export type StudentGrading =
+  | { state: 'pending' }
+  | { state: 'failed' }
+  | {
+      state: 'graded'
+      score: number | null
+      maxScore: number | null
+      output: string | null
+      outputTruncated: boolean
+      tests: StudentGradingTest[]
+      hiddenTests: number
+    }
 
 export type CurrentSubmission = {
   sha: string
@@ -271,6 +309,12 @@ const MAX_REF_LENGTH = 255
 const MAX_AI_DECLARATION_LENGTH = 2000
 
 /**
+ * The runner keeps up to 256 KB per test; the student gets the tail, which is
+ * where `go test` puts the failure. Measured on TP1: 33 KB the largest, 1 KB on average.
+ */
+export const STUDENT_OUTPUT_MAX_CHARS = 16_000
+
+/**
  * What the setup screen needs, one panel per entrega — 2A to 2D for TP2, or
  * a list of one for a TP with a single date. Empty means the teacher has not
  * opened entregas at all: nothing to hand in.
@@ -309,6 +353,7 @@ export async function findSubmissionPanels(
       exempt: enabled && closed && checkpoint.exempt,
       current: null,
       history: [],
+      grading: null,
     }
 
     if (context.repoId === null) {
@@ -319,7 +364,18 @@ export async function findSubmissionPanels(
     const history = await listSubmissions(context.repoId, checkpoint.id, checkpoint.deadlineAt)
     // Append-only: the current submission is the last row, and the serial id
     // is what breaks the tie — `submitted_at` can repeat
-    panels.push({ ...panel, current: history[0] ?? null, history })
+    const current = history[0] ?? null
+
+    const grading =
+      current && checkpoint.autograderId !== null
+        ? studentGradingView(await listGradingRuns(current.id), {
+            closed,
+            published: checkpoint.resultsPublishedAt !== null,
+            deadlinePassed: panel.overdue,
+          })
+        : null
+
+    panels.push({ ...panel, current, history, grading })
   }
 
   return panels
@@ -690,6 +746,138 @@ export async function confirmSubmission(
   }
 }
 
+type GradingRunForStudent = {
+  status: 'leased' | 'succeeded' | 'failed'
+  score: number | null
+  output: string | null
+  tests: unknown
+}
+
+/** Every attempt against one submission, newest first */
+async function listGradingRuns(submissionId: number): Promise<GradingRunForStudent[]> {
+  return db
+    .select({
+      status: gradingRuns.status,
+      score: gradingRuns.score,
+      output: gradingRuns.output,
+      tests: gradingRuns.tests,
+    })
+    .from(gradingRuns)
+    .where(eq(gradingRuns.submissionId, submissionId))
+    .orderBy(desc(gradingRuns.id))
+}
+
+type GradingVisibilityContext = {
+  closed: boolean
+  /** The teacher's "Publicar resultados" — checkpoints.resultsPublishedAt */
+  published: boolean
+  deadlinePassed: boolean
+}
+
+/**
+ * Gradescope's `visibility`, per test, from the autograder spec
+ * (gradescope-autograders.readthedocs.io/en/latest/specs/). One divergence: a
+ * test with no `visibility` reads as `after_published`, where Gradescope
+ * reads it as `visible`. There the student is waiting for the result of what
+ * they just uploaded; here grading only starts once the entrega closes, and
+ * TP1 showed why a review comes first — an image missing `libprotobuf-dev`
+ * failed a correct submission as "no compila". See docs/entregas.md.
+ *
+ * `after_due_date` is the deadline or the close, whichever comes first:
+ * Gradescope waits for the late due date when late submissions are allowed,
+ * and the close is what ends them here.
+ */
+function isVisibleToStudent(visibility: unknown, context: GradingVisibilityContext): boolean {
+  switch (visibility) {
+    case 'visible':
+      return true
+    case 'hidden':
+      return false
+    case 'after_due_date':
+      return context.deadlinePassed || context.closed
+    default:
+      return context.published
+  }
+}
+
+function hasTests(run: GradingRunForStudent): boolean {
+  return Array.isArray(run.tests) && run.tests.length > 0
+}
+
+function tail(text: string | null): { text: string | null; truncated: boolean } {
+  if (text === null || text.length <= STUDENT_OUTPUT_MAX_CHARS) return { text, truncated: false }
+  return { text: text.slice(-STUDENT_OUTPUT_MAX_CHARS), truncated: true }
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+/**
+ * What the student sees of one submission's grading runs. Pure, so the
+ * visibility rules are tested without a database.
+ *
+ * Reads the newest `succeeded` run — the lease never grades a submission
+ * twice once one succeeded, so there is at most one. The overall `output`
+ * (the build log) has no `visibility` of its own stored yet, so it follows
+ * the default: shown once published.
+ *
+ * A `succeeded` run with no tests counts as a worker failure: it is what the
+ * runner writes when it fails on its own before grading (`main` in
+ * ~/fiuba/autograder/cmd/runner, "El autograder falló antes de poder
+ * corregir"), and its output is that internal error, not the student's.
+ * A build that breaks still lists every test, via the runner's `zeroed`.
+ */
+export function studentGradingView(
+  runs: GradingRunForStudent[],
+  context: GradingVisibilityContext,
+): StudentGrading | null {
+  const succeeded = runs.find((run) => run.status === 'succeeded' && hasTests(run))
+
+  if (!succeeded) {
+    if (runs.length === 0 && !context.closed) return null
+    const onlyFailures = runs.length > 0 && runs.every((run) => run.status !== 'leased')
+    return context.published && onlyFailures ? { state: 'failed' } : { state: 'pending' }
+  }
+
+  const all = Array.isArray(succeeded.tests)
+    ? succeeded.tests.filter((test): test is Record<string, unknown> => typeof test === 'object' && test !== null)
+    : []
+  const visible = all.filter((test) => isVisibleToStudent(test.visibility, context))
+
+  if (visible.length === 0 && !context.published) return { state: 'pending' }
+
+  const allVisible = visible.length === all.length
+  const maxScores = all.map((test) => numberOrNull(test.max_score))
+  const scores = all.map((test) => numberOrNull(test.score))
+  const sum = (values: (number | null)[]) =>
+    values.every((value) => value !== null) ? values.reduce<number>((a, b) => a + b!, 0) : null
+
+  const output = context.published ? tail(succeeded.output) : { text: null, truncated: false }
+
+  return {
+    state: 'graded',
+    // The run's own `score` first: Gradescope's top-level score "overrides
+    // total of tests if specified"
+    score: allVisible && all.length > 0 ? (succeeded.score ?? sum(scores)) : null,
+    maxScore: allVisible && all.length > 0 ? sum(maxScores) : null,
+    output: output.text,
+    outputTruncated: output.truncated,
+    tests: visible.map((test) => {
+      const testOutput = tail(typeof test.output === 'string' ? test.output : null)
+      return {
+        name: typeof test.name === 'string' ? test.name : '—',
+        status: typeof test.status === 'string' ? test.status : null,
+        score: numberOrNull(test.score),
+        maxScore: numberOrNull(test.max_score),
+        output: testOutput.text,
+        truncated: testOutput.truncated,
+      }
+    }),
+    hiddenTests: all.length - visible.length,
+  }
+}
+
 /** Newest first, with the deadline applied to each row */
 async function listSubmissions(
   repoId: number,
@@ -740,6 +928,8 @@ async function loadContext(session: Session, key: string) {
       title: checkpoints.title,
       deadlineAt: checkpoints.deadlineAt,
       closedAt: checkpoints.closedAt,
+      autograderId: checkpoints.autograderId,
+      resultsPublishedAt: checkpoints.resultsPublishedAt,
       exemptionId: submissionExemptions.id,
     })
     .from(assignmentInvitations)
@@ -785,6 +975,8 @@ async function loadContext(session: Session, key: string) {
         title: row.title,
         deadlineAt: row.deadlineAt,
         closedAt: row.closedAt,
+        autograderId: row.autograderId,
+        resultsPublishedAt: row.resultsPublishedAt,
         exempt: row.exemptionId !== null,
       })),
   }

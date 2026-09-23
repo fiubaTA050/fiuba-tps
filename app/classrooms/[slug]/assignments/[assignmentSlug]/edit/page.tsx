@@ -97,6 +97,7 @@ export default async function EditAssignmentPage(
                 : '',
               autograderId: checkpoint.autograderId ?? '',
               closed: Boolean(checkpoint.closedAt),
+              resultsPublished: Boolean(checkpoint.resultsPublishedAt),
               submissionCount: checkpoint.submissionCount,
             }))}
           />
