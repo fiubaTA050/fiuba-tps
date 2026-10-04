@@ -1,7 +1,7 @@
 'use client'
 
 import { CommentIcon, EyeIcon, HistoryIcon } from '@primer/octicons-react'
-import { type RefObject, useActionState, useRef } from 'react'
+import { type RefObject, useActionState, useRef, useState } from 'react'
 
 import { setLateJustificationAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
 import { EMPTY_STATE, type RosterActionState } from '@/app/classrooms/[slug]/roster/state'
@@ -39,43 +39,76 @@ export function LateJustificationDialog({
 }) {
   const justified = target.reason !== null
   const form = useRef<HTMLFormElement>(null)
-  const [state, formAction, pending] = useActionState(
+  // Held here rather than read off the action state, so closing the dialog
+  // clears it: a stale error must not greet the next opening
+  const [error, setError] = useState<string | null>(null)
+  // A justify refused because another teacher got there first. The action
+  // revalidates either way, so `target.reason` arrives set and this same
+  // dialog would turn into "Quitar justificación" under the teacher's
+  // cursor, one click away from undoing the other teacher's work
+  const [overtaken, setOvertaken] = useState(false)
+  const [, formAction, pending] = useActionState(
     async (previous: RosterActionState, formData: FormData) => {
       const result = await setLateJustificationAction(previous, formData)
+      setError(result.error)
       if (!result.error) {
         form.current?.reset()
-        dialogRef.current?.close()
+        dismiss()
+      } else if (formData.get('justify') === '1') {
+        setOvertaken(true)
       }
       return result
     },
     EMPTY_STATE,
   )
 
+  function reset() {
+    setError(null)
+    setOvertaken(false)
+  }
+
+  // Resets before closing rather than only on the `close` event: Chrome
+  // holds that event back while the tab is hidden, and the next opening
+  // would still show the old error. `onClose` stays for Escape.
+  function dismiss() {
+    reset()
+    dialogRef.current?.close()
+  }
+
   const titleId = `late-justification-${target.submissionId}`
   const reasonId = `late-justification-reason-${target.submissionId}`
   const whose = name ? `de ${name}` : ''
 
   return (
-    <dialog ref={dialogRef} className="modal" aria-labelledby={titleId}>
+    <dialog ref={dialogRef} className="modal" aria-labelledby={titleId} onClose={reset}>
       <form ref={form} action={formAction} className="Box Box--overlay text-left">
         <div className="Box-header d-flex flex-justify-between flex-items-center">
           <h2 className="Box-title" id={titleId}>
-            {justified ? `Quitar la justificación ${whose}` : `Justificar la entrega tardía ${whose}`}
+            {justified && !overtaken
+              ? `Quitar la justificación ${whose}`
+              : `Justificar la entrega tardía ${whose}`}
           </h2>
           <button
             type="button"
             className="btn-octicon"
             aria-label="Cerrar"
-            onClick={() => dialogRef.current?.close()}
+            onClick={dismiss}
           >
             ✕
           </button>
         </div>
 
         <div className="Box-body">
-          {state.error && <div className="flash flash-error mb-3">{state.error}</div>}
+          {error && <div className="flash flash-error mb-3">{error}</div>}
 
-          {justified ? (
+          {overtaken && justified ? (
+            <>
+              <p className="mb-1 text-bold">Otro docente la justificó mientras tanto</p>
+              <p className="color-fg-muted mb-0" style={{ whiteSpace: 'pre-wrap' }}>
+                {target.reason}
+              </p>
+            </>
+          ) : justified ? (
             <>
               <div className="flash flash-warn">
                 <strong>La entrega vuelve a figurar como tarde.</strong>
@@ -135,10 +168,16 @@ export function LateJustificationDialog({
           <input type="hidden" name="github_repo_id" value={target.githubRepoId} />
           <input type="hidden" name="submission_id" value={target.submissionId} />
           <input type="hidden" name="justify" value={justified ? '0' : '1'} />
-          <button type="button" className="btn mr-2" onClick={() => dialogRef.current?.close()}>
-            Cancelar
-          </button>
-          {justified ? (
+          {overtaken && justified ? (
+            <button type="button" className="btn" onClick={dismiss}>
+              Cerrar
+            </button>
+          ) : (
+            <button type="button" className="btn mr-2" onClick={dismiss}>
+              Cancelar
+            </button>
+          )}
+          {overtaken && justified ? null : justified ? (
             <button type="submit" className="btn btn-danger" disabled={pending}>
               {pending ? 'Quitando…' : 'Quitar justificación'}
             </button>

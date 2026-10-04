@@ -12,7 +12,7 @@ import {
   XIcon,
 } from '@primer/octicons-react'
 import Link from 'next/link'
-import { type ComponentProps, useMemo, useRef, useState } from 'react'
+import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   hasSubmitted,
@@ -789,30 +789,56 @@ function SubmissionHistoryDetails({
   assignmentSlug: string
 }) {
   const [state, setState] = useState<'closed' | 'loading' | 'error' | SubmissionRow[]>('closed')
+  const details = useRef<HTMLDetailsElement>(null)
+
+  const url =
+    row.submission == null || row.repoId === null || checkpointId === null
+      ? null
+      : `/api/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}?checkpointId=${checkpointId}`
+
+  // What the loaded history depends on beyond the URL: justifying or taking
+  // it back from the ⋯ menu re-renders this row from the revalidated page,
+  // and an open history must not keep saying "Tarde" next to a justified row
+  const justification = row.submission?.justification
+  const freshness = `${url}|${row.submission?.id}|${justification?.createdAt.getTime() ?? ''}`
+
+  function load(target: string) {
+    fetch(target)
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
+      .then(({ history }: { history: RawSubmissionRow[] }) =>
+        setState(
+          history.map((entry) => ({
+            ...entry,
+            committedAt: new Date(entry.committedAt),
+            submittedAt: new Date(entry.submittedAt),
+          })),
+        ),
+      )
+      .catch(() => setState('error'))
+  }
+
+  // Open: refetch, keeping the rows on screen until the new ones arrive
+  // instead of a flash of "Cargando…". Closed: forget them, so the next
+  // toggle fetches — otherwise switching to another entrega's tab and
+  // reopening would show the previous tab's history.
+  useEffect(() => {
+    if (url !== null && details.current?.open) load(url)
+    else setState('closed')
+    // `freshness` is the dependency; `url` is part of it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [freshness])
 
   // Nothing confirmed, nothing to show — and no repo id or checkpoint to ask about anyway
-  if (row.submission == null || row.repoId === null || checkpointId === null) return null
+  if (url === null) return null
 
   return (
     <details
+      ref={details}
       className="mt-1"
       onToggle={(event) => {
         if (!event.currentTarget.open || state !== 'closed') return
         setState('loading')
-        fetch(
-          `/api/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}?checkpointId=${checkpointId}`,
-        )
-          .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
-          .then(({ history }: { history: RawSubmissionRow[] }) =>
-            setState(
-              history.map((entry) => ({
-                ...entry,
-                committedAt: new Date(entry.committedAt),
-                submittedAt: new Date(entry.submittedAt),
-              })),
-            ),
-          )
-          .catch(() => setState('error'))
+        load(url)
       }}
     >
       <summary className="btn-link f6">Ver entregas anteriores</summary>

@@ -132,11 +132,13 @@ export async function setLateJustificationAction(
       )
 
   if (!result) return { error: 'No encontramos ese classroom.', notice: null }
-  if (!result.success) return { error: result.error, notice: null }
 
+  // On a refusal too: "Esa entrega ya está justificada" means another teacher
+  // got there first, and without this the page keeps offering "Justificar"
+  // and every retry repeats the same error until a reload
   const assignmentPath = `/classrooms/${classroomSlug}/assignments/${assignmentSlug}`
   revalidatePath(assignmentPath)
   revalidatePath(`${assignmentPath}/submissions/${githubRepoId}/${submissionId}`)
 
-  return EMPTY_STATE
+  return result.success ? EMPTY_STATE : { error: result.error, notice: null }
 }
