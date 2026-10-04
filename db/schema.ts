@@ -873,6 +873,44 @@ export const submissionExemptions = pgTable(
 )
 
 /**
+ * The teacher accepting one late submission as if it were on time, with the
+ * reason why — "Tarde · justificada". No equivalent in the original or on the
+ * live site, whose "Late" is a plain reading of the deadline.
+ *
+ * Hangs off the submission, not the (repo, checkpoint): what is justified is
+ * that SHA. A later re-submission is a new row and reads as late again on its
+ * own. It is informational for now; when lateness counts towards the grade,
+ * that rule reads `late && !lateJustified`.
+ *
+ * Unlike `submission_exemptions`, justifying again after a revoke inserts a
+ * new row instead of clearing `revoked_at`, so every reason ever written is
+ * kept. Hence the partial index: one active justification per submission.
+ */
+export const lateSubmissionJustifications = pgTable(
+  'late_submission_justifications',
+  {
+    id: serial('id').primaryKey(),
+    submissionId: integer('submission_id')
+      .notNull()
+      .references(() => submissions.id, { onDelete: 'cascade' }),
+    /** Teacher-only: it may carry personal circumstances of the student */
+    reason: text('reason').notNull(),
+    createdByUserId: integer('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedByUserId: integer('revoked_by_user_id').references(() => users.id),
+    /** Null while the justification is active */
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('index_late_submission_justifications_on_active_submission')
+      .on(table.submissionId)
+      .where(sql`${table.revokedAt} is null`),
+  ],
+)
+
+/**
  * A credential for a non-browser client of the API — the grading worker
  * today, and whatever else gets built on top of this later, which is why the
  * table is generic rather than named after that one caller.

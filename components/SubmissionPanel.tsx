@@ -112,11 +112,15 @@ export function SubmissionPanel({
 /** The summary line's state, for the collapsed row — mirrors the teacher dashboard's own labels */
 function EntregaStatus({ panel }: { panel: CheckpointPanel }) {
   if (panel.current) {
+    // Siblings, not nested: a label inside a label reads as one pill with a
+    // patch on it, and the dashboard rows already put them side by side
     return (
-      <span className="IssueLabel color-bg-success">
-        Confirmado {panel.current.sha.slice(0, 7)}
-        {panel.current.late && <LateLabel />}
-      </span>
+      <>
+        <span className="IssueLabel color-bg-success">
+          Confirmado {panel.current.sha.slice(0, 7)}
+        </span>
+        {panel.current.late && <LateLabel justified={panel.current.lateJustified} />}
+      </>
     )
   }
 
@@ -166,7 +170,7 @@ function PanelBody({
           <CheckCircleIcon className="mr-1" />
           Entregaste <SubmissionLink repoUrl={repoUrl} row={panel.current} /> el{' '}
           {formatArgentina(panel.current.submittedAt)}
-          {panel.current.late && <LateLabel />}
+          {panel.current.late && <LateLabel justified={panel.current.lateJustified} />}
         </div>
       )}
 
@@ -243,7 +247,7 @@ function PanelBody({
             {panel.history.map((row) => (
               <li key={row.id} className="py-1 border-bottom color-fg-muted f6">
                 <SubmissionLink repoUrl={repoUrl} row={row} /> el {formatArgentina(row.submittedAt)}
-                {row.late && <LateLabel />}
+                {row.late && <LateLabel justified={row.lateJustified} />}
               </li>
             ))}
           </ul>
@@ -369,8 +373,13 @@ function OutputDetails({
  * primer 10, whose `color: #fff` with no background painted this white on the
  * green flash. Same idiom as the dashboard rows.
  */
-function LateLabel() {
-  return <span className="IssueLabel color-bg-attention ml-2">Tarde</span>
+function LateLabel({ justified }: { justified: boolean }) {
+  // Never the reason: that is teacher-only, see lateSubmissionJustifications
+  return (
+    <span className="IssueLabel color-bg-attention ml-2">
+      {justified ? 'Tarde · justificada' : 'Tarde'}
+    </span>
+  )
 }
 
 /**

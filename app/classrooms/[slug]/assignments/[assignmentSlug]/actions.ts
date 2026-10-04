@@ -5,7 +5,11 @@ import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { linkAccountToEntry } from '@/lib/data/rosters'
-import { setSubmissionExemption } from '@/lib/data/submissions'
+import {
+  justifyLateSubmission,
+  revokeLateSubmissionJustification,
+  setSubmissionExemption,
+} from '@/lib/data/submissions'
 import { positiveInteger } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
@@ -84,6 +88,55 @@ export async function setSubmissionExemptionAction(
   if (!result.success) return { error: result.error, notice: null }
 
   revalidatePath(`/classrooms/${classroomSlug}/assignments/${assignmentSlug}`)
+
+  return EMPTY_STATE
+}
+
+/**
+ * "Justificar entrega tardía" / "Quitar justificación", from the dashboard
+ * row's ⋯ or the submission's detail page. See `lateSubmissionJustifications`
+ * in db/schema.ts. One action for both: `justify` says which.
+ */
+export async function setLateJustificationAction(
+  _previous: RosterActionState,
+  formData: FormData,
+): Promise<RosterActionState> {
+  const session = await auth()
+  if (!isUsableSession(session)) redirect('/')
+
+  const classroomSlug = String(formData.get('classroom_slug') ?? '')
+  const assignmentSlug = String(formData.get('assignment_slug') ?? '')
+  const githubRepoId = positiveInteger(formData.get('github_repo_id'))
+  const submissionId = positiveInteger(formData.get('submission_id'))
+  const justify = formData.get('justify') === '1'
+
+  if (githubRepoId === null || submissionId === null) {
+    return { error: 'No encontramos esa entrega.', notice: null }
+  }
+
+  const result = justify
+    ? await justifyLateSubmission(
+        session,
+        classroomSlug,
+        assignmentSlug,
+        githubRepoId,
+        submissionId,
+        String(formData.get('reason') ?? ''),
+      )
+    : await revokeLateSubmissionJustification(
+        session,
+        classroomSlug,
+        assignmentSlug,
+        githubRepoId,
+        submissionId,
+      )
+
+  if (!result) return { error: 'No encontramos ese classroom.', notice: null }
+  if (!result.success) return { error: result.error, notice: null }
+
+  const assignmentPath = `/classrooms/${classroomSlug}/assignments/${assignmentSlug}`
+  revalidatePath(assignmentPath)
+  revalidatePath(`${assignmentPath}/submissions/${githubRepoId}/${submissionId}`)
 
   return EMPTY_STATE
 }

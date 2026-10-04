@@ -2,9 +2,14 @@ import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { Breadcrumb } from '@/components/Breadcrumb'
+import { LateJustificationButton } from '@/components/LateJustificationDialog'
 import { findAssignment } from '@/lib/data/assignments'
 import { findClassroomInstallation } from '@/lib/data/organizations'
-import { findSubmissionDetail, type GradingRunRow } from '@/lib/data/submissions'
+import {
+  findSubmissionDetail,
+  type GradingRunRow,
+  type LateJustification,
+} from '@/lib/data/submissions'
 import { formatArgentina } from '@/lib/dates'
 import { isUsableSession } from '@/lib/session'
 
@@ -45,7 +50,9 @@ export default async function SubmissionDetailPage(
 
   if (!classroom || !assignment || !detail) notFound()
 
-  const { submission, gradingRuns } = detail
+  const { submission, gradingRuns, justifications } = detail
+  const active = justifications.find((justification) => justification.revokedAt === null) ?? null
+  const revoked = justifications.filter((justification) => justification.revokedAt !== null)
 
   return (
     <>
@@ -72,10 +79,60 @@ export default async function SubmissionDetailPage(
               <span className="text-mono">{submission.sha.slice(0, 7)}</span>{' '}
               <span className="color-fg-muted">({submission.ref})</span> el{' '}
               {formatArgentina(submission.submittedAt)}
-              {submission.late && <span className="IssueLabel color-bg-attention ml-2">Tarde</span>}
+              {submission.late && (
+                <span className="IssueLabel color-bg-attention ml-2">
+                  {submission.lateJustified ? 'Tarde · justificada' : 'Tarde'}
+                </span>
+              )}
             </p>
           </div>
         </div>
+
+        {/* Only a late submission has anything to justify — see
+            lateSubmissionJustifications in db/schema.ts */}
+        {submission.late && (
+          <div className="Box mt-3">
+            <div className="Box-body">
+              <div className="d-flex flex-justify-between flex-items-center mb-2">
+                <h3 className="h5">Justificación de la demora</h3>
+                <LateJustificationButton
+                  target={{
+                    classroomSlug: classroom.slug,
+                    assignmentSlug: assignment.slug,
+                    githubRepoId,
+                    submissionId: submission.id,
+                    reason: active?.reason ?? null,
+                  }}
+                />
+              </div>
+
+              {active ? (
+                <Justification justification={active} />
+              ) : (
+                <p className="color-fg-muted mb-0">
+                  Sin justificar: cuenta como entregada tarde.
+                </p>
+              )}
+
+              {revoked.length > 0 && (
+                <details className="mt-3">
+                  <summary className="btn-link f6">
+                    {revoked.length === 1
+                      ? 'Ver 1 justificación quitada'
+                      : `Ver ${revoked.length} justificaciones quitadas`}
+                  </summary>
+                  <ul className="list-style-none mt-2">
+                    {revoked.map((justification) => (
+                      <li key={justification.id} className="py-2 border-top color-fg-muted">
+                        <Justification justification={justification} />
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="Box mt-3">
           <div className="Box-body">
@@ -109,6 +166,28 @@ export default async function SubmissionDetailPage(
           </div>
         </div>
       </div>
+    </>
+  )
+}
+
+/** Who wrote it and when, then the reason; who took it back, when it was */
+function Justification({ justification }: { justification: LateJustification }) {
+  return (
+    <>
+      <p className="mb-1" style={{ whiteSpace: 'pre-wrap' }}>
+        {justification.reason}
+      </p>
+      <p className="color-fg-muted f6 mb-0">
+        Justificada{justification.createdBy && ` por @${justification.createdBy}`} el{' '}
+        {formatArgentina(justification.createdAt)}
+        {justification.revokedAt && (
+          <>
+            {' '}
+            · quitada{justification.revokedBy && ` por @${justification.revokedBy}`} el{' '}
+            {formatArgentina(justification.revokedAt)}
+          </>
+        )}
+      </p>
     </>
   )
 }

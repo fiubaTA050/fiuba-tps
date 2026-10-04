@@ -27,7 +27,7 @@ import { formatArgentina } from '@/lib/dates'
 import { CheckboxMenu } from './CheckboxMenu'
 import { LinkToStudentDialog } from './LinkToStudentDialog'
 import { Pagination } from './Pagination'
-import { SubmissionExtensionMenu } from './SubmissionExtensionMenu'
+import { SubmissionActionsMenu } from './SubmissionActionsMenu'
 
 /**
  * The list of repositories on an assignment dashboard, with the filter bar the
@@ -200,7 +200,11 @@ export function AssignmentRepoList({
         // A confirmed row matches both "submitted" and one of on-time/late;
         // nothing is on-time or late without a confirmation
         const states: SubmissionFilter[] = hasSubmitted(row) ? ['submitted'] : ['not_submitted']
-        if (row.submission) states.push(row.submission.late ? 'late' : 'on_time')
+        // A justified late submission counts as on time — that is what
+        // justifying means; its row still says "Tarde · justificada"
+        if (row.submission) {
+          states.push(row.submission.late && !row.submission.justification ? 'late' : 'on_time')
+        }
         if (!states.some((state) => submission.has(state))) return false
       }
 
@@ -317,7 +321,7 @@ export function AssignmentRepoList({
                     {
                       value: 'on_time' as const,
                       label: 'A tiempo',
-                      description: 'Confirmaron antes del vencimiento',
+                      description: 'Confirmaron antes del vencimiento, o con la demora justificada',
                       dot: DOT_ON_TIME,
                     },
                     {
@@ -593,6 +597,7 @@ function RepoListItem({
 }) {
   const { snapshot } = row
   const extended = row.repoId !== null && checkpoint?.exemptRepoIds.has(row.repoId) === true
+  const justifiable = row.submission?.late === true && row.submission.id !== undefined
 
   return (
     <div className="d-table col-12 assignment-repo-list-item">
@@ -621,8 +626,19 @@ function RepoListItem({
 
               {/* No saved copy of the live site to port this from — AGENTS.md
                   notes its own "Late" label isn't ported yet either. New UI. */}
-              {row.submission?.late && (
+              {row.submission?.late && !row.submission.justification && (
                 <span className="IssueLabel IssueLabel--big mr-2 color-bg-danger">Tarde</span>
+              )}
+
+              {/* Grey, not red: the teacher already settled it. The reason is
+                  the tooltip — see lateSubmissionJustifications in db/schema.ts */}
+              {row.submission?.late && row.submission.justification && (
+                <span
+                  className="IssueLabel IssueLabel--big mr-2 color-bg-subtle color-fg-muted"
+                  title={justificationTooltip(row.submission.justification)}
+                >
+                  Tarde · justificada
+                </span>
               )}
 
               {/* The live "Deadline extended" (GitHub Docs); its colour is not
@@ -709,18 +725,35 @@ function RepoListItem({
             )}
           </div>
 
-          {/* Only on a closed entrega: on an open one there is nothing to
-              extend, the menu would be empty, and setSubmissionExemption
-              refuses it */}
-          {checkpoint?.closed && row.repoId !== null && (
-            <SubmissionExtensionMenu
+          {/* Each item only where it means something: extending on a closed
+              entrega (setSubmissionExemption refuses an open one), justifying
+              on a late current submission. With neither there is no menu */}
+          {row.repoId !== null && (checkpoint?.closed || justifiable) && (
+            <SubmissionActionsMenu
               name={row.name}
-              entrega={checkpoint.title ?? 'la entrega'}
-              extended={extended}
-              classroomSlug={classroomSlug}
-              assignmentSlug={assignmentSlug}
-              checkpointId={checkpoint.id}
-              githubRepoId={row.repoId}
+              extension={
+                checkpoint?.closed
+                  ? {
+                      entrega: checkpoint.title ?? 'la entrega',
+                      extended,
+                      classroomSlug,
+                      assignmentSlug,
+                      checkpointId: checkpoint.id,
+                      githubRepoId: row.repoId,
+                    }
+                  : null
+              }
+              justification={
+                justifiable
+                  ? {
+                      classroomSlug,
+                      assignmentSlug,
+                      githubRepoId: row.repoId,
+                      submissionId: row.submission!.id!,
+                      reason: row.submission!.justification?.reason ?? null,
+                    }
+                  : null
+              }
             />
           )}
         </div>
@@ -809,7 +842,11 @@ function SubmissionHistoryDetails({
                 )}{' '}
                 <span className="color-fg-muted">({entry.ref})</span> el{' '}
                 {formatCommitDate(entry.submittedAt)}
-                {entry.late && <span className="IssueLabel color-bg-attention ml-2">Tarde</span>}{' '}
+                {entry.late && (
+                  <span className="IssueLabel color-bg-attention ml-2">
+                    {entry.lateJustified ? 'Tarde · justificada' : 'Tarde'}
+                  </span>
+                )}{' '}
                 <Link
                   href={`/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}/${entry.id}`}
                   className="Link--secondary ml-1"
@@ -913,6 +950,15 @@ function memberAvatar(
       />
     </a>
   )
+}
+
+function justificationTooltip(justification: {
+  reason: string
+  createdBy: string | null
+  createdAt: Date
+}): string {
+  const by = justification.createdBy ? ` por @${justification.createdBy}` : ''
+  return `Justificada${by} el ${formatArgentina(justification.createdAt)}: ${justification.reason}`
 }
 
 /**

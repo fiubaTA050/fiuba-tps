@@ -8,6 +8,7 @@ import {
   assignments,
   checkpoints,
   gradingRuns,
+  lateSubmissionJustifications,
   organizations,
   organizationsUsers,
   submissionExemptions,
@@ -76,7 +77,9 @@ const {
   findSubmissionPanels,
   findSubmissionHistory,
   findSubmissionDetail,
+  justifyLateSubmission,
   listAssignmentSubmissions,
+  revokeLateSubmissionJustification,
   setSubmissionExemption,
 } = await import('@/lib/data/submissions')
 
@@ -1426,6 +1429,308 @@ describe('submission exemptions', () => {
         await setSubmissionExemption(ajeno, classroomSlug, assignmentSlug, checkpointId, githubRepoId, true),
       ).toBeNull()
       expect(await db.select().from(submissionExemptions)).toHaveLength(0)
+    })
+  })
+})
+
+/**
+ * "Justificar entrega tardía" — see `lateSubmissionJustifications` in
+ * db/schema.ts and docs/entregas.md. No spec to port: neither the original
+ * nor the live site has anything like it.
+ */
+describe('late submission justifications', () => {
+  const DEADLINE = new Date('2026-09-11T02:59:00Z')
+  const LATE = new Date('2026-09-12T00:00:00Z')
+  const ON_TIME = new Date('2026-09-10T00:00:00Z')
+  const REASON = 'Estuvo internada el fin de semana de la entrega; presentó certificado.'
+
+  async function lateSubmission() {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await openCheckpoint(assignmentId, DEADLINE)
+    const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+    const submissionId = await submit(repoId, checkpointId, alumna, 'a'.repeat(40), LATE)
+
+    return { profe, alumna, classroomSlug, assignmentSlug, assignmentId, checkpointId, repoId, githubRepoId, submissionId }
+  }
+
+  describe('justifyLateSubmission', () => {
+    it('justifies a late submission, keeping it late and recording who and why', async () => {
+      const f = await lateSubmission()
+
+      const result = await justifyLateSubmission(
+        f.profe,
+        f.classroomSlug,
+        f.assignmentSlug,
+        f.githubRepoId,
+        f.submissionId,
+        `  ${REASON}  `,
+      )
+
+      expect(result).toEqual({ success: true })
+      const [row] = await db.select().from(lateSubmissionJustifications)
+      expect(row).toMatchObject({
+        submissionId: f.submissionId,
+        reason: REASON,
+        createdByUserId: Number(f.profe.user.id),
+        revokedAt: null,
+      })
+
+      const detail = await findSubmissionDetail(
+        f.profe,
+        f.classroomSlug,
+        f.assignmentSlug,
+        f.githubRepoId,
+        f.submissionId,
+      )
+      expect(detail?.submission).toMatchObject({ late: true, lateJustified: true })
+      expect(detail?.justifications).toMatchObject([
+        { reason: REASON, createdBy: 'profe', revokedAt: null, revokedBy: null },
+      ])
+    })
+
+    it('requires a reason', async () => {
+      const f = await lateSubmission()
+
+      const result = await justifyLateSubmission(
+        f.profe,
+        f.classroomSlug,
+        f.assignmentSlug,
+        f.githubRepoId,
+        f.submissionId,
+        '   ',
+      )
+
+      expect(result).toMatchObject({ success: false })
+      expect(await db.select().from(lateSubmissionJustifications)).toHaveLength(0)
+    })
+
+    it('refuses a reason that is too long', async () => {
+      const f = await lateSubmission()
+
+      const result = await justifyLateSubmission(
+        f.profe,
+        f.classroomSlug,
+        f.assignmentSlug,
+        f.githubRepoId,
+        f.submissionId,
+        'x'.repeat(2001),
+      )
+
+      expect(result).toMatchObject({ success: false })
+    })
+
+    it('refuses a submission that is not late', async () => {
+      const profe = await student('profe')
+      const alumna = await student('alumna')
+      const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+      const checkpointId = await openCheckpoint(assignmentId, DEADLINE)
+      const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+      const onTime = await submit(repoId, checkpointId, alumna, 'a'.repeat(40), ON_TIME)
+      const [{ id: undated }] = await db
+        .insert(checkpoints)
+        .values({ assignmentId, title: '2B', deadlineAt: null })
+        .returning({ id: checkpoints.id })
+      const noDeadline = await submit(repoId, undated, alumna, 'b'.repeat(40), LATE)
+
+      for (const submissionId of [onTime, noDeadline]) {
+        expect(
+          await justifyLateSubmission(profe, classroomSlug, assignmentSlug, githubRepoId, submissionId, REASON),
+        ).toMatchObject({ success: false })
+      }
+      expect(await db.select().from(lateSubmissionJustifications)).toHaveLength(0)
+    })
+
+    it('refuses a second active justification of the same submission', async () => {
+      const f = await lateSubmission()
+      const justify = (reason: string) =>
+        justifyLateSubmission(f.profe, f.classroomSlug, f.assignmentSlug, f.githubRepoId, f.submissionId, reason)
+
+      expect(await justify(REASON)).toEqual({ success: true })
+      expect(await justify('Otro motivo')).toMatchObject({ success: false })
+
+      const rows = await db.select().from(lateSubmissionJustifications)
+      expect(rows.map((row) => row.reason)).toEqual([REASON])
+    })
+
+    it('keeps every reason when justified again after a revoke', async () => {
+      const f = await lateSubmission()
+      const args = [f.classroomSlug, f.assignmentSlug, f.githubRepoId, f.submissionId] as const
+
+      await justifyLateSubmission(f.profe, ...args, 'Primer motivo')
+      await revokeLateSubmissionJustification(f.profe, ...args)
+      await justifyLateSubmission(f.profe, ...args, 'Segundo motivo')
+
+      const detail = await findSubmissionDetail(f.profe, ...args)
+      expect(detail?.submission.lateJustified).toBe(true)
+      expect(detail?.justifications.map((j) => [j.reason, j.revokedAt === null])).toEqual([
+        ['Segundo motivo', true],
+        ['Primer motivo', false],
+      ])
+      expect(detail?.justifications[1].revokedBy).toBe('profe')
+    })
+
+    it('works on a closed entrega and an inactive assignment, refusing only an archived classroom', async () => {
+      const f = await lateSubmission()
+      await db.update(checkpoints).set({ closedAt: new Date() }).where(eq(checkpoints.id, f.checkpointId))
+      await db.update(assignments).set({ invitationsEnabled: false }).where(eq(assignments.id, f.assignmentId))
+      const args = [f.classroomSlug, f.assignmentSlug, f.githubRepoId, f.submissionId] as const
+
+      expect(await justifyLateSubmission(f.profe, ...args, REASON)).toEqual({ success: true })
+
+      await db.update(organizations).set({ archivedAt: new Date() }).where(eq(organizations.slug, f.classroomSlug))
+
+      expect(await revokeLateSubmissionJustification(f.profe, ...args)).toMatchObject({ success: false })
+      expect(await justifyLateSubmission(f.profe, ...args, REASON)).toMatchObject({ success: false })
+    })
+
+    it("refuses a submission that is not this repository's or this assignment's", async () => {
+      const f = await lateSubmission()
+      const other = await classroomWithAssignment(f.profe)
+      const otherCheckpoint = await openCheckpoint(other.assignmentId, DEADLINE)
+      const otherRepo = await repoFor(other.assignmentId, f.alumna)
+      const otherSubmission = await submit(otherRepo.repoId, otherCheckpoint, f.alumna, 'b'.repeat(40), LATE)
+
+      expect(
+        await justifyLateSubmission(f.profe, f.classroomSlug, f.assignmentSlug, f.githubRepoId, otherSubmission, REASON),
+      ).toMatchObject({ success: false })
+      expect(
+        await justifyLateSubmission(
+          f.profe,
+          f.classroomSlug,
+          f.assignmentSlug,
+          otherRepo.githubRepoId,
+          f.submissionId,
+          REASON,
+        ),
+      ).toMatchObject({ success: false })
+      expect(await db.select().from(lateSubmissionJustifications)).toHaveLength(0)
+    })
+
+    it('does not let a teacher of another classroom justify or revoke', async () => {
+      const f = await lateSubmission()
+      const ajeno = await student('ajeno')
+      const args = [f.classroomSlug, f.assignmentSlug, f.githubRepoId, f.submissionId] as const
+
+      expect(await justifyLateSubmission(ajeno, ...args, REASON)).toBeNull()
+      expect(await db.select().from(lateSubmissionJustifications)).toHaveLength(0)
+
+      await justifyLateSubmission(f.profe, ...args, REASON)
+      expect(await revokeLateSubmissionJustification(ajeno, ...args)).toBeNull()
+      expect((await db.select().from(lateSubmissionJustifications))[0].revokedAt).toBeNull()
+    })
+  })
+
+  describe('revokeLateSubmissionJustification', () => {
+    it('revokes without deleting, recording who', async () => {
+      const f = await lateSubmission()
+      const args = [f.classroomSlug, f.assignmentSlug, f.githubRepoId, f.submissionId] as const
+      await justifyLateSubmission(f.profe, ...args, REASON)
+
+      expect(await revokeLateSubmissionJustification(f.profe, ...args)).toEqual({ success: true })
+
+      const [row] = await db.select().from(lateSubmissionJustifications)
+      expect(row.revokedAt).not.toBeNull()
+      expect(row.revokedByUserId).toBe(Number(f.profe.user.id))
+      const detail = await findSubmissionDetail(f.profe, ...args)
+      expect(detail?.submission).toMatchObject({ late: true, lateJustified: false })
+    })
+
+    it('is a no-op on a submission that is not justified', async () => {
+      const f = await lateSubmission()
+
+      expect(
+        await revokeLateSubmissionJustification(
+          f.profe,
+          f.classroomSlug,
+          f.assignmentSlug,
+          f.githubRepoId,
+          f.submissionId,
+        ),
+      ).toEqual({ success: true })
+    })
+  })
+
+  describe('reads', () => {
+    it('gives the dashboard the reason of the current submission only while it is active', async () => {
+      const f = await lateSubmission()
+      const args = [f.classroomSlug, f.assignmentSlug, f.githubRepoId, f.submissionId] as const
+
+      let current = checkpointResult(
+        await listAssignmentSubmissions(f.profe, f.classroomSlug, f.assignmentSlug),
+        f.checkpointId,
+      )?.byRepoId.get(f.githubRepoId)
+      expect(current).toMatchObject({ id: f.submissionId, late: true, justification: null })
+
+      await justifyLateSubmission(f.profe, ...args, REASON)
+      current = checkpointResult(
+        await listAssignmentSubmissions(f.profe, f.classroomSlug, f.assignmentSlug),
+        f.checkpointId,
+      )?.byRepoId.get(f.githubRepoId)
+      expect(current).toMatchObject({ late: true, justification: { reason: REASON, createdBy: 'profe' } })
+
+      await revokeLateSubmissionJustification(f.profe, ...args)
+      current = checkpointResult(
+        await listAssignmentSubmissions(f.profe, f.classroomSlug, f.assignmentSlug),
+        f.checkpointId,
+      )?.byRepoId.get(f.githubRepoId)
+      expect(current?.justification).toBeNull()
+    })
+
+    it('reads a later re-submission as late again, unjustified', async () => {
+      const f = await lateSubmission()
+      await justifyLateSubmission(f.profe, f.classroomSlug, f.assignmentSlug, f.githubRepoId, f.submissionId, REASON)
+      const later = await submit(f.repoId, f.checkpointId, f.alumna, 'b'.repeat(40), new Date('2026-09-13T00:00:00Z'))
+
+      const current = checkpointResult(
+        await listAssignmentSubmissions(f.profe, f.classroomSlug, f.assignmentSlug),
+        f.checkpointId,
+      )?.byRepoId.get(f.githubRepoId)
+      expect(current).toMatchObject({ id: later, late: true, justification: null })
+
+      const history = await findSubmissionHistory(
+        f.profe,
+        f.classroomSlug,
+        f.assignmentSlug,
+        f.githubRepoId,
+        f.checkpointId,
+      )
+      expect(history?.map((row) => [row.id, row.lateJustified])).toEqual([
+        [later, false],
+        [f.submissionId, true],
+      ])
+    })
+
+    it('stops counting once the deadline moves past the submission', async () => {
+      const f = await lateSubmission()
+      await justifyLateSubmission(f.profe, f.classroomSlug, f.assignmentSlug, f.githubRepoId, f.submissionId, REASON)
+      await db
+        .update(checkpoints)
+        .set({ deadlineAt: new Date('2026-09-20T00:00:00Z') })
+        .where(eq(checkpoints.id, f.checkpointId))
+
+      const current = checkpointResult(
+        await listAssignmentSubmissions(f.profe, f.classroomSlug, f.assignmentSlug),
+        f.checkpointId,
+      )?.byRepoId.get(f.githubRepoId)
+      expect(current).toMatchObject({ late: false, justification: null })
+    })
+
+    it('tells the student it is justified, without the reason', async () => {
+      const alumna = await student('alumna')
+      const { key, repoId, checkpointId } = await assignmentWithRepo(alumna, { deadlineAt: DEADLINE })
+      const submissionId = await submit(repoId, checkpointId!, alumna, 'a'.repeat(40), LATE)
+      await db.insert(lateSubmissionJustifications).values({
+        submissionId,
+        reason: REASON,
+        createdByUserId: Number(alumna.user.id),
+      })
+
+      const [panel] = (await findSubmissionPanels(alumna, key))!
+
+      expect(panel.current).toMatchObject({ late: true, lateJustified: true })
+      expect(JSON.stringify(panel)).not.toContain(REASON)
     })
   })
 })

@@ -16,8 +16,12 @@ export type SubmissionLabel = {
 
 /** The repo's current confirmed submission, as `listAssignmentSubmissions` reads it */
 export type RepoSubmission = {
+  /** The submission's own id; set on the dashboards that track checkpoints */
+  id?: number
   sha: string
   late: boolean
+  /** The teacher's active justification of `late` — see `CurrentSubmission` */
+  justification?: { reason: string; createdBy: string | null; createdAt: Date } | null
   /** Automated grading's verdict; null until a run succeeds — see `CurrentSubmission` */
   passed?: boolean | null
 }

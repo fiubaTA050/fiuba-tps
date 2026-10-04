@@ -134,6 +134,42 @@ del *cutoff* (el corte que le saca el permiso de push). Acá lo que corta es
 - Revocar setea `revoked_at` en vez de borrar, así una entrega confirmada
   después del cierre conserva el motivo por el que existe.
 
+## Justificar una entrega tardía
+
+El docente puede aceptar una entrega tardía como si hubiera llegado a tiempo,
+y tiene que escribir por qué (`late_submission_justifications`, agregado
+2026-10-03). Se hace desde el menú ⋯ de la fila del alumno, que ofrece
+"Justificar entrega tardía" cuando la entrega vigente es tardía, o desde el
+detalle de cualquier entrega tardía. La fila pasa a decir **"Tarde ·
+justificada"**, con el motivo en el tooltip, y deja de contar como tarde en
+el filtro. Ni el original ni el sitio vivo tienen algo así: su "Late" es una
+lectura directa de la deadline.
+
+- **Se justifica una fila de `submissions`, un SHA**, no el par (repo,
+  checkpoint). Si el alumno reentrega después, la entrega nueva vuelve a
+  figurar como tarde: el docente justificó *esa* versión, no le dio permiso
+  para cualquiera que venga. Con append-only no hace falta código para eso.
+- **"Tarde" sigue siendo cierto.** `late` se sigue calculando contra
+  `deadline_at` y aparece `lateJustified` al lado. Por ahora es solo
+  informativo; cuando la tardanza cuente para la nota, esa regla lee
+  `late && !lateJustified`. Si la deadline se corre y la entrega deja de ser
+  tardía, la justificación queda guardada pero no justifica nada.
+- **El motivo es obligatorio y solo lo ven los docentes**, porque puede
+  incluir cosas personales del alumno ("estuvo internado"). El alumno ve la
+  etiqueta "Tarde · justificada" y nada más: el motivo no está en lo que
+  `findSubmissionPanels` le devuelve.
+- **Quitarla setea `revoked_at` y `revoked_by_user_id`, y volver a
+  justificar inserta una fila nueva.** En eso se aparta de la extensión, que
+  reactiva su fila: acá la fila lleva un motivo, y pisarla borraría el
+  anterior. El índice único es parcial (`where revoked_at is null`), así que
+  hay una sola justificación vigente por entrega, y el detalle muestra las
+  que se quitaron, con quién las escribió y quién las quitó.
+- El motivo no se edita. Para cambiarlo se quita la justificación y se pone
+  otra, y queda registrado.
+- Se puede justificar con la entrega cerrada y con el assignment Inactive,
+  que es justamente cuando suele hacer falta. Solo un classroom archivado lo
+  rechaza, como pasa con todas las escrituras.
+
 ## Append-only
 
 **Reentregar es una fila nueva, nunca un `UPDATE`.** No hay índice único por

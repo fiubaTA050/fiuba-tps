@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import type { Session } from 'next-auth'
 
 import {
@@ -9,12 +10,15 @@ import {
   assignments,
   checkpoints,
   gradingRuns,
+  lateSubmissionJustifications,
   organizations,
   submissionExemptions,
   submissions,
+  users,
 } from '@/db/schema'
 import { disabledState } from '@/lib/data/invitations'
 import { findTeachingClassroom } from '@/lib/data/organizations'
+import { isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
 import { isReachableFromDefaultBranch, resolveRepositoryRef } from '@/lib/github/repositories'
 
@@ -46,6 +50,24 @@ export type SubmissionRow = {
   submittedAt: Date
   /** `submitted_at` past the deadline. Accepted anyway — it closes nothing */
   late: boolean
+  /**
+   * The teacher accepted it as on time — see `lateSubmissionJustifications`
+   * in db/schema.ts. Only ever true when `late` is. The reason is not here:
+   * this row reaches the student, and the reason is teacher-only.
+   */
+  lateJustified: boolean
+}
+
+/** One justification of a late submission, as the teacher reads it */
+export type LateJustification = {
+  id: number
+  reason: string
+  /** Login of the teacher who wrote it; null if the account is gone from GitHub */
+  createdBy: string | null
+  createdAt: Date
+  revokedBy: string | null
+  /** Null while it is active */
+  revokedAt: Date | null
 }
 
 export type CheckpointPanel = {
@@ -108,10 +130,13 @@ export type StudentGrading =
     }
 
 export type CurrentSubmission = {
+  id: number
   sha: string
   submittedAt: Date
   /** `submitted_at` past the checkpoint's deadline. Accepted anyway — it closes nothing */
   late: boolean
+  /** The active justification of that lateness, if any. Only ever set when `late` is */
+  justification: Pick<LateJustification, 'reason' | 'createdBy' | 'createdAt'> | null
   /**
    * What the automated grading made of this SHA: true when every test of its
    * succeeded run passed, false when one did not, null when no run has
@@ -227,16 +252,46 @@ export async function listAssignmentSubmissions(
 
   const passedBySubmission = new Map(runs.map((run) => [run.submissionId, passedAllTests(run.tests)]))
 
+  const justifications =
+    rows.length === 0
+      ? []
+      : await db
+          .select({
+            submissionId: lateSubmissionJustifications.submissionId,
+            reason: lateSubmissionJustifications.reason,
+            createdBy: users.githubLogin,
+            createdAt: lateSubmissionJustifications.createdAt,
+          })
+          .from(lateSubmissionJustifications)
+          .leftJoin(users, eq(users.id, lateSubmissionJustifications.createdByUserId))
+          .where(
+            and(
+              inArray(
+                lateSubmissionJustifications.submissionId,
+                rows.map((row) => row.id),
+              ),
+              isNull(lateSubmissionJustifications.revokedAt),
+            ),
+          )
+
+  const justificationBySubmission = new Map(
+    justifications.map(({ submissionId, ...justification }) => [submissionId, justification]),
+  )
+
   const byCheckpoint = new Map<number, Map<number, CurrentSubmission>>(
     checkpointIds.map((id) => [id, new Map()]),
   )
 
   for (const row of rows) {
-    const deadlineAt = deadlineById.get(row.checkpointId)!
+    const late = isLate(row.submittedAt, deadlineById.get(row.checkpointId)!)
     byCheckpoint.get(row.checkpointId)!.set(row.githubRepoId, {
+      id: row.id,
       sha: row.sha,
       submittedAt: row.submittedAt,
-      late: deadlineAt !== null && row.submittedAt.getTime() > deadlineAt.getTime(),
+      late,
+      // A deadline moved later can leave a justification behind on a
+      // submission that is no longer late; it justifies nothing then
+      justification: late ? (justificationBySubmission.get(row.id) ?? null) : null,
       passed: passedBySubmission.get(row.id) ?? null,
     })
   }
@@ -446,6 +501,8 @@ export type GradingRunRow = {
 export type SubmissionDetail = {
   submission: SubmissionRow
   gradingRuns: GradingRunRow[]
+  /** Every justification of its lateness, newest first, revoked ones included */
+  justifications: LateJustification[]
 }
 
 /**
@@ -467,32 +524,7 @@ export async function findSubmissionDetail(
   const classroom = await findTeachingClassroom(session, classroomSlug)
   if (!classroom) return null
 
-  const [row] = await db
-    .select({
-      id: submissions.id,
-      sha: submissions.sha,
-      ref: submissions.ref,
-      aiDeclaration: submissions.aiDeclaration,
-      committedAt: submissions.committedAt,
-      submittedAt: submissions.submittedAt,
-      deadlineAt: checkpoints.deadlineAt,
-    })
-    .from(submissions)
-    .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissions.assignmentRepoId))
-    .innerJoin(
-      assignments,
-      and(eq(assignments.id, assignmentRepos.assignmentId), isNull(assignments.deletedAt)),
-    )
-    .innerJoin(checkpoints, eq(checkpoints.id, submissions.checkpointId))
-    .where(
-      and(
-        eq(assignments.organizationId, classroom.id),
-        eq(assignments.slug, assignmentSlug),
-        eq(assignmentRepos.githubRepoId, githubRepoId),
-        eq(submissions.id, submissionId),
-      ),
-    )
-
+  const row = await findTeacherSubmission(classroom.id, assignmentSlug, githubRepoId, submissionId)
   // Not this classroom's, not this assignment's repo, or not this
   // submission's id — never distinguished from each other, same stance as
   // findSubmissionHistory's "nothing to show" above
@@ -513,18 +545,175 @@ export async function findSubmissionDetail(
     .where(eq(gradingRuns.submissionId, row.id))
     .orderBy(desc(gradingRuns.id))
 
+  const creator = alias(users, 'creator')
+  const revoker = alias(users, 'revoker')
+  const justifications = await db
+    .select({
+      id: lateSubmissionJustifications.id,
+      reason: lateSubmissionJustifications.reason,
+      createdBy: creator.githubLogin,
+      createdAt: lateSubmissionJustifications.createdAt,
+      revokedBy: revoker.githubLogin,
+      revokedAt: lateSubmissionJustifications.revokedAt,
+    })
+    .from(lateSubmissionJustifications)
+    .leftJoin(creator, eq(creator.id, lateSubmissionJustifications.createdByUserId))
+    .leftJoin(revoker, eq(revoker.id, lateSubmissionJustifications.revokedByUserId))
+    .where(eq(lateSubmissionJustifications.submissionId, row.id))
+    .orderBy(desc(lateSubmissionJustifications.id))
+
+  const { deadlineAt, ...submission } = row
+  const late = isLate(row.submittedAt, deadlineAt)
+
   return {
     submission: {
-      id: row.id,
-      sha: row.sha,
-      ref: row.ref,
-      aiDeclaration: row.aiDeclaration,
-      committedAt: row.committedAt,
-      submittedAt: row.submittedAt,
-      late: row.deadlineAt !== null && row.submittedAt.getTime() > row.deadlineAt.getTime(),
+      ...submission,
+      late,
+      lateJustified: late && justifications.some((justification) => justification.revokedAt === null),
     },
     gradingRuns: runs,
+    justifications,
   }
+}
+
+/**
+ * One submission of one of this classroom's assignments, reached the way a
+ * teacher's URL names it: assignment slug, GitHub repo id, submission id.
+ * Null for any mismatch, never telling them apart.
+ */
+async function findTeacherSubmission(
+  classroomId: number,
+  assignmentSlug: string,
+  githubRepoId: number,
+  submissionId: number,
+) {
+  const [row] = await db
+    .select({
+      id: submissions.id,
+      sha: submissions.sha,
+      ref: submissions.ref,
+      aiDeclaration: submissions.aiDeclaration,
+      committedAt: submissions.committedAt,
+      submittedAt: submissions.submittedAt,
+      deadlineAt: checkpoints.deadlineAt,
+    })
+    .from(submissions)
+    .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissions.assignmentRepoId))
+    .innerJoin(
+      assignments,
+      and(eq(assignments.id, assignmentRepos.assignmentId), isNull(assignments.deletedAt)),
+    )
+    .innerJoin(checkpoints, eq(checkpoints.id, submissions.checkpointId))
+    .where(
+      and(
+        eq(assignments.organizationId, classroomId),
+        eq(assignments.slug, assignmentSlug),
+        eq(assignmentRepos.githubRepoId, githubRepoId),
+        eq(submissions.id, submissionId),
+      ),
+    )
+
+  return row ?? null
+}
+
+function isLate(submittedAt: Date, deadlineAt: Date | null): boolean {
+  return deadlineAt !== null && submittedAt.getTime() > deadlineAt.getTime()
+}
+
+export type LateJustificationResult = { success: true } | { success: false; error: string }
+
+const MAX_JUSTIFICATION_LENGTH = 2000
+
+const ARCHIVED_CLASSROOM = 'No se pueden modificar trabajos prácticos en un classroom archivado.'
+
+/**
+ * "Justificar entrega tardía": the teacher accepts one late submission as on
+ * time and writes down why. See `lateSubmissionJustifications` in db/schema.ts.
+ *
+ * Any late submission of the repository can be justified, not only the
+ * current one — the detail page reaches older ones too. Allowed on a closed
+ * entrega and an Inactive assignment, which is when it usually happens; only
+ * an archived classroom refuses, like every other writer.
+ */
+export async function justifyLateSubmission(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  githubRepoId: number,
+  submissionId: number,
+  reason: string,
+): Promise<LateJustificationResult | null> {
+  const trimmed = reason.trim()
+
+  if (trimmed.length === 0) {
+    return { success: false, error: 'Escribí el motivo de la justificación.' }
+  }
+
+  if (trimmed.length > MAX_JUSTIFICATION_LENGTH) {
+    return { success: false, error: 'Ese motivo es demasiado largo.' }
+  }
+
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+  if (!classroom) return null
+
+  if (classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
+
+  const row = await findTeacherSubmission(classroom.id, assignmentSlug, githubRepoId, submissionId)
+  if (!row) return { success: false, error: 'No encontramos esa entrega.' }
+
+  if (!isLate(row.submittedAt, row.deadlineAt)) {
+    return { success: false, error: 'Esa entrega no es tardía, no hace falta justificarla.' }
+  }
+
+  try {
+    await db.insert(lateSubmissionJustifications).values({
+      submissionId: row.id,
+      reason: trimmed,
+      createdByUserId: Number(session.user.id),
+    })
+  } catch (error) {
+    // Two teachers, or a double click: the partial unique index keeps one
+    // active justification, and the first reason written is the one that stays
+    if (isUniqueViolation(error)) {
+      return { success: false, error: 'Esa entrega ya está justificada.' }
+    }
+    throw error
+  }
+
+  return { success: true }
+}
+
+/**
+ * "Quitar justificación". Sets `revoked_at` instead of deleting, so the
+ * reason stays readable on the detail page. Revoking what is not justified is
+ * a no-op, not an error: the double click lands here.
+ */
+export async function revokeLateSubmissionJustification(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  githubRepoId: number,
+  submissionId: number,
+): Promise<LateJustificationResult | null> {
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+  if (!classroom) return null
+
+  if (classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
+
+  const row = await findTeacherSubmission(classroom.id, assignmentSlug, githubRepoId, submissionId)
+  if (!row) return { success: false, error: 'No encontramos esa entrega.' }
+
+  await db
+    .update(lateSubmissionJustifications)
+    .set({ revokedAt: new Date(), revokedByUserId: Number(session.user.id) })
+    .where(
+      and(
+        eq(lateSubmissionJustifications.submissionId, row.id),
+        isNull(lateSubmissionJustifications.revokedAt),
+      ),
+    )
+
+  return { success: true }
 }
 
 export type SubmissionExemptionResult = { success: true } | { success: false; error: string }
@@ -548,12 +737,7 @@ export async function setSubmissionExemption(
   const classroom = await findTeachingClassroom(session, classroomSlug)
   if (!classroom) return null
 
-  if (classroom.archivedAt) {
-    return {
-      success: false,
-      error: 'No se pueden modificar trabajos prácticos en un classroom archivado.',
-    }
-  }
+  if (classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
 
   const [row] = await db
     .select({ repoId: assignmentRepos.id, closedAt: checkpoints.closedAt })
@@ -899,9 +1083,27 @@ async function listSubmissions(
     )
     .orderBy(desc(submissions.id))
 
+  const lateIds = rows.filter((row) => isLate(row.submittedAt, deadlineAt)).map((row) => row.id)
+
+  const justified =
+    lateIds.length === 0
+      ? []
+      : await db
+          .select({ submissionId: lateSubmissionJustifications.submissionId })
+          .from(lateSubmissionJustifications)
+          .where(
+            and(
+              inArray(lateSubmissionJustifications.submissionId, lateIds),
+              isNull(lateSubmissionJustifications.revokedAt),
+            ),
+          )
+
+  const justifiedIds = new Set(justified.map((row) => row.submissionId))
+
   return rows.map((row) => ({
     ...row,
-    late: deadlineAt !== null && row.submittedAt.getTime() > deadlineAt.getTime(),
+    late: isLate(row.submittedAt, deadlineAt),
+    lateJustified: justifiedIds.has(row.id),
   }))
 }
 
