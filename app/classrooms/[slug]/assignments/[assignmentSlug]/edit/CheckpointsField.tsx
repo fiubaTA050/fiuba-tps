@@ -113,7 +113,7 @@ export function CheckpointsField({ initial }: { initial: CheckpointFieldValue[] 
             <div className="checkpoints-grid-header text-center">Cerrar</div>
             <div
               className="checkpoints-grid-header text-center"
-              title="Los alumnos ven la corrección automática recién cuando la publicás"
+              title="Los alumnos ven la corrección automática y las devoluciones recién cuando las publicás"
             >
               Publicar
             </div>

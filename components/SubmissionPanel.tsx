@@ -4,9 +4,16 @@ import { CheckCircleIcon, ClockIcon } from '@primer/octicons-react'
 import { useActionState } from 'react'
 
 import { confirmSubmissionAction } from '@/app/assignment-invitations/[key]/actions'
-import type { CheckpointPanel, StudentGrading, SubmissionRow } from '@/lib/data/submissions'
+import type {
+  CheckpointPanel,
+  StudentFeedback,
+  StudentGrading,
+  SubmissionRow,
+} from '@/lib/data/submissions'
 import { formatArgentina } from '@/lib/dates'
 import { EMPTY_STATE, type InvitationActionState } from '@/lib/form'
+
+import { LinkifiedText } from './LinkifiedText'
 
 /**
  * Where the student hands in, under the repository card of
@@ -120,6 +127,8 @@ function EntregaStatus({ panel }: { panel: CheckpointPanel }) {
           Confirmado {panel.current.sha.slice(0, 7)}
         </span>
         {panel.current.late && <LateLabel justified={panel.current.lateJustified} />}
+        {/* Collapsed, the devolución would go unnoticed */}
+        {panel.feedback && <span className="IssueLabel color-bg-accent ml-2">Con devolución</span>}
       </>
     )
   }
@@ -255,6 +264,8 @@ function PanelBody({
       )}
 
       {panel.grading && <GradingResult grading={panel.grading} />}
+
+      {panel.feedback && <Feedback feedback={panel.feedback} repoUrl={repoUrl} />}
     </>
   )
 }
@@ -341,6 +352,38 @@ function GradingResult({ grading }: { grading: StudentGrading }) {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * The cátedra's devolución, after the automated grading — only ever here once
+ * the entrega is published, `findSubmissionPanels` decides that. It may be
+ * about an older SHA when the student re-submitted after it.
+ */
+function Feedback({ feedback, repoUrl }: { feedback: StudentFeedback; repoUrl: string }) {
+  return (
+    <div className="mt-3 pt-3 border-top">
+      <h4 className="h5 mb-2">Devolución de la cátedra</h4>
+      {!feedback.current && (
+        <p className="color-fg-muted f6">
+          Sobre tu entrega{' '}
+          <a
+            href={`${repoUrl}/tree/${feedback.sha}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-mono"
+          >
+            {feedback.sha.slice(0, 7)}
+          </a>
+          , anterior a la que tenés confirmada ahora.
+        </p>
+      )}
+      <LinkifiedText text={feedback.body} className="mb-1" />
+      <p className="color-fg-muted f6 mb-0">
+        {feedback.author ? `@${feedback.author}` : 'La cátedra'} el{' '}
+        {formatArgentina(feedback.createdAt)}
+      </p>
     </div>
   )
 }

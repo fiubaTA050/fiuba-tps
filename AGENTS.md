@@ -174,6 +174,12 @@ reference code without mental translation. The confusing one:
     at 23:50 — but the installation's GitHub rate limit is shared with every
     teacher's dashboard, and the SHA dedupe does not stop a script that commits
     before each confirmation.
+- **Feedback is a devolución stored here, not a feedback pull request.** The
+  live site's "Enable feedback pull requests" opens a "Feedback" PR in every
+  repository for line comments; this is the general comment on one
+  submission instead, released with the same "Publicar" as the automated
+  grading. Line comments stay on the commit in GitHub. See "Devolución al
+  alumno" in `docs/entregas.md`.
 - **Group assignments do not use GitHub Teams.** The original gives every group
   a GitHub team and grants the team push access to the repository, which forces
   every student into the organization as a member. Here each member is an

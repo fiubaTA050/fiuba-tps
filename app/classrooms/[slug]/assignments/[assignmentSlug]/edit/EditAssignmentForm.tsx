@@ -196,7 +196,9 @@ export function EditAssignmentForm({
                 one `deadline` off the assignment and freezes submissions with a
                 Sidekiq job; here each entrega is a row of its own and the
                 student is the one who confirms. See docs/entregas.md. */}
-            <h3 className="h5 mt-5 pt-4 border-top">Entregas</h3>
+            <h3 id="entregas" className="h5 mt-5 pt-4 border-top">
+              Entregas
+            </h3>
             <p className="note mt-0 mb-3">
               Cada alumno elige una rama, un tag o un commit de su repositorio y confirma. Eso
               congela el árbol que vas a corregir. Un trabajo práctico con una sola fecha es una

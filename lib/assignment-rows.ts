@@ -24,6 +24,8 @@ export type RepoSubmission = {
   justification?: { reason: string; createdBy: string | null; createdAt: Date } | null
   /** Automated grading's verdict; null until a run succeeds — see `CurrentSubmission` */
   passed?: boolean | null
+  /** It has a devolución — see `CurrentSubmission` */
+  hasFeedback?: boolean
 }
 
 /** One student or one team, with everything the filters need to decide on it */

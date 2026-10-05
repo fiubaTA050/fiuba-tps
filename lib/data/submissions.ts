@@ -13,6 +13,7 @@ import {
   lateSubmissionJustifications,
   organizations,
   submissionExemptions,
+  submissionFeedbacks,
   submissions,
   users,
 } from '@/db/schema'
@@ -70,6 +71,27 @@ export type LateJustification = {
   revokedAt: Date | null
 }
 
+/** One saved version of a devolución, as the teacher reads it */
+export type FeedbackVersion = {
+  id: number
+  /** Null when this version removed the devolución */
+  body: string | null
+  /** Login of the teacher who saved it; null if the account is gone from GitHub */
+  createdBy: string | null
+  createdAt: Date
+}
+
+/** The devolución as the student reads it — see `submissionFeedbacks` in db/schema.ts */
+export type StudentFeedback = {
+  body: string
+  author: string | null
+  createdAt: Date
+  /** The submission it is about */
+  sha: string
+  /** False when the student re-submitted after it, so it talks about an older SHA */
+  current: boolean
+}
+
 export type CheckpointPanel = {
   checkpointId: number
   /** "2A". Null is the single unnamed entrega of an assignment with no parts */
@@ -95,6 +117,12 @@ export type CheckpointPanel = {
    * confirmed, or an open entrega nobody has graded yet.
    */
   grading: StudentGrading | null
+  /**
+   * The cátedra's devolución, once the entrega is published: the newest one
+   * among this entrega's submissions, so a student who re-submits to fix
+   * what it says keeps it in sight. Null when unpublished or there is none.
+   */
+  feedback: StudentFeedback | null
 }
 
 export type StudentGradingTest = {
@@ -144,6 +172,8 @@ export type CurrentSubmission = {
    * worker has not reached it. See `passedAllTests`.
    */
   passed: boolean | null
+  /** It has a devolución, published or not — the ⋯ says "Ver" instead of "Escribir" */
+  hasFeedback: boolean
 }
 
 export type CheckpointSubmissions = {
@@ -274,6 +304,8 @@ export async function listAssignmentSubmissions(
             ),
           )
 
+  const withFeedback = await submissionsWithFeedback(rows.map((row) => row.id))
+
   const justificationBySubmission = new Map(
     justifications.map(({ submissionId, ...justification }) => [submissionId, justification]),
   )
@@ -293,6 +325,7 @@ export async function listAssignmentSubmissions(
       // submission that is no longer late; it justifies nothing then
       justification: late ? (justificationBySubmission.get(row.id) ?? null) : null,
       passed: passedBySubmission.get(row.id) ?? null,
+      hasFeedback: withFeedback.has(row.id),
     })
   }
 
@@ -409,6 +442,7 @@ export async function findSubmissionPanels(
       current: null,
       history: [],
       grading: null,
+      feedback: null,
     }
 
     if (context.repoId === null) {
@@ -430,7 +464,12 @@ export async function findSubmissionPanels(
           })
         : null
 
-    panels.push({ ...panel, current, history, grading })
+    // Never read before publishing: an unpublished devolución must not reach
+    // the browser, the same line studentGradingView draws for the grading
+    const feedback =
+      checkpoint.resultsPublishedAt !== null ? await findStudentFeedback(history) : null
+
+    panels.push({ ...panel, current, history, grading, feedback })
   }
 
   return panels
@@ -500,9 +539,21 @@ export type GradingRunRow = {
 
 export type SubmissionDetail = {
   submission: SubmissionRow
+  /** Login of whoever confirmed it; null if the account is gone from GitHub */
+  submittedBy: string | null
+  entrega: {
+    /** "2A". Null is the single unnamed entrega of an assignment with no parts */
+    title: string | null
+    /** "Publicar" is set: the student reads the devolución as soon as it is saved */
+    resultsPublished: boolean
+  }
+  /** The repository's current submission on this entrega, when it is not this one */
+  newer: { id: number; sha: string; submittedAt: Date } | null
   gradingRuns: GradingRunRow[]
   /** Every justification of its lateness, newest first, revoked ones included */
   justifications: LateJustification[]
+  /** Every saved version of its devolución, newest first: the first is the current one */
+  feedback: FeedbackVersion[]
 }
 
 /**
@@ -562,17 +613,50 @@ export async function findSubmissionDetail(
     .where(eq(lateSubmissionJustifications.submissionId, row.id))
     .orderBy(desc(lateSubmissionJustifications.id))
 
-  const { deadlineAt, ...submission } = row
-  const late = isLate(row.submittedAt, deadlineAt)
+  const feedback = await db
+    .select({
+      id: submissionFeedbacks.id,
+      body: submissionFeedbacks.body,
+      createdBy: users.githubLogin,
+      createdAt: submissionFeedbacks.createdAt,
+    })
+    .from(submissionFeedbacks)
+    .leftJoin(users, eq(users.id, submissionFeedbacks.createdByUserId))
+    .where(eq(submissionFeedbacks.submissionId, row.id))
+    .orderBy(desc(submissionFeedbacks.id))
+
+  // Append-only: the current submission is the last row by id
+  const [latest] = await db
+    .select({ id: submissions.id, sha: submissions.sha, submittedAt: submissions.submittedAt })
+    .from(submissions)
+    .where(
+      and(
+        eq(submissions.assignmentRepoId, row.assignmentRepoId),
+        eq(submissions.checkpointId, row.checkpointId),
+      ),
+    )
+    .orderBy(desc(submissions.id))
+    .limit(1)
+
+  const late = isLate(row.submittedAt, row.deadlineAt)
 
   return {
     submission: {
-      ...submission,
+      id: row.id,
+      sha: row.sha,
+      ref: row.ref,
+      aiDeclaration: row.aiDeclaration,
+      committedAt: row.committedAt,
+      submittedAt: row.submittedAt,
       late,
       lateJustified: late && justifications.some((justification) => justification.revokedAt === null),
     },
+    submittedBy: row.submittedBy,
+    entrega: { title: row.checkpointTitle, resultsPublished: row.resultsPublishedAt !== null },
+    newer: latest && latest.id !== row.id ? latest : null,
     gradingRuns: runs,
     justifications,
+    feedback,
   }
 }
 
@@ -595,9 +679,15 @@ async function findTeacherSubmission(
       aiDeclaration: submissions.aiDeclaration,
       committedAt: submissions.committedAt,
       submittedAt: submissions.submittedAt,
+      submittedBy: users.githubLogin,
+      assignmentRepoId: submissions.assignmentRepoId,
+      checkpointId: submissions.checkpointId,
+      checkpointTitle: checkpoints.title,
       deadlineAt: checkpoints.deadlineAt,
+      resultsPublishedAt: checkpoints.resultsPublishedAt,
     })
     .from(submissions)
+    .leftJoin(users, eq(users.id, submissions.submittedByUserId))
     .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissions.assignmentRepoId))
     .innerJoin(
       assignments,
@@ -714,6 +804,140 @@ export async function revokeLateSubmissionJustification(
     )
 
   return { success: true }
+}
+
+export type SubmissionFeedbackResult = { success: true } | { success: false; error: string }
+
+export const MAX_FEEDBACK_LENGTH = 10_000
+
+const FEEDBACK_CONFLICT =
+  'Otro docente cambió esta devolución mientras escribías. Revisá lo que guardó: si guardás de ' +
+  'nuevo, lo reemplazás.'
+
+/**
+ * "Guardar devolución": inserts a new version of the submission's devolución,
+ * never an UPDATE — see `submissionFeedbacks` in db/schema.ts. A blank body
+ * removes it, which is a version too.
+ *
+ * `basedOnId` is the version the teacher was editing, null if there was
+ * none. If another teacher saved in the meantime the save is refused rather
+ * than silently replacing theirs; the unique indexes on `replaces_id` make
+ * that hold for two saves landing at once. Saving what is already current is
+ * a no-op, which is what a double click lands on.
+ *
+ * Allowed on a closed entrega and an Inactive assignment, which is when a
+ * devolución gets written; only an archived classroom refuses.
+ */
+export async function saveSubmissionFeedback(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  githubRepoId: number,
+  submissionId: number,
+  body: string,
+  basedOnId: number | null,
+): Promise<SubmissionFeedbackResult | null> {
+  // A browser posts a textarea's line breaks as CRLF
+  const trimmed = body.replace(/\r\n?/g, '\n').trim()
+
+  if (trimmed.length > MAX_FEEDBACK_LENGTH) {
+    return { success: false, error: 'Esa devolución es demasiado larga.' }
+  }
+
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+  if (!classroom) return null
+
+  if (classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
+
+  const row = await findTeacherSubmission(classroom.id, assignmentSlug, githubRepoId, submissionId)
+  if (!row) return { success: false, error: 'No encontramos esa entrega.' }
+
+  const [latest] = await db
+    .select({ id: submissionFeedbacks.id, body: submissionFeedbacks.body })
+    .from(submissionFeedbacks)
+    .where(eq(submissionFeedbacks.submissionId, row.id))
+    .orderBy(desc(submissionFeedbacks.id))
+    .limit(1)
+
+  const next = trimmed === '' ? null : trimmed
+  if ((latest?.body ?? null) === next) return { success: true }
+
+  if ((latest?.id ?? null) !== basedOnId) return { success: false, error: FEEDBACK_CONFLICT }
+
+  try {
+    await db.insert(submissionFeedbacks).values({
+      submissionId: row.id,
+      body: next,
+      replacesId: basedOnId,
+      createdByUserId: Number(session.user.id),
+    })
+  } catch (error) {
+    if (isUniqueViolation(error)) return { success: false, error: FEEDBACK_CONFLICT }
+    throw error
+  }
+
+  return { success: true }
+}
+
+/** Of these submissions, the ones whose devolución is there now — not removed */
+async function submissionsWithFeedback(submissionIds: number[]): Promise<Set<number>> {
+  if (submissionIds.length === 0) return new Set()
+
+  const rows = await db
+    .selectDistinctOn([submissionFeedbacks.submissionId], {
+      submissionId: submissionFeedbacks.submissionId,
+      body: submissionFeedbacks.body,
+    })
+    .from(submissionFeedbacks)
+    .where(inArray(submissionFeedbacks.submissionId, submissionIds))
+    .orderBy(submissionFeedbacks.submissionId, desc(submissionFeedbacks.id))
+
+  return new Set(rows.filter((row) => row.body !== null).map((row) => row.submissionId))
+}
+
+/**
+ * The devolución the student reads on one entrega: the newest submission
+ * whose devolución is there now. Not only the current submission's — a
+ * student who re-submits to fix what the devolución says keeps it in sight,
+ * marked as being about the older SHA. The caller has checked it is published.
+ */
+async function findStudentFeedback(history: SubmissionRow[]): Promise<StudentFeedback | null> {
+  if (history.length === 0) return null
+
+  const rows = await db
+    .selectDistinctOn([submissionFeedbacks.submissionId], {
+      submissionId: submissionFeedbacks.submissionId,
+      body: submissionFeedbacks.body,
+      author: users.githubLogin,
+      createdAt: submissionFeedbacks.createdAt,
+    })
+    .from(submissionFeedbacks)
+    .leftJoin(users, eq(users.id, submissionFeedbacks.createdByUserId))
+    .where(
+      inArray(
+        submissionFeedbacks.submissionId,
+        history.map((row) => row.id),
+      ),
+    )
+    .orderBy(submissionFeedbacks.submissionId, desc(submissionFeedbacks.id))
+
+  const bySubmission = new Map(rows.map((row) => [row.submissionId, row]))
+
+  // `history` is newest first
+  for (const [index, submission] of history.entries()) {
+    const feedback = bySubmission.get(submission.id)
+    if (!feedback || feedback.body === null) continue
+
+    return {
+      body: feedback.body,
+      author: feedback.author,
+      createdAt: feedback.createdAt,
+      sha: submission.sha,
+      current: index === 0,
+    }
+  }
+
+  return null
 }
 
 export type SubmissionExemptionResult = { success: true } | { success: false; error: string }

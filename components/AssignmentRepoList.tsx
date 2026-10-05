@@ -598,6 +598,7 @@ function RepoListItem({
   const { snapshot } = row
   const extended = row.repoId !== null && checkpoint?.exemptRepoIds.has(row.repoId) === true
   const justifiable = row.submission?.late === true && row.submission.id !== undefined
+  const submissionId = row.submission?.id
 
   return (
     <div className="d-table col-12 assignment-repo-list-item">
@@ -727,8 +728,10 @@ function RepoListItem({
 
           {/* Each item only where it means something: extending on a closed
               entrega (setSubmissionExemption refuses an open one), justifying
-              on a late current submission. With neither there is no menu */}
-          {row.repoId !== null && (checkpoint?.closed || justifiable) && (
+              on a late current submission, a devolución on any current
+              submission. With none of them there is no menu */}
+          {row.repoId !== null &&
+            (checkpoint?.closed || justifiable || submissionId !== undefined) && (
             <SubmissionActionsMenu
               name={row.name}
               extension={
@@ -751,6 +754,14 @@ function RepoListItem({
                       githubRepoId: row.repoId,
                       submissionId: row.submission!.id!,
                       reason: row.submission!.justification?.reason ?? null,
+                    }
+                  : null
+              }
+              feedback={
+                submissionId !== undefined
+                  ? {
+                      href: `/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}/${submissionId}#devolucion`,
+                      exists: row.submission?.hasFeedback === true,
                     }
                   : null
               }

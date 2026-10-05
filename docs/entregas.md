@@ -342,3 +342,47 @@ La salida que se le muestra al alumno es solo el final de cada texto, hasta
 16.000 caracteres (`STUDENT_OUTPUT_MAX_CHARS`). El runner guarda hasta 256 KB
 por test, y el error de `go test` queda al final. En TP1 la salida más larga
 fue de 33 KB, y el promedio de 1 KB.
+
+## Devolución al alumno
+
+El docente puede dejarle al alumno un texto sobre su entrega
+(`submission_feedbacks`, agregado 2026-10-04). Se escribe en el último bloque
+del detalle de la entrega, al que se llega desde el ⋯ de la fila del alumno
+("Escribir devolución" / "Ver devolución") o desde "Ver entregas anteriores".
+El alumno la lee en su pantalla, debajo de la corrección automática, bajo
+"Devolución de la cátedra".
+
+Lo que hay en el original y en el sitio vivo es otra cosa: el Rails archivado
+no tiene nada y manda a comentar en GitHub, y el sitio vivo crea un pull request
+"Feedback" en cada repositorio para comentar líneas. Esto es la devolución
+general. Para comentar líneas, sigue estando el commit en GitHub, y el texto
+acepta links: un permalink a `blob/<sha>/archivo#L88-L102` se puede clickear.
+
+- **Se escribe sobre una fila de `submissions`, un SHA**, como la
+  justificación. Si el alumno reentrega, la entrega nueva arranca sin
+  devolución y la anterior conserva la suya. El alumno ve la más nueva entre
+  todas sus versiones de esa entrega, no solo la de la vigente. Si es de una
+  anterior, dice sobre qué SHA es: el que reentrega para corregir lo que le
+  marcaron la sigue teniendo a la vista.
+- **El alumno la ve recién cuando se publica la entrega**, con el mismo
+  "Publicar" (`checkpoints.results_published_at`) que libera la corrección
+  automática. Es el "Publish Grades" de Gradescope, que libera puntajes y
+  comentarios juntos. Así se escriben las devoluciones de todo el curso durante
+  varios días y nadie ve una a medias, ni la suya antes que los demás. La contra
+  es que no se puede liberar la de un solo alumno. Con la entrega ya publicada,
+  lo que se guarda se ve en el momento, y el bloque lo avisa antes de guardar.
+  Lo que no está publicado no sale del servidor.
+- **El alumno ve quién la escribió**, el @login, así sabe a quién preguntarle.
+  Con la entrega colapsada, el resumen dice "Con devolución" para que no pase
+  desapercibida.
+- **Cada vez que se guarda se agrega una versión.** La vigente es la última, y
+  guardar el texto vacío la quita (una versión con `body` nulo). Nada se pisa:
+  lo que el alumno leyó queda en el detalle, en "Ver versiones anteriores".
+- **Dos docentes no se pisan.** El form manda la versión que estaba editando.
+  Si otro docente guardó en el medio, se rechaza y muestra lo que guardó el
+  otro. Volver a guardar lo reemplaza, ya a sabiendas. Los índices únicos sobre
+  `replaces_id` sostienen eso también para dos guardados simultáneos. Guardar
+  lo mismo que ya está es un no-op, que es lo que cubre el doble click.
+- Texto plano con saltos de línea, hasta 10.000 caracteres. Sin Markdown.
+- Se puede escribir con la entrega abierta o cerrada y con el trabajo práctico
+  Inactive. Solo un classroom archivado lo rechaza.

@@ -1,8 +1,11 @@
 import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
+import Link from 'next/link'
+
 import { Breadcrumb } from '@/components/Breadcrumb'
 import { LateJustificationButton } from '@/components/LateJustificationDialog'
+import { SubmissionFeedbackForm } from '@/components/SubmissionFeedbackForm'
 import { findAssignment } from '@/lib/data/assignments'
 import { findClassroomInstallation } from '@/lib/data/organizations'
 import {
@@ -23,9 +26,10 @@ const STATUS: Record<GradingRunRow['status'], { label: string; tone: string }> =
 
 /**
  * The two facts a docente cannot see anywhere else about one entrega: the
- * student's AI declaration and every automated-grading attempt against it.
- * Linked from the "Ver entregas anteriores" list in AssignmentRepoList.tsx,
- * which keeps showing sha/ref/fecha/Tarde exactly as before.
+ * student's AI declaration and every automated-grading attempt against it —
+ * and, last, the devolución the docente writes after reading them (see
+ * `submissionFeedbacks` in db/schema.ts). Linked from the "Ver entregas
+ * anteriores" list in AssignmentRepoList.tsx and from the row's ⋯.
  *
  * Frame is the breadcrumb alone, not ClassroomShell, same reasoning as
  * .../assignments/[assignmentSlug]/page.tsx: a step away from the classroom,
@@ -51,6 +55,7 @@ export default async function SubmissionDetailPage(
   if (!classroom || !assignment || !detail) notFound()
 
   const { submission, gradingRuns, justifications } = detail
+  const assignmentPath = `/classrooms/${classroom.slug}/assignments/${assignment.slug}`
   const active = justifications.find((justification) => justification.revokedAt === null) ?? null
   const revoked = justifications.filter((justification) => justification.revokedAt !== null)
 
@@ -62,11 +67,11 @@ export default async function SubmissionDetailPage(
           { label: classroom.title, href: `/classrooms/${classroom.slug}` },
           {
             label: assignment.title,
-            href: `/classrooms/${classroom.slug}/assignments/${assignment.slug}`,
+            href: assignmentPath,
           },
           {
             label: 'Entrega',
-            href: `/classrooms/${classroom.slug}/assignments/${assignment.slug}/submissions/${repoId}/${submissionId}`,
+            href: `${assignmentPath}/submissions/${repoId}/${submissionId}`,
           },
         ]}
       />
@@ -74,8 +79,13 @@ export default async function SubmissionDetailPage(
       <div className="container-md p-responsive">
         <div className="Box mt-4">
           <div className="Box-body">
-            <h3 className="h5 mb-2">Entrega</h3>
-            <p className="color-fg-muted">
+            <h3 className="h5 mb-2">
+              {detail.entrega.title ? `Entrega ${detail.entrega.title}` : 'Entrega'}
+              {detail.submittedBy && (
+                <span className="color-fg-muted text-normal"> de @{detail.submittedBy}</span>
+              )}
+            </h3>
+            <p className={`color-fg-muted ${detail.newer ? '' : 'mb-0'}`}>
               <span className="text-mono">{submission.sha.slice(0, 7)}</span>{' '}
               <span className="color-fg-muted">({submission.ref})</span> el{' '}
               {formatArgentina(submission.submittedAt)}
@@ -85,6 +95,21 @@ export default async function SubmissionDetailPage(
                 </span>
               )}
             </p>
+
+            {/* The devolución stays on this SHA; the student reads it marked
+                as being about an older entrega — findStudentFeedback */}
+            {detail.newer && (
+              <div className="flash flash-warn mb-0">
+                El alumno volvió a entregar después: la entrega vigente es{' '}
+                <Link
+                  href={`${assignmentPath}/submissions/${repoId}/${detail.newer.id}`}
+                  className="text-mono"
+                >
+                  {detail.newer.sha.slice(0, 7)}
+                </Link>
+                , del {formatArgentina(detail.newer.submittedAt)}
+              </div>
+            )}
           </div>
         </div>
 
@@ -149,7 +174,7 @@ export default async function SubmissionDetailPage(
           </div>
         </div>
 
-        <div className="Box mt-3 mb-4">
+        <div className="Box mt-3">
           <div className="Box-body">
             <h3 className="h5 mb-2">Corrección automática</h3>
             {gradingRuns.length === 0 ? (
@@ -165,6 +190,19 @@ export default async function SubmissionDetailPage(
             )}
           </div>
         </div>
+
+        <SubmissionFeedbackForm
+          target={{
+            classroomSlug: classroom.slug,
+            assignmentSlug: assignment.slug,
+            githubRepoId,
+            submissionId: submission.id,
+          }}
+          versions={detail.feedback}
+          entrega={detail.entrega.title ?? 'esta entrega'}
+          published={detail.entrega.resultsPublished}
+          publishHref={`${assignmentPath}/edit#entregas`}
+        />
       </div>
     </>
   )

@@ -12,6 +12,7 @@ import {
   organizations,
   organizationsUsers,
   submissionExemptions,
+  submissionFeedbacks,
   submissions,
   users,
 } from '@/db/schema'
@@ -80,6 +81,7 @@ const {
   justifyLateSubmission,
   listAssignmentSubmissions,
   revokeLateSubmissionJustification,
+  saveSubmissionFeedback,
   setSubmissionExemption,
 } = await import('@/lib/data/submissions')
 
@@ -1731,6 +1733,242 @@ describe('late submission justifications', () => {
 
       expect(panel.current).toMatchObject({ late: true, lateJustified: true })
       expect(JSON.stringify(panel)).not.toContain(REASON)
+    })
+  })
+})
+
+/**
+ * The cátedra's devolución — see `submissionFeedbacks` in db/schema.ts. No
+ * spec to port: the archived Rails code has nothing like it, and the live
+ * site's feedback pull request is a different mechanism.
+ */
+describe('submission feedback', () => {
+  const FEEDBACK = 'Muy bien la replicación. Mirá https://github.com/org/repo/blob/abc/raft.go#L88.'
+
+  async function submitted() {
+    const profe = await student('profe')
+    const alumna = await student('alumna')
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    const checkpointId = await openCheckpoint(assignmentId)
+    const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+    const submissionId = await submit(repoId, checkpointId, alumna, 'a'.repeat(40))
+    const args = [classroomSlug, assignmentSlug, githubRepoId, submissionId] as const
+
+    return { profe, alumna, classroomSlug, assignmentSlug, assignmentId, checkpointId, repoId, githubRepoId, submissionId, args }
+  }
+
+  async function versions(f: { profe: Session; args: readonly [string, string, number, number] }) {
+    return (await findSubmissionDetail(f.profe, ...f.args))!.feedback
+  }
+
+  /** What the student's panel carries, through a real invitation key */
+  async function studentPanel(f: Awaited<ReturnType<typeof submitted>>) {
+    const key = `key-feedback-${f.assignmentId}`
+    await db.insert(assignmentInvitations).values({ assignmentId: f.assignmentId, key }).onConflictDoNothing()
+    const [panel] = (await findSubmissionPanels(f.alumna, key))!
+    return panel
+  }
+
+  async function publish(checkpointId: number) {
+    await db.update(checkpoints).set({ resultsPublishedAt: new Date() }).where(eq(checkpoints.id, checkpointId))
+  }
+
+  describe('saveSubmissionFeedback', () => {
+    it('saves a first version, trimmed, recording who', async () => {
+      const f = await submitted()
+
+      expect(await saveSubmissionFeedback(f.profe, ...f.args, `  ${FEEDBACK}  `, null)).toEqual({ success: true })
+
+      expect(await versions(f)).toMatchObject([{ body: FEEDBACK, createdBy: 'profe' }])
+    })
+
+    it('stores the line breaks a browser posts as CRLF as plain newlines', async () => {
+      const f = await submitted()
+
+      await saveSubmissionFeedback(f.profe, ...f.args, 'Primera línea\r\nSegunda', null)
+
+      expect((await versions(f))[0].body).toBe('Primera línea\nSegunda')
+    })
+
+    it('keeps every version, newest first, and a blank body removes it', async () => {
+      const f = await submitted()
+
+      await saveSubmissionFeedback(f.profe, ...f.args, 'Primera', null)
+      const [first] = await versions(f)
+      await saveSubmissionFeedback(f.profe, ...f.args, 'Segunda', first.id)
+      const [second] = await versions(f)
+      await saveSubmissionFeedback(f.profe, ...f.args, '   ', second.id)
+
+      expect((await versions(f)).map((version) => version.body)).toEqual([null, 'Segunda', 'Primera'])
+    })
+
+    it('refuses to save over a version another teacher replaced, keeping theirs', async () => {
+      const f = await submitted()
+      const ayudante = await student('ayudante')
+      const [classroom] = await db.select().from(organizations).where(eq(organizations.slug, f.classroomSlug))
+      await db.insert(organizationsUsers).values({ organizationId: classroom.id, userId: Number(ayudante.user.id) })
+
+      await saveSubmissionFeedback(f.profe, ...f.args, 'Primera', null)
+      const [first] = await versions(f)
+      await saveSubmissionFeedback(ayudante, ...f.args, 'La del ayudante', first.id)
+
+      expect(await saveSubmissionFeedback(f.profe, ...f.args, 'La del profe', first.id)).toMatchObject({
+        success: false,
+      })
+      // Nor may a first version be written twice
+      expect(await saveSubmissionFeedback(f.profe, ...f.args, 'La del profe', null)).toMatchObject({
+        success: false,
+      })
+      expect((await versions(f)).map((version) => [version.body, version.createdBy])).toEqual([
+        ['La del ayudante', 'ayudante'],
+        ['Primera', 'profe'],
+      ])
+    })
+
+    it('lets the database refuse two versions replacing the same one', async () => {
+      const f = await submitted()
+      const by = Number(f.profe.user.id)
+      const [first] = await db
+        .insert(submissionFeedbacks)
+        .values({ submissionId: f.submissionId, body: 'Primera', createdByUserId: by })
+        .returning({ id: submissionFeedbacks.id })
+      await db
+        .insert(submissionFeedbacks)
+        .values({ submissionId: f.submissionId, body: 'A', replacesId: first.id, createdByUserId: by })
+
+      await expect(
+        db
+          .insert(submissionFeedbacks)
+          .values({ submissionId: f.submissionId, body: 'B', replacesId: first.id, createdByUserId: by }),
+      ).rejects.toThrow()
+      await expect(
+        db.insert(submissionFeedbacks).values({ submissionId: f.submissionId, body: 'C', createdByUserId: by }),
+      ).rejects.toThrow()
+    })
+
+    it('treats saving what is already there as a no-op, whatever version the form read', async () => {
+      const f = await submitted()
+
+      await saveSubmissionFeedback(f.profe, ...f.args, FEEDBACK, null)
+      // The double click: the second submit still names the version before the first
+      expect(await saveSubmissionFeedback(f.profe, ...f.args, FEEDBACK, null)).toEqual({ success: true })
+      // Removing what is not there
+      const g = await submitted()
+      expect(await saveSubmissionFeedback(g.profe, ...g.args, '', null)).toEqual({ success: true })
+
+      expect(await versions(f)).toHaveLength(1)
+      expect(await versions(g)).toHaveLength(0)
+    })
+
+    it('refuses a devolución that is too long', async () => {
+      const f = await submitted()
+
+      expect(await saveSubmissionFeedback(f.profe, ...f.args, 'x'.repeat(10_001), null)).toMatchObject({
+        success: false,
+      })
+    })
+
+    it('works on a closed entrega and an inactive assignment, refusing only an archived classroom', async () => {
+      const f = await submitted()
+      await db.update(checkpoints).set({ closedAt: new Date() }).where(eq(checkpoints.id, f.checkpointId))
+      await db.update(assignments).set({ invitationsEnabled: false }).where(eq(assignments.id, f.assignmentId))
+
+      expect(await saveSubmissionFeedback(f.profe, ...f.args, FEEDBACK, null)).toEqual({ success: true })
+
+      await db.update(organizations).set({ archivedAt: new Date() }).where(eq(organizations.slug, f.classroomSlug))
+      const [current] = await versions(f)
+
+      expect(await saveSubmissionFeedback(f.profe, ...f.args, 'Otra', current.id)).toMatchObject({ success: false })
+    })
+
+    it("refuses a submission that is not this repository's, and a teacher of another classroom", async () => {
+      const f = await submitted()
+      const ajeno = await student('ajeno')
+
+      expect(
+        await saveSubmissionFeedback(f.profe, f.classroomSlug, f.assignmentSlug, 999_999, f.submissionId, FEEDBACK, null),
+      ).toMatchObject({ success: false })
+      expect(await saveSubmissionFeedback(ajeno, ...f.args, FEEDBACK, null)).toBeNull()
+      expect(await db.select().from(submissionFeedbacks)).toHaveLength(0)
+    })
+  })
+
+  describe('reads', () => {
+    it('gives the detail page the entrega, who submitted it and whether a newer one exists', async () => {
+      const f = await submitted()
+      await db.update(checkpoints).set({ title: '2A' }).where(eq(checkpoints.id, f.checkpointId))
+
+      let detail = await findSubmissionDetail(f.profe, ...f.args)
+      expect(detail).toMatchObject({
+        submittedBy: 'alumna',
+        entrega: { title: '2A', resultsPublished: false },
+        newer: null,
+        feedback: [],
+      })
+
+      await publish(f.checkpointId)
+      const later = await submit(f.repoId, f.checkpointId, f.alumna, 'b'.repeat(40))
+
+      detail = await findSubmissionDetail(f.profe, ...f.args)
+      expect(detail).toMatchObject({
+        entrega: { resultsPublished: true },
+        newer: { id: later, sha: 'b'.repeat(40) },
+      })
+    })
+
+    it('hides it from the student until the entrega is published', async () => {
+      const f = await submitted()
+      await saveSubmissionFeedback(f.profe, ...f.args, FEEDBACK, null)
+
+      const unpublished = await studentPanel(f)
+      expect(unpublished.feedback).toBeNull()
+      expect(JSON.stringify(unpublished)).not.toContain('replicación')
+
+      await publish(f.checkpointId)
+
+      expect((await studentPanel(f)).feedback).toMatchObject({
+        body: FEEDBACK,
+        author: 'profe',
+        sha: 'a'.repeat(40),
+        current: true,
+      })
+    })
+
+    it('keeps the devolución in sight after a re-submission, marked as being about the older SHA', async () => {
+      const f = await submitted()
+      await publish(f.checkpointId)
+      await saveSubmissionFeedback(f.profe, ...f.args, FEEDBACK, null)
+      const later = await submit(f.repoId, f.checkpointId, f.alumna, 'b'.repeat(40))
+
+      expect((await studentPanel(f)).feedback).toMatchObject({ sha: 'a'.repeat(40), current: false })
+
+      // A devolución on the newer one takes over
+      await saveSubmissionFeedback(f.profe, f.classroomSlug, f.assignmentSlug, f.githubRepoId, later, 'Sobre la nueva', null)
+      expect((await studentPanel(f)).feedback).toMatchObject({ body: 'Sobre la nueva', current: true })
+
+      // Removing it brings back the older one, which was never removed
+      const [newest] = (await findSubmissionDetail(f.profe, f.classroomSlug, f.assignmentSlug, f.githubRepoId, later))!
+        .feedback
+      await saveSubmissionFeedback(f.profe, f.classroomSlug, f.assignmentSlug, f.githubRepoId, later, '', newest.id)
+      expect((await studentPanel(f)).feedback).toMatchObject({ body: FEEDBACK, current: false })
+    })
+
+    it('tells the dashboard which current submissions have one', async () => {
+      const f = await submitted()
+      const read = async () =>
+        checkpointResult(
+          await listAssignmentSubmissions(f.profe, f.classroomSlug, f.assignmentSlug),
+          f.checkpointId,
+        )?.byRepoId.get(f.githubRepoId)?.hasFeedback
+
+      expect(await read()).toBe(false)
+
+      await saveSubmissionFeedback(f.profe, ...f.args, FEEDBACK, null)
+      expect(await read()).toBe(true)
+
+      const [current] = await versions(f)
+      await saveSubmissionFeedback(f.profe, ...f.args, '', current.id)
+      expect(await read()).toBe(false)
     })
   })
 })

@@ -5,8 +5,10 @@ import {
   ClockIcon,
   CommentIcon,
   GitPullRequestIcon,
+  NoteIcon,
   KebabHorizontalIcon,
 } from '@primer/octicons-react'
+import Link from 'next/link'
 import { type ReactNode, type RefObject, useActionState, useRef } from 'react'
 
 import { setSubmissionExemptionAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
@@ -26,11 +28,15 @@ type Extension = {
 }
 
 /**
- * The ⋯ at the end of a dashboard row. Two independent items, each only where
- * it means something: "Extender entrega" / "Revocar extensión" over an entrega
- * the teacher already closed (`submissionExemptions` in db/schema.ts), and
+ * The ⋯ at the end of a dashboard row. Three independent items, each only
+ * where it means something: "Extender entrega" / "Revocar extensión" over an
+ * entrega the teacher already closed (`submissionExemptions` in db/schema.ts),
  * "Justificar entrega tardía" / "Quitar justificación" over a current
- * submission that is late (`lateSubmissionJustifications`, LateJustificationDialog).
+ * submission that is late (`lateSubmissionJustifications`, LateJustificationDialog),
+ * and "Escribir devolución" / "Ver devolución" over any current submission —
+ * a link to its detail page, which is where the devolución is written.
+ * Without it that page is two clicks and a fetch away, behind "Ver entregas
+ * anteriores".
  *
  * The extension is a port of the live site's per-row "Actions:" menu with its calendar-iconed
  * "Extend deadline" / "Revoke extension" (GitHub Docs, "Extending an
@@ -52,6 +58,7 @@ export function SubmissionActionsMenu({
   name,
   extension,
   justification,
+  feedback,
 }: {
   /** The row's title — the student's login or identifier */
   name: string
@@ -59,6 +66,8 @@ export function SubmissionActionsMenu({
   extension: Extension | null
   /** Absent unless the current submission is late */
   justification: LateJustificationTarget | null
+  /** Absent when nothing is confirmed: there is nothing to write about */
+  feedback: { href: string; exists: boolean } | null
 }) {
   const menu = useRef<HTMLDetailsElement>(null)
   const extensionDialog = useRef<HTMLDialogElement>(null)
@@ -99,6 +108,23 @@ export function SubmissionActionsMenu({
                       ? 'Justificar entrega tardía'
                       : 'Quitar justificación'}
                   </MenuItem>
+                )}
+
+                {feedback && (
+                  <li role="none" className="ActionListItem">
+                    <Link
+                      href={feedback.href}
+                      role="menuitem"
+                      className="ActionListContent ActionListContent--visual16"
+                    >
+                      <span className="ActionListItem-visual ActionListItem-action--leading">
+                        <NoteIcon />
+                      </span>
+                      <span className="ActionListItem-label">
+                        {feedback.exists ? 'Ver devolución' : 'Escribir devolución'}
+                      </span>
+                    </Link>
+                  </li>
                 )}
               </ul>
             </div>

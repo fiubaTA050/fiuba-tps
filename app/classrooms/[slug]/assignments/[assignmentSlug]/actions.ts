@@ -8,6 +8,7 @@ import { linkAccountToEntry } from '@/lib/data/rosters'
 import {
   justifyLateSubmission,
   revokeLateSubmissionJustification,
+  saveSubmissionFeedback,
   setSubmissionExemption,
 } from '@/lib/data/submissions'
 import { positiveInteger } from '@/lib/form'
@@ -136,6 +137,49 @@ export async function setLateJustificationAction(
   // On a refusal too: "Esa entrega ya está justificada" means another teacher
   // got there first, and without this the page keeps offering "Justificar"
   // and every retry repeats the same error until a reload
+  const assignmentPath = `/classrooms/${classroomSlug}/assignments/${assignmentSlug}`
+  revalidatePath(assignmentPath)
+  revalidatePath(`${assignmentPath}/submissions/${githubRepoId}/${submissionId}`)
+
+  return result.success ? EMPTY_STATE : { error: result.error, notice: null }
+}
+
+/**
+ * "Guardar devolución" on the submission's detail page. See
+ * `submissionFeedbacks` in db/schema.ts. `based_on` is the version the
+ * teacher was editing, empty when there was none.
+ */
+export async function saveSubmissionFeedbackAction(
+  _previous: RosterActionState,
+  formData: FormData,
+): Promise<RosterActionState> {
+  const session = await auth()
+  if (!isUsableSession(session)) redirect('/')
+
+  const classroomSlug = String(formData.get('classroom_slug') ?? '')
+  const assignmentSlug = String(formData.get('assignment_slug') ?? '')
+  const githubRepoId = positiveInteger(formData.get('github_repo_id'))
+  const submissionId = positiveInteger(formData.get('submission_id'))
+  const basedOnId = positiveInteger(formData.get('based_on'))
+
+  if (githubRepoId === null || submissionId === null) {
+    return { error: 'No encontramos esa entrega.', notice: null }
+  }
+
+  const result = await saveSubmissionFeedback(
+    session,
+    classroomSlug,
+    assignmentSlug,
+    githubRepoId,
+    submissionId,
+    String(formData.get('body') ?? ''),
+    basedOnId,
+  )
+
+  if (!result) return { error: 'No encontramos ese classroom.', notice: null }
+
+  // On a refusal too: when another teacher saved first, the page has to show
+  // what they wrote, and the form has to pick up their version as `based_on`
   const assignmentPath = `/classrooms/${classroomSlug}/assignments/${assignmentSlug}`
   revalidatePath(assignmentPath)
   revalidatePath(`${assignmentPath}/submissions/${githubRepoId}/${submissionId}`)

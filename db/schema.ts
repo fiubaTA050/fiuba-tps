@@ -911,6 +911,59 @@ export const lateSubmissionJustifications = pgTable(
 )
 
 /**
+ * The cátedra's devolución on one submission: free text the teacher writes
+ * on the submission's detail page and the student reads under their entrega.
+ * The archived Rails code has nothing like it, and the live site's answer is
+ * a "Feedback" pull request in each repository for line comments; this is the
+ * general comment instead, and line comments are still GitHub's own, on the
+ * commit. See "Devolución al alumno" in docs/entregas.md.
+ *
+ * Hangs off the submission, a SHA, like `late_submission_justifications`: it
+ * talks about that code, and a re-submission starts without one.
+ *
+ * **One row per saved version**, so the current devolución is the last row and
+ * a null `body` is one that was removed. Nothing is overwritten: what the
+ * student read stays readable after an edit. `replaces_id` names the version
+ * the teacher was editing, and its unique indexes are what refuses the second
+ * of two teachers saving over the same version — the save names the version
+ * it read, and only one row may replace it.
+ *
+ * The student sees it only once `checkpoints.results_published_at` is set,
+ * the same "Publicar" that releases the automated grading.
+ */
+export const submissionFeedbacks = pgTable(
+  'submission_feedbacks',
+  {
+    id: serial('id').primaryKey(),
+    submissionId: integer('submission_id')
+      .notNull()
+      .references(() => submissions.id, { onDelete: 'cascade' }),
+    /** Null when this version removed the devolución */
+    body: text('body'),
+    /** The version this one replaced; null on the first one */
+    replacesId: integer('replaces_id'),
+    createdByUserId: integer('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('index_submission_feedbacks_on_submission_id').on(table.submissionId, desc(table.id)),
+    foreignKey({
+      columns: [table.replacesId],
+      foreignColumns: [table.id],
+      name: 'submission_feedbacks_replaces_id_fk',
+    }),
+    uniqueIndex('index_submission_feedbacks_on_replaces_id').on(table.replacesId),
+    // Two NULLs do not collide in a unique index, so the first version needs
+    // its own partial one — the shape of index_checkpoints_on_assignment_id_unnamed
+    uniqueIndex('index_submission_feedbacks_on_first_version')
+      .on(table.submissionId)
+      .where(sql`${table.replacesId} is null`),
+  ],
+)
+
+/**
  * A credential for a non-browser client of the API — the grading worker
  * today, and whatever else gets built on top of this later, which is why the
  * table is generic rather than named after that one caller.
@@ -1005,3 +1058,4 @@ export type Submission = typeof submissions.$inferSelect
 export type SubmissionExemption = typeof submissionExemptions.$inferSelect
 export type ApiKey = typeof apiKeys.$inferSelect
 export type GradingRun = typeof gradingRuns.$inferSelect
+export type SubmissionFeedback = typeof submissionFeedbacks.$inferSelect
