@@ -121,6 +121,12 @@ reference code without mental translation. The confusing one:
   `unlinked_users_page` do in `orgs/rosters/show.html.erb`. There the whole
   roster is server-rendered and the browser hands out a page of it, so the cost
   is not a request but the teacher's find-in-page over the rows off the page.
+- **Joining the roster takes a confirmation, and its list filters as the
+  student types.** `shared/_shared_join_roster.html.erb` makes every entry its
+  own one-click form over an unfiltered list: fine for thirty students, a hunt
+  through a wall of padrones for a few hundred, and a mis-click links the
+  account to someone else's identifier, which only the teacher can undo.
+  `components/JoinRosterForm` selects on click and links on "Confirmar".
 - **The classroom index is the original's card grid**, `_organization_filters`
   over `_organization_card_layout`, which is still what the live site renders —
   a two-column grid of cards, each with a coloured band, a kebab menu, the
