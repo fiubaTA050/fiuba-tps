@@ -125,6 +125,16 @@
   border-top: 1px solid #e1e4e8;
 }
 
+/* The selectable rows of JoinRosterForm */
+.Box-row--hover-gray:hover {
+  background-color: #f6f8fa;
+}
+
+.Box-row--blue,
+.Box-row--blue:hover {
+  background-color: #f1f8ff;
+}
+
 /* v22 keeps .Box-header but strips it down to the border and the radii — the
    grey band and the padding are gone, and .Box-title never made it across. */
 .Box-header {
