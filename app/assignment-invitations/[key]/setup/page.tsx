@@ -79,7 +79,7 @@ export default async function AssignmentInvitationSetupPage(
       ) : invitation.roster ? (
         <p className="color-fg-muted">
           Tu cuenta no está vinculada a ningún {invitation.roster.identifierName.toLowerCase()}{' '}
-          de la lista. <a href={`/assignment-invitations/${key}`}>Vinculala ahora</a>
+          de la lista. <a href={`/assignment-invitations/${key}?roster=link`}>Vinculala ahora</a>
         </p>
       ) : null}
 

@@ -40,8 +40,13 @@ export default async function GroupAssignmentInvitationPage(
   const invitation = await findGroupInvitation(session, key)
   if (!invitation) notFound()
 
-  // check_user_not_group_member: the pick is over once they are on a team
-  if (invitation.team) {
+  // check_user_not_group_member: the pick is over once they are on a team —
+  // unless the student came from setup's "Vinculala ahora" to pick their
+  // identifier, which the original never offered to a team member. Without
+  // this exception that link bounced straight back to setup.
+  const linkingAfterJoin =
+    searchParams.roster === 'link' && invitation.roster !== null && invitation.rosterEntry === null
+  if (invitation.team && !linkingAfterJoin) {
     redirect(
       invitation.status === 'unaccepted'
         ? `/group-assignment-invitations/${key}/accept`

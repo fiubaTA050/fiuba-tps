@@ -66,7 +66,7 @@ export default async function GroupAssignmentSetupPage(
           <>
             {' '}
             Tu cuenta no está vinculada a ningún {invitation.roster.identifierName.toLowerCase()}{' '}
-            de la lista. <a href={`/group-assignment-invitations/${key}`}>Vinculala ahora</a>
+            de la lista. <a href={`/group-assignment-invitations/${key}?roster=link`}>Vinculala ahora</a>
           </>
         ) : null}
       </p>
