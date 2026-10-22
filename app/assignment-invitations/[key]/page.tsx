@@ -44,8 +44,13 @@ export default async function AssignmentInvitationPage(
   // `find_by!(key: params[:id])` raising RecordNotFound
   if (!invitation) notFound()
 
-  // route_based_on_status: anything past `unaccepted` belongs on #setup
-  if (invitation.status !== 'unaccepted') {
+  // route_based_on_status: anything past `unaccepted` belongs on #setup —
+  // unless the student came from setup's "Vinculala ahora" to pick their
+  // identifier, which the original never offered after accepting. Without
+  // this exception that link bounced straight back to setup.
+  const linkingAfterAccept =
+    searchParams.roster === 'link' && invitation.roster !== null && invitation.rosterEntry === null
+  if (invitation.status !== 'unaccepted' && !linkingAfterAccept) {
     redirect(`/assignment-invitations/${key}/setup`)
   }
 
