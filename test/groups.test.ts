@@ -507,6 +507,8 @@ describe('listGroupAssignmentAcceptances', () => {
     expect(acceptances?.studentsNotOnTeam).toEqual([
       { identifier: '104002', githubLogin: null },
     ])
+    // What the teams export reads the padrón from: linked entries only
+    expect(acceptances?.identifiers).toEqual(new Map([[onATeam, '104001']]))
 
     // The assignment exists, which is what the id above is for
     expect(assignmentId).toBeGreaterThan(0)

@@ -15,6 +15,7 @@ import {
   rosters,
   users,
 } from '@/db/schema'
+import { toCsv } from '@/lib/csv'
 import { unlinkedEntriesOf } from '@/lib/data/invitations'
 import { isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
@@ -638,9 +639,7 @@ export async function rosterCsv(
     ]),
   ]
 
-  // `force_quotes: true`, so a padrón that starts with a zero survives the
-  // trip through a spreadsheet and a name with a comma does not split.
-  return rows.map((row) => row.map(quote).join(',')).join('\n') + '\n'
+  return toCsv(rows)
 }
 
 /**
@@ -690,11 +689,6 @@ export function addSuffixToDuplicates({
 
 function identifierTooLongMessage(identifier: string): string {
   return `"${identifier.slice(0, 40)}…" supera los ${IDENTIFIER_MAX_LENGTH} caracteres.`
-}
-
-/** RFC 4180 quoting, matching Ruby's CSV with force_quotes: true */
-function quote(value: string): string {
-  return `"${value.replaceAll('"', '""')}"`
 }
 
 /**

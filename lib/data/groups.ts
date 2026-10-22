@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, asc, eq, isNull, notInArray, sql } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, isNull, notInArray, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
@@ -143,6 +143,8 @@ export type GroupAssignmentAcceptances = {
   identifierName: string | null
   /** RosterEntry.students_not_on_team */
   studentsNotOnTeam: { identifier: string; githubLogin: string | null }[]
+  /** user id → roster identifier, for the members linked to the roster */
+  identifiers: Map<number, string>
 }
 
 /**
@@ -212,6 +214,13 @@ export async function listGroupAssignmentAcceptances(
 
   const repoByTeam = new Map(repos.map((row) => [row.groupId, row.repoId]))
 
+  const linked = roster
+    ? await db
+        .select({ userId: rosterEntries.userId, identifier: rosterEntries.identifier })
+        .from(rosterEntries)
+        .where(and(eq(rosterEntries.rosterId, roster.id), isNotNull(rosterEntries.userId)))
+    : []
+
   return {
     teams: teams.map((team) => ({
       ...team,
@@ -220,6 +229,7 @@ export async function listGroupAssignmentAcceptances(
     })),
     identifierName: roster?.identifierName ?? null,
     studentsNotOnTeam: roster ? await studentsNotOnTeam(roster.id, assignment.groupingId) : [],
+    identifiers: new Map(linked.map((row) => [row.userId!, row.identifier])),
   }
 }
 

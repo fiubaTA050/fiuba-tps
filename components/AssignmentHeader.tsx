@@ -1,4 +1,4 @@
-import { DotFillIcon, OrganizationIcon, PersonIcon, TriangleDownIcon } from '@primer/octicons-react'
+import { DotFillIcon, DownloadIcon, OrganizationIcon, PersonIcon, TriangleDownIcon } from '@primer/octicons-react'
 import Link from 'next/link'
 
 import { InvitationLink } from '@/components/InvitationLink'
@@ -34,6 +34,7 @@ export function AssignmentHeader({
   invitationUrl,
   invitationsEnabled,
   disabledReason,
+  downloadHref,
 }: {
   title: string
   group: boolean
@@ -47,6 +48,8 @@ export function AssignmentHeader({
   invitationsEnabled: boolean
   /** Why the link is disabled, shown under it. Null when it is enabled */
   disabledReason: string | null
+  /** The CSV export, when the assignment has one */
+  downloadHref?: string
 }) {
   return (
     <div className="border-bottom py-3 pt-md-4 mb-3">
@@ -100,6 +103,19 @@ export function AssignmentHeader({
             <div className="d-inline-block mr-2">
               <InvitationLink url={invitationUrl} disabled={!invitationsEnabled} width="43ch" />
             </div>
+
+            {/* The live site's "Download" sits in the same place. A plain
+                link, so the browser saves the file, as on the roster */}
+            {downloadHref && (
+              <a
+                href={downloadHref}
+                className="btn btn-sm mr-2 d-inline-flex flex-items-center"
+                role="button"
+              >
+                <DownloadIcon className="mr-1" />
+                Descargar {group ? 'equipos' : 'alumnos'}
+              </a>
+            )}
 
             <details className="dropdown details-reset details-overlay d-inline-block">
               <summary className="btn btn-sm" role="button" aria-haspopup="menu">

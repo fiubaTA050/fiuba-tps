@@ -119,6 +119,7 @@ export default async function GroupAssignmentPage(
           starterCodeRepoId={assignment.starterCodeRepoId}
           starterCode={starterCode}
           editHref={`/classrooms/${classroom.slug}/group-assignments/${assignment.slug}/edit`}
+          downloadHref={`/classrooms/${classroom.slug}/group-assignments/${assignment.slug}/csv`}
           invitationUrl={inviteUrl}
           invitationsEnabled={invitationsEnabled}
           disabledReason={

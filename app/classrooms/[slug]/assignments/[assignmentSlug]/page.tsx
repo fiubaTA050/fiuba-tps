@@ -153,6 +153,7 @@ export default async function AssignmentPage(
           starterCodeRepoId={assignment.starterCodeRepoId}
           starterCode={starterCode}
           editHref={`/classrooms/${classroom.slug}/assignments/${assignment.slug}/edit`}
+          downloadHref={`/classrooms/${classroom.slug}/assignments/${assignment.slug}/csv`}
           invitationUrl={inviteUrl}
           invitationsEnabled={invitationsEnabled}
           disabledReason={
