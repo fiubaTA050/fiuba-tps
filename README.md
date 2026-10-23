@@ -24,6 +24,9 @@ repos de los alumnos se crean contra GitHub de verdad.
 8. **Dashboard** de cada assignment: repositorio, último commit y cantidad de
    commits por alumno o equipo, con filtros y orden —
    `app/classrooms/[slug]/assignments/[assignmentSlug]/`
+9. **Administrar desde Claude Code**: un servidor MCP en `/api/mcp` que lee
+   classrooms, trabajos prácticos, entregas y alumnos, y activa o desactiva un
+   trabajo práctico — `lib/mcp/server.ts`
 
 **Alumno**
 
@@ -160,6 +163,32 @@ crear ninguno. El id se saca con `gh api /orgs/<login> --jq .id`. En Vercel va
 en las env vars del proyecto, y cambiarla **requiere redeploy** para que tome
 efecto. Los classrooms ya creados no se ven afectados: el chequeo está sólo en
 la creación.
+
+### 4. Administrar desde Claude Code
+
+`/api/mcp` es un servidor MCP que expone el classroom como herramientas: listar
+classrooms y trabajos prácticos, ver el dashboard de un TP con el envío vigente
+de cada alumno o equipo en cada entrega, el detalle de un envío con la
+corrección automática, la lista de alumnos y los equipos, y pasar un TP a
+Activo o Inactivo — que es lo que cierra sus entregas.
+
+Se autentica con una API key de `/settings/api-keys`:
+
+- `classroom:read` da las herramientas de lectura.
+- `classroom:write` agrega las que modifican, e incluye la lectura.
+
+Cada herramienta llama a las mismas funciones de `lib/data/` que la web, con
+el dueño de la key como usuario, así que llega exactamente a los classrooms de
+los que es docente. Para sumarlo a Claude Code:
+
+```bash
+claude mcp add --transport http fiuba https://<host>/api/mcp --header "Authorization: Bearer <api key>"
+```
+
+Una key no lleva el token OAuth del docente, y por eso `list_classrooms` sólo
+muestra los classrooms a los que el docente ya está vinculado: un ayudante
+recién agregado como admin de la org tiene que abrir una vez el listado en la
+web para que aparezcan.
 
 ## Tests
 

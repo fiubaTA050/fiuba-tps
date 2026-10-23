@@ -5,7 +5,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { and, desc, eq } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
-import { apiKeys } from '@/db/schema'
+import { apiKeys, users } from '@/db/schema'
 import { AVAILABLE_SCOPES, type ApiKeyScope } from '@/lib/data/api-key-scopes'
 import { db } from '@/lib/db'
 
@@ -104,4 +104,43 @@ export async function authenticateApiKey(
   if (!row || !row.scopes.includes(scope)) return { success: false }
 
   return { success: true, userId: row.userId, apiKeyId: row.id }
+}
+
+/**
+ * The key's owner as the Session every other function here takes, for the MCP
+ * endpoint (app/api/mcp/route.ts): its tools go through the same boundary as
+ * the web — `organizations_users` — and can do nothing the owner could not.
+ *
+ * `accessToken` is empty because a key carries no GitHub OAuth token. The few
+ * paths that use one (`userClient` in lib/github/client.ts: the org list,
+ * starter-code search, accepting an invitation) fail with GitHub's 401 rather
+ * than acting as anybody, and no tool reaches them.
+ */
+export async function sessionFromApiKey(
+  rawKey: string,
+): Promise<{ session: Session; scopes: string[]; apiKeyId: number } | null> {
+  const [row] = await db
+    .select({
+      apiKeyId: apiKeys.id,
+      scopes: apiKeys.scopes,
+      userId: users.id,
+      uid: users.uid,
+      githubLogin: users.githubLogin,
+    })
+    .from(apiKeys)
+    .innerJoin(users, eq(users.id, apiKeys.userId))
+    .where(eq(apiKeys.keyHash, hashKey(rawKey)))
+
+  if (!row) return null
+
+  return {
+    apiKeyId: row.apiKeyId,
+    scopes: row.scopes,
+    session: {
+      accessToken: '',
+      // One request long: nothing keeps this object past the response
+      expires: new Date(Date.now() + 60_000).toISOString(),
+      user: { id: String(row.userId), uid: row.uid, githubLogin: row.githubLogin ?? '' },
+    },
+  }
 }

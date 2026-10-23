@@ -1,5 +1,3 @@
-import { AVAILABLE_SCOPES } from '@/lib/data/api-key-scopes'
-
 /**
  * The shape both of this screen's `useActionState` forms carry.
  *
@@ -18,7 +16,12 @@ import { AVAILABLE_SCOPES } from '@/lib/data/api-key-scopes'
  */
 export type ApiKeyActionState = { error: string | null; label: string; scopes: string[] }
 
-export const EMPTY_STATE: ApiKeyActionState = { error: null, label: '', scopes: [...AVAILABLE_SCOPES] }
+/**
+ * Nothing checked, like GitHub's own token form: when `grading` was the only
+ * scope it came pre-checked, but with `classroom:write` next to it that would
+ * hand every new worker key the power to edit classrooms.
+ */
+export const EMPTY_STATE: ApiKeyActionState = { error: null, label: '', scopes: [] }
 
 /**
  * The raw key exists in plain text for exactly one request: the one right

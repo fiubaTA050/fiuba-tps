@@ -54,8 +54,8 @@ export default async function ApiKeysPage() {
           <KeyIcon size={24} className="blankslate-icon" />
           <h3 className="mb-2">No generaste ninguna key todavía</h3>
           <p className="color-fg-muted mb-4">
-            ¿Necesitás acceder a la API sin abrir el navegador? Generá una key para scripts o para
-            el worker de corrección automática.
+            ¿Necesitás acceder a la API sin abrir el navegador? Generá una key para el worker de
+            corrección automática o para administrar tus classrooms desde Claude Code.
           </p>
           <Link href="/settings/api-keys/new" className="btn btn-primary btn-large">
             Generar key
@@ -64,8 +64,8 @@ export default async function ApiKeysPage() {
       ) : (
         <>
           <p className="color-fg-muted mb-3">
-            Credenciales para acceder a la API sin iniciar sesión en el navegador — hoy las usa el
-            worker de corrección automática.
+            Credenciales para acceder a la API sin iniciar sesión en el navegador: las usan el
+            worker de corrección automática y el servidor MCP para Claude Code.
           </p>
 
           <div className="Box">

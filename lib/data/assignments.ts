@@ -19,6 +19,7 @@ import {
   validateCheckpointTitles,
   type CheckpointInput,
 } from '@/lib/data/checkpoints'
+import { KIND, findTeachingAssignment, type AssignmentKind } from '@/lib/data/assignment-kind'
 import { findTeachingClassroom } from '@/lib/data/organizations'
 import { isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
@@ -455,6 +456,45 @@ export async function updateAssignment(
   }
 
   return { success: true, slug }
+}
+
+/**
+ * The edit screen's "Assignment status" — Active/Inactive, `invitations_enabled`
+ * — on its own, for the MCP tool `set_assignment_active`. Inactive is what
+ * closes every entrega of the assignment at once (docs/entregas.md).
+ *
+ * The edit screen writes the same column through `updateAssignment`, which
+ * takes the whole form: a caller that only means to close entregas would
+ * have to send back the title, the prefix and the starter code it read, and
+ * re-resolve the starter code against GitHub, to change one boolean. This
+ * keeps the one guard of that path that applies — an archived classroom
+ * refuses edits — and serves both kinds of assignment.
+ */
+export async function setAssignmentActive(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  kind: AssignmentKind,
+  active: boolean,
+): Promise<DeleteAssignmentResult> {
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found) return { success: false, error: 'No encontramos ese classroom.' }
+  if (!found.assignment) return { success: false, error: 'No encontramos ese trabajo práctico.' }
+
+  if (found.classroom.archivedAt) {
+    return {
+      success: false,
+      error: 'No se pueden modificar trabajos prácticos en un classroom archivado.',
+    }
+  }
+
+  const table = KIND[kind].assignments
+  await db
+    .update(table)
+    .set({ invitationsEnabled: active, updatedAt: new Date() })
+    .where(eq(table.id, found.assignment.id))
+
+  return { success: true }
 }
 
 /**
