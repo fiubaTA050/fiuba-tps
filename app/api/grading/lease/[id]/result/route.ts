@@ -10,7 +10,7 @@ import { recordGradingResult } from '@/lib/data/grading'
  * than silently accepting a late result.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await authenticateRequest(request, 'grading')
+  const auth = await authenticateRequest(request, 'grading:write')
   if (!auth.ok) return auth.response
 
   const { id } = await params

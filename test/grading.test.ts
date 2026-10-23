@@ -75,7 +75,7 @@ async function teacher(): Promise<number> {
 async function apiKey(userId: number): Promise<number> {
   const [row] = await db
     .insert(apiKeys)
-    .values({ userId, label: 'test', keyHash: `hash-${nextGithubId++}`, scopes: ['grading'] })
+    .values({ userId, label: 'test', keyHash: `hash-${nextGithubId++}`, scopes: ['grading:write'] })
     .returning({ id: apiKeys.id })
   return row.id
 }

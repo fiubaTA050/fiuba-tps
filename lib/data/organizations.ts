@@ -199,6 +199,40 @@ async function linkUserToExistingClassrooms(session: Session, admin: GitHubOrgan
     .onConflictDoNothing()
 }
 
+/** A classroom as the MCP endpoint lists it: nothing read from GitHub */
+export type TeachingClassroomItem = {
+  title: string
+  slug: string
+  archivedAt: Date | null
+}
+
+/**
+ * `listClassrooms` without GitHub, for the MCP tool `list_classrooms`: that one
+ * starts from `GET /user/installations`, which takes the teacher's OAuth token,
+ * and an API key has none (`sessionFromApiKey`).
+ *
+ * What is lost with it is `add_current_user_to_organizations`: a teaching
+ * assistant made an admin of the org only sees its classrooms here once they
+ * have opened the classroom index on the web, which links them.
+ */
+export async function listTeachingClassrooms(session: Session): Promise<TeachingClassroomItem[]> {
+  return db
+    .select({
+      title: organizations.title,
+      slug: organizations.slug,
+      archivedAt: organizations.archivedAt,
+    })
+    .from(organizations)
+    .innerJoin(organizationsUsers, eq(organizationsUsers.organizationId, organizations.id))
+    .where(
+      and(
+        eq(organizationsUsers.userId, Number(session.user.id)),
+        isNull(organizations.deletedAt),
+      ),
+    )
+    .orderBy(desc(organizations.createdAt))
+}
+
 /**
  * Port of Orgs::Controller#ensure_current_organization +
  * #ensure_current_organization_visible_to_current_user: look up by slug and

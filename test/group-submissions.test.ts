@@ -565,7 +565,7 @@ describe('grading a team submission', () => {
 
     const [key] = await db
       .insert(apiKeys)
-      .values({ userId: Number(fixture.profe.user.id), label: 'test', keyHash: 'hash', scopes: ['grading'] })
+      .values({ userId: Number(fixture.profe.user.id), label: 'test', keyHash: 'hash', scopes: ['grading:write'] })
       .returning({ id: apiKeys.id })
 
     const lease = await leaseSubmissionForGrading(Number(fixture.profe.user.id), key.id)
