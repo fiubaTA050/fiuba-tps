@@ -177,7 +177,7 @@ describe('authentication', () => {
   })
 
   it('refuses a key with only the grading scope', async () => {
-    const rawKey = await apiKey(await user(), ['grading'])
+    const rawKey = await apiKey(await user(), ['grading:write'])
     expect((await rpc(rawKey, 'tools/list')).status).toBe(401)
   })
 })

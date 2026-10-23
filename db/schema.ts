@@ -1025,8 +1025,10 @@ export const submissionFeedbacks = pgTable(
  *
  * `scopes` is the only concession to that future: each endpoint validates its
  * own scope is in the array, so a key issued for one purpose does not
- * automatically work for another. No roles, no scope hierarchy, no
- * per-scope expiration — the minimal extension, not a permission system.
+ * automatically work for another. Names are `<area>:<access>`
+ * (lib/data/api-key-scopes.ts). No roles, no per-scope expiration, and one
+ * implication only — `classroom:write` includes `classroom:read` — the
+ * minimal extension, not a permission system.
  */
 export const apiKeys = pgTable(
   'api_keys',

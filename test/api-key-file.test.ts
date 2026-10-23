@@ -7,7 +7,7 @@ import { apiKeyFileContents, apiKeyFileName } from '@/lib/api-key-file'
  * shape the worker reads, so renaming a field fails here rather than there.
  */
 describe('apiKeyFileContents', () => {
-  const apiKey = { label: 'PC de casa', scopes: ['grading'] }
+  const apiKey = { label: 'PC de casa', scopes: ['grading:write'] }
 
   it('carries the label, the url, the key and the scopes', () => {
     const contents = JSON.parse(
@@ -18,7 +18,7 @@ describe('apiKeyFileContents', () => {
       label: 'PC de casa',
       api_url: 'https://classroom.fi.uba.ar/api',
       api_key: 'fc_abc123',
-      scopes: ['grading'],
+      scopes: ['grading:write'],
     })
   })
 

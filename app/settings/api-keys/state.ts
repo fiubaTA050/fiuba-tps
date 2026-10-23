@@ -17,7 +17,7 @@
 export type ApiKeyActionState = { error: string | null; label: string; scopes: string[] }
 
 /**
- * Nothing checked, like GitHub's own token form: when `grading` was the only
+ * Nothing checked, like GitHub's own token form: when `grading:write` was the only
  * scope it came pre-checked, but with `classroom:write` next to it that would
  * hand every new worker key the power to edit classrooms.
  */

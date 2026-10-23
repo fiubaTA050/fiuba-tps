@@ -70,7 +70,7 @@ async function student(): Promise<number> {
   return row.id
 }
 
-async function apiKey(userId: number, scopes = ['grading']): Promise<{ id: number; rawKey: string }> {
+async function apiKey(userId: number, scopes = ['grading:write']): Promise<{ id: number; rawKey: string }> {
   const rawKey = `raw-${nextId++}`
   const { createHash } = await import('node:crypto')
   const [row] = await db

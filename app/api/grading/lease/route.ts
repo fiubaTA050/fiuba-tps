@@ -12,7 +12,7 @@ import { leaseSubmissionForGrading } from '@/lib/data/grading'
  * of the algorithm in grading-runs-plan).
  */
 export async function POST(request: Request) {
-  const auth = await authenticateRequest(request, 'grading')
+  const auth = await authenticateRequest(request, 'grading:write')
   if (!auth.ok) return auth.response
 
   const lease = await leaseSubmissionForGrading(auth.auth.userId, auth.auth.apiKeyId)
