@@ -333,8 +333,9 @@ tiempo, cierre, extensión, justificación, devolución y corrección automátic
   `group_assignment_repo_id`, exactamente uno, con un CHECK. Es la `deadlines`
   polimórfica del original (`assignment_type` + `assignment_id`) con dos claves
   foráneas reales. Que el repositorio y el checkpoint sean del mismo trabajo
-  práctico lo exige un trigger (`entregas_same_assignment`, migración 0020),
-  porque ninguna clave foránea cruza esas dos tablas. Lo que cuelga de una
+  práctico no lo puede exigir ninguna clave foránea; lo garantiza la capa de
+  datos, que lee los dos de una misma consulta sobre ese trabajo práctico, y
+  no un trigger, porque la base no lleva funciones ni triggers. Lo que cuelga de una
   entrega —justificación, devolución, `grading_runs`— apunta a
   `submissions.id` y no cambió. Se descartaron tablas
   `group_*` aparte: había que duplicar también todo lo que cuelga de una

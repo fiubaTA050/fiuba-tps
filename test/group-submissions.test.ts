@@ -554,57 +554,6 @@ describe('checkpoints of a group assignment', () => {
   })
 })
 
-describe('the entregas_same_assignment trigger', () => {
-  it('refuses a team submission against an individual assignment\'s checkpoint', async () => {
-    const fixture = await groupAssignment()
-    const ana = await person('ana')
-    const { repoId } = await team(fixture, 'Los Pibes', [ana])
-
-    const [individual] = await db
-      .insert(assignments)
-      .values({
-        organizationId: fixture.organizationId,
-        creatorId: Number(fixture.profe.user.id),
-        title: 'TP individual',
-        slug: 'tp-individual',
-      })
-      .returning({ id: assignments.id })
-    const [foreign] = await db
-      .insert(checkpoints)
-      .values({ assignmentId: individual.id })
-      .returning({ id: checkpoints.id })
-
-    const row = {
-      groupAssignmentRepoId: repoId,
-      checkpointId: foreign.id,
-      sha: 'a'.repeat(40),
-      ref: 'main',
-      committedAt: new Date(),
-      submittedByUserId: Number(ana.user.id),
-    }
-    await expect(db.insert(submissions).values(row)).rejects.toThrow()
-  })
-
-  it('refuses a team submission against another group assignment\'s checkpoint', async () => {
-    const fixture = await groupAssignment()
-    const ana = await person('ana')
-    const { repoId } = await team(fixture, 'Los Pibes', [ana])
-    const other = await groupAssignment()
-    const foreign = await groupCheckpoint(other.groupAssignmentId)
-
-    await expect(
-      db.insert(submissions).values({
-        groupAssignmentRepoId: repoId,
-        checkpointId: foreign,
-        sha: 'a'.repeat(40),
-        ref: 'main',
-        committedAt: new Date(),
-        submittedByUserId: Number(ana.user.id),
-      }),
-    ).rejects.toThrow()
-  })
-})
-
 describe('grading a team submission', () => {
   it('leases it like a student one', async () => {
     const fixture = await groupAssignment()

@@ -812,10 +812,10 @@ export const checkpoints = pgTable(
  *
  * Of a student's repository or of a team's, exactly one — the same split as
  * `checkpoints`. On a team's, any member confirms for the whole team. The
- * repository and the checkpoint must belong to the same assignment, which the
- * `entregas_same_assignment` trigger of migration 0020 enforces — Drizzle does
- * not model triggers, so it lives only in that SQL. `submission_exemptions`
- * carries the same trigger.
+ * repository and the checkpoint must belong to the same assignment; no
+ * foreign key can say so, and the data layer guarantees it by reading both
+ * from one query over that assignment (`loadContext`, `findTeacherRepo` in
+ * lib/data/submissions.ts). Same for `submission_exemptions`.
  */
 export const submissions = pgTable(
   'submissions',

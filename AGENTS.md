@@ -277,6 +277,9 @@ reference code without mental translation. The confusing one:
 - **No database query outside `lib/data/`.** Every function there takes the
   session and filters by user. There is no RLS; this layer is the authorization
   boundary.
+- **No SQL functions or triggers.** Business rules live in TypeScript, in
+  `lib/data/`. The database holds tables, foreign keys, unique indexes and
+  CHECKs on a single row, nothing that runs code.
 - **GitHub is the source of truth for org and repo metadata.** The database
   stores ids and relationships. Names, avatars, URLs and visibility are read
   from the API at render time. Never key anything on a repo or org name — those
