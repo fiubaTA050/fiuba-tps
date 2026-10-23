@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
+import { confirmSubmissionFromForm } from '@/lib/confirm-submission-form'
 import { acceptGroupInvitation, joinRosterForGroup } from '@/lib/data/group-invitations'
 import { positiveInteger, type InvitationActionState } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
@@ -66,4 +67,16 @@ export async function joinRosterAction(
 
   revalidatePath(`/group-assignment-invitations/${key}`)
   redirect(`/group-assignment-invitations/${key}?joined=1`)
+}
+
+/**
+ * A member confirms a ref of the team's repository as the team's entrega —
+ * the group counterpart of `confirmSubmissionAction`. Any member may, and
+ * the last confirmation is the current one; see docs/entregas.md.
+ */
+export async function confirmGroupSubmissionAction(
+  _previous: InvitationActionState,
+  formData: FormData,
+): Promise<InvitationActionState> {
+  return confirmSubmissionFromForm(formData, 'group')
 }

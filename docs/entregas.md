@@ -296,11 +296,49 @@ y no en una ruta nueva. **Es la única pantalla del alumno** y el link de
 invitación es lo que tiene guardado: cero rutas nuevas, cero superficie de auth
 nueva.
 
-En las grupales, el panel dice **quién** entregó por el equipo, y el segundo
-integrante que confirma agrega una fila por encima de la del primero, con el
-nombre del anterior a la vista antes de apretar. Sin lock: es una corrección
-deliberada, no una carrera como la creación del repositorio, y con append-only
-nadie pierde lo que había.
+En las grupales es `/group-assignment-invitations/[key]/setup`, por la misma
+razón.
+
+## Trabajos prácticos grupales
+
+Decidido el 23/10/2026. **Una entrega grupal es una entrega del repositorio
+del equipo**, con las mismas reglas que la individual: checkpoints, tarde a
+tiempo, cierre, extensión, justificación, devolución y corrección automática.
+
+- **Confirma cualquier integrante, por todo el equipo.** El panel dice
+  **quién** confirmó cada versión, y el segundo integrante que confirma agrega
+  una fila por encima de la del primero, con el nombre del anterior a la vista
+  antes de apretar ("Reemplaza la que confirmó @…"). Sin lock: es una
+  corrección deliberada, no una carrera como la creación del repositorio, y con
+  append-only nadie pierde lo que había. Vale la última.
+- **La declaración de uso de IA la escribe quien confirma, en nombre del
+  equipo.** Una por confirmación, como en la individual. Se descartó pedirle
+  una a cada integrante: separaba la declaración de la entrega y agregaba un
+  estado más al dashboard ("faltan declaraciones") sin que nadie lo pidiera.
+- **El cooldown es del repositorio**, así que lo comparten los integrantes:
+  protege el rate limit, que no distingue quién apretó.
+- **La entrega es del repositorio, no de los integrantes del momento.** Si el
+  docente mueve a un alumno de equipo después de una entrega, la entrega se
+  queda con el repositorio. No se guarda una foto de quiénes eran.
+- **La autorización es la pertenencia al equipo** (`groups_users`): un alumno
+  de otro equipo, o sin equipo, no lee ni escribe la entrega.
+- **Hasta que se abre la primera entrega, el dashboard grupal sigue leyendo
+  commits.** Había TPs grupales corriendo antes de que existieran sus
+  entregas, y pasar a todos los equipos con commits a "Sin confirmar" —algo
+  que todavía nadie puede hacer— se leería como que el curso dejó de entregar.
+  Con una entrega abierta, el dashboard pasa a confirmaciones, como el
+  individual.
+- **Esquema.** `checkpoints` lleva `assignment_id` o `group_assignment_id`, y
+  `submissions` y `submission_exemptions` llevan `assignment_repo_id` o
+  `group_assignment_repo_id`, exactamente uno, con un CHECK. Es la `deadlines`
+  polimórfica del original (`assignment_type` + `assignment_id`) con dos claves
+  foráneas reales. Que el repositorio y el checkpoint sean del mismo trabajo
+  práctico lo exige un trigger (`entregas_same_assignment`, migración 0020),
+  porque ninguna clave foránea cruza esas dos tablas. Lo que cuelga de una
+  entrega —justificación, devolución, `grading_runs`— apunta a
+  `submissions.id` y no cambió. Se descartaron tablas
+  `group_*` aparte: había que duplicar también todo lo que cuelga de una
+  entrega.
 
 ## Resultados de la corrección automática para el alumno
 

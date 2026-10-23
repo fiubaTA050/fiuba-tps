@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
+import { assignmentPath, parseAssignmentKind } from '@/lib/assignment-paths'
 import { linkAccountToEntry } from '@/lib/data/rosters'
 import {
   justifyLateSubmission,
@@ -71,6 +72,7 @@ export async function setSubmissionExemptionAction(
   const checkpointId = positiveInteger(formData.get('checkpoint_id'))
   const githubRepoId = positiveInteger(formData.get('github_repo_id'))
   const exempt = formData.get('exempt') === '1'
+  const kind = parseAssignmentKind(formData.get('kind'))
 
   if (checkpointId === null || githubRepoId === null) {
     return { error: 'No encontramos esa entrega.', notice: null }
@@ -83,12 +85,13 @@ export async function setSubmissionExemptionAction(
     checkpointId,
     githubRepoId,
     exempt,
+    kind,
   )
 
   if (!result) return { error: 'No encontramos ese classroom.', notice: null }
   if (!result.success) return { error: result.error, notice: null }
 
-  revalidatePath(`/classrooms/${classroomSlug}/assignments/${assignmentSlug}`)
+  revalidatePath(assignmentPath(classroomSlug, kind, assignmentSlug))
 
   return EMPTY_STATE
 }
@@ -110,6 +113,7 @@ export async function setLateJustificationAction(
   const githubRepoId = positiveInteger(formData.get('github_repo_id'))
   const submissionId = positiveInteger(formData.get('submission_id'))
   const justify = formData.get('justify') === '1'
+  const kind = parseAssignmentKind(formData.get('kind'))
 
   if (githubRepoId === null || submissionId === null) {
     return { error: 'No encontramos esa entrega.', notice: null }
@@ -123,6 +127,7 @@ export async function setLateJustificationAction(
         githubRepoId,
         submissionId,
         String(formData.get('reason') ?? ''),
+        kind,
       )
     : await revokeLateSubmissionJustification(
         session,
@@ -130,6 +135,7 @@ export async function setLateJustificationAction(
         assignmentSlug,
         githubRepoId,
         submissionId,
+        kind,
       )
 
   if (!result) return { error: 'No encontramos ese classroom.', notice: null }
@@ -137,9 +143,9 @@ export async function setLateJustificationAction(
   // On a refusal too: "Esa entrega ya está justificada" means another teacher
   // got there first, and without this the page keeps offering "Justificar"
   // and every retry repeats the same error until a reload
-  const assignmentPath = `/classrooms/${classroomSlug}/assignments/${assignmentSlug}`
-  revalidatePath(assignmentPath)
-  revalidatePath(`${assignmentPath}/submissions/${githubRepoId}/${submissionId}`)
+  const path = assignmentPath(classroomSlug, kind, assignmentSlug)
+  revalidatePath(path)
+  revalidatePath(`${path}/submissions/${githubRepoId}/${submissionId}`)
 
   return result.success ? EMPTY_STATE : { error: result.error, notice: null }
 }
@@ -161,6 +167,7 @@ export async function saveSubmissionFeedbackAction(
   const githubRepoId = positiveInteger(formData.get('github_repo_id'))
   const submissionId = positiveInteger(formData.get('submission_id'))
   const basedOnId = positiveInteger(formData.get('based_on'))
+  const kind = parseAssignmentKind(formData.get('kind'))
 
   if (githubRepoId === null || submissionId === null) {
     return { error: 'No encontramos esa entrega.', notice: null }
@@ -174,15 +181,16 @@ export async function saveSubmissionFeedbackAction(
     submissionId,
     String(formData.get('body') ?? ''),
     basedOnId,
+    kind,
   )
 
   if (!result) return { error: 'No encontramos ese classroom.', notice: null }
 
   // On a refusal too: when another teacher saved first, the page has to show
   // what they wrote, and the form has to pick up their version as `based_on`
-  const assignmentPath = `/classrooms/${classroomSlug}/assignments/${assignmentSlug}`
-  revalidatePath(assignmentPath)
-  revalidatePath(`${assignmentPath}/submissions/${githubRepoId}/${submissionId}`)
+  const path = assignmentPath(classroomSlug, kind, assignmentSlug)
+  revalidatePath(path)
+  revalidatePath(`${path}/submissions/${githubRepoId}/${submissionId}`)
 
   return result.success ? EMPTY_STATE : { error: result.error, notice: null }
 }

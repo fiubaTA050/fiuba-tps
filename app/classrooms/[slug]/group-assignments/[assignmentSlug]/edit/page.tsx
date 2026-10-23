@@ -3,6 +3,8 @@ import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { Breadcrumb } from '@/components/Breadcrumb'
+import { toCheckpointFieldValues } from '@/lib/checkpoint-fields'
+import { listCheckpoints } from '@/lib/data/checkpoints'
 import { findGroupAssignment, listGroupings } from '@/lib/data/group-assignments'
 import { findClassroom } from '@/lib/data/organizations'
 import { findRepositoryById, listTemplateRepositories } from '@/lib/github/repositories'
@@ -21,11 +23,12 @@ export default async function EditGroupAssignmentPage(
 
   const { slug, assignmentSlug } = await props.params
 
-  const [classroom, assignment, groupings] = await Promise.all([
+  const [classroom, assignment, groupings, checkpoints] = await Promise.all([
     findClassroom(session, slug),
     findGroupAssignment(session, slug, assignmentSlug),
     // Reused for its `teamCount`, which is what max_teams is measured against
     listGroupings(session, slug),
+    listCheckpoints(session, slug, assignmentSlug, 'group'),
   ])
 
   if (!classroom || !assignment) notFound()
@@ -80,6 +83,7 @@ export default async function EditGroupAssignmentPage(
             templates={templates}
             starterCodeFullName={starterCode?.fullName ?? ''}
             teamCount={teamCount}
+            entregas={toCheckpointFieldValues(checkpoints)}
           />
         )}
       </div>

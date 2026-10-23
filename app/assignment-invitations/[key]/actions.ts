@@ -4,8 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
+import { confirmSubmissionFromForm } from '@/lib/confirm-submission-form'
 import { acceptInvitation, joinRoster } from '@/lib/data/invitations'
-import { confirmSubmission } from '@/lib/data/submissions'
 import { positiveInteger, type InvitationActionState } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
@@ -77,35 +77,5 @@ export async function confirmSubmissionAction(
   _previous: InvitationActionState,
   formData: FormData,
 ): Promise<InvitationActionState> {
-  const key = String(formData.get('key') ?? '')
-
-  const session = await auth()
-  if (!isUsableSession(session)) redirect(`/assignment-invitations/${key}`)
-
-  const checkpointId = positiveInteger(formData.get('checkpoint_id'))
-  if (checkpointId === null) {
-    return { error: 'No encontramos esa entrega.', notice: null }
-  }
-
-  const result = await confirmSubmission(
-    session,
-    key,
-    checkpointId,
-    String(formData.get('ref') ?? ''),
-    String(formData.get('ai_declaration') ?? ''),
-  )
-
-  if (!result.success) return { error: result.error, notice: null }
-
-  revalidatePath(`/assignment-invitations/${key}/setup`)
-
-  if (result.unchanged) {
-    return { error: null, notice: 'Esa entrega ya estaba confirmada: no cambió nada.' }
-  }
-
-  const confirmed = `Entrega confirmada: ${result.sha.slice(0, 7)}.`
-
-  // The warning rides along with the confirmation rather than replacing it —
-  // the entrega *was* recorded, and saying only the caveat reads as a failure
-  return { error: null, notice: result.warning ? `${confirmed} ${result.warning}` : confirmed }
+  return confirmSubmissionFromForm(formData, 'individual')
 }

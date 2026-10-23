@@ -4,6 +4,7 @@ import { CheckCircleIcon, ClockIcon } from '@primer/octicons-react'
 import { useActionState } from 'react'
 
 import { confirmSubmissionAction } from '@/app/assignment-invitations/[key]/actions'
+import { confirmGroupSubmissionAction } from '@/app/group-assignment-invitations/[key]/actions'
 import type {
   CheckpointPanel,
   StudentFeedback,
@@ -31,21 +32,28 @@ import { LinkifiedText } from './LinkifiedText'
  * confirmed starts expanded; the rest wait for a click. An assignment with a
  * single entrega (still the common case today) skips the disclosure
  * entirely and renders exactly like before — one form, no click needed.
+ *
+ * On a group assignment the entrega is the team's: any member confirms for
+ * everyone, so every version says who confirmed it, and a member about to
+ * replace a teammate's sees whose before pressing (docs/entregas.md).
  */
 export function SubmissionPanel({
   invitationKey,
   repoUrl,
   defaultBranch,
   panels,
+  group = false,
 }: {
   invitationKey: string
   /** `https://github.com/org/repo`, for the link to the frozen tree */
   repoUrl: string
   defaultBranch: string
   panels: CheckpointPanel[]
+  /** The team's repository, on a group assignment */
+  group?: boolean
 }) {
   const [state, formAction, pending] = useActionState<InvitationActionState, FormData>(
-    confirmSubmissionAction,
+    group ? confirmGroupSubmissionAction : confirmSubmissionAction,
     EMPTY_STATE,
   )
 
@@ -82,6 +90,7 @@ export function SubmissionPanel({
             panel={panels[0]}
             formAction={formAction}
             pending={pending}
+            group={group}
           />
         ) : (
           panels.map((panel, index) => (
@@ -106,6 +115,7 @@ export function SubmissionPanel({
                   panel={panel}
                   formAction={formAction}
                   pending={pending}
+                  group={group}
                 />
               </div>
             </details>
@@ -148,6 +158,7 @@ function PanelBody({
   panel,
   formAction,
   pending,
+  group,
 }: {
   invitationKey: string
   repoUrl: string
@@ -155,6 +166,7 @@ function PanelBody({
   panel: CheckpointPanel
   formAction: (formData: FormData) => void
   pending: boolean
+  group: boolean
 }) {
   const refId = `ref-${panel.checkpointId}`
   const declarationId = `ai_declaration-${panel.checkpointId}`
@@ -177,8 +189,17 @@ function PanelBody({
       {panel.current && (
         <div className="flash flash-success mb-3">
           <CheckCircleIcon className="mr-1" />
-          Entregaste <SubmissionLink repoUrl={repoUrl} row={panel.current} /> el{' '}
-          {formatArgentina(panel.current.submittedAt)}
+          {group ? (
+            <>
+              Tu equipo entregó <SubmissionLink repoUrl={repoUrl} row={panel.current} />, confirmada
+              por <Confirmer row={panel.current} /> el {formatArgentina(panel.current.submittedAt)}
+            </>
+          ) : (
+            <>
+              Entregaste <SubmissionLink repoUrl={repoUrl} row={panel.current} /> el{' '}
+              {formatArgentina(panel.current.submittedAt)}
+            </>
+          )}
           {panel.current.late && <LateLabel justified={panel.current.lateJustified} />}
         </div>
       )}
@@ -186,8 +207,9 @@ function PanelBody({
       {/* The entrega is closed for everyone else — see submissionExemptions in db/schema.ts */}
       {panel.exempt && (
         <div className="flash mb-3">
-          El docente te extendió esta entrega aunque esté cerrada. Lo que confirmes reemplaza tu
-          entrega anterior.
+          {group
+            ? 'El docente le extendió esta entrega a tu equipo aunque esté cerrada. Lo que confirmes reemplaza la entrega anterior del equipo.'
+            : 'El docente te extendió esta entrega aunque esté cerrada. Lo que confirmes reemplaza tu entrega anterior.'}
         </div>
       )}
 
@@ -215,14 +237,33 @@ function PanelBody({
               </button>
             </div>
             <p className="note">
-              Lo que confirmes queda congelado aunque después sigas trabajando. Podés volver a
-              entregar las veces que quieras mientras el trabajo práctico esté activo.
+              {group ? (
+                <>
+                  Lo que confirmes es la entrega de todo el equipo y queda congelado aunque después
+                  sigan trabajando.
+                  {panel.current && (
+                    <>
+                      {' '}
+                      Reemplaza la que confirmó <Confirmer row={panel.current} />.
+                    </>
+                  )}{' '}
+                  Cualquier integrante puede volver a entregar mientras el trabajo práctico esté
+                  activo, y vale la última.
+                </>
+              ) : (
+                <>
+                  Lo que confirmes queda congelado aunque después sigas trabajando. Podés volver a
+                  entregar las veces que quieras mientras el trabajo práctico esté activo.
+                </>
+              )}
             </p>
           </div>
 
           <div className="form-group">
             <div className="form-group-header">
-              <label htmlFor={declarationId}>Declaración de uso de IA</label>
+              <label htmlFor={declarationId}>
+                {group ? 'Declaración de uso de IA del equipo' : 'Declaración de uso de IA'}
+              </label>
             </div>
             <div className="form-group-body">
               <textarea
@@ -235,8 +276,9 @@ function PanelBody({
               />
             </div>
             <p className="note">
-              Declaración jurada: contá qué herramientas de IA usaste y para qué partes del
-              trabajo práctico, o escribí que no usaste ninguna.
+              {group
+                ? 'Declaración jurada en nombre de todo el equipo: contá qué herramientas de IA usaron y para qué partes del trabajo práctico, o escribí que no usaron ninguna.'
+                : 'Declaración jurada: contá qué herramientas de IA usaste y para qué partes del trabajo práctico, o escribí que no usaste ninguna.'}
             </p>
           </div>
         </form>
@@ -251,11 +293,21 @@ function PanelBody({
 
       {panel.history.length > 1 && (
         <details className="mt-3">
-          <summary className="btn-link">Ver mis {panel.history.length} entregas</summary>
+          <summary className="btn-link">
+            {group
+              ? `Ver las ${panel.history.length} entregas del equipo`
+              : `Ver mis ${panel.history.length} entregas`}
+          </summary>
           <ul className="list-style-none mt-2">
             {panel.history.map((row) => (
               <li key={row.id} className="py-1 border-bottom color-fg-muted f6">
                 <SubmissionLink repoUrl={repoUrl} row={row} /> el {formatArgentina(row.submittedAt)}
+                {group && (
+                  <>
+                    {' '}
+                    por <Confirmer row={row} />
+                  </>
+                )}
                 {row.late && <LateLabel justified={row.lateJustified} />}
               </li>
             ))}
@@ -423,6 +475,11 @@ function LateLabel({ justified }: { justified: boolean }) {
       {justified ? 'Tarde · justificada' : 'Tarde'}
     </span>
   )
+}
+
+/** Who confirmed a team's entrega */
+function Confirmer({ row }: { row: SubmissionRow }) {
+  return row.submittedBy ? <strong>@{row.submittedBy}</strong> : <>un integrante</>
 }
 
 /**

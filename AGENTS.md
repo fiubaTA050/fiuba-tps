@@ -180,6 +180,14 @@ reference code without mental translation. The confusing one:
     at 23:50 — but the installation's GitHub rate limit is shared with every
     teacher's dashboard, and the SHA dedupe does not stop a script that commits
     before each confirmation.
+  - **A group assignment hands in the same way, over the team's repository.**
+    Any member confirms for the whole team, with the AI declaration written
+    in the team's name, and the last confirmation is the current one.
+    `checkpoints`, `submissions` and `submission_exemptions` carry one foreign
+    key per kind — the original's polymorphic `deadlines` — so justifications,
+    devoluciones and the grading worker serve both kinds unchanged. Until a
+    group assignment opens its first entrega, its dashboard keeps the
+    commit-based "Entregado".
 - **Feedback is a devolución stored here, not a feedback pull request.** The
   live site's "Enable feedback pull requests" opens a "Feedback" PR in every
   repository for line comments; this is the general comment on one

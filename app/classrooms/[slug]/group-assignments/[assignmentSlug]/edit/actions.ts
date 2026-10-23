@@ -9,6 +9,11 @@ import {
   updateGroupAssignment,
   type GroupAssignmentField,
 } from '@/lib/data/group-assignments'
+import {
+  parseCheckpointsField,
+  parseKnownCheckpointIds,
+  saveCheckpoints,
+} from '@/lib/data/checkpoints'
 import { limitField } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
@@ -28,6 +33,13 @@ export async function updateGroupAssignmentAction(
   const classroomSlug = String(formData.get('classroom_slug') ?? '')
   const assignmentSlug = String(formData.get('assignment_slug') ?? '')
 
+  // Parsed before anything is written, as on the individual edit
+  const checkpointInputs = parseCheckpointsField(formData.get('checkpoints'))
+  if (checkpointInputs === null) {
+    return { error: 'No entendimos la lista de entregas.', field: 'base' }
+  }
+  const knownCheckpointIds = parseKnownCheckpointIds(formData.get('checkpoints_known_ids'))
+
   const result = await updateGroupAssignment(session, classroomSlug, assignmentSlug, {
     title: String(formData.get('title') ?? ''),
     slug: String(formData.get('slug') ?? ''),
@@ -41,6 +53,19 @@ export async function updateGroupAssignmentAction(
   })
 
   if (!result.success) return { error: result.error, field: result.field }
+
+  // Last, for the same reason as on the individual edit: the common failures
+  // are the title and the prefix, and those leave everything untouched
+  const checkpoints = await saveCheckpoints(
+    session,
+    classroomSlug,
+    result.slug,
+    checkpointInputs,
+    knownCheckpointIds ?? undefined,
+    'group',
+  )
+
+  if (!checkpoints.success) return { error: checkpoints.error, field: 'base' }
 
   revalidatePath(`/classrooms/${classroomSlug}`)
   revalidatePath(`/classrooms/${classroomSlug}/group-assignments/${assignmentSlug}`)

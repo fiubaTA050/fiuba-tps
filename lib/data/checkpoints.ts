@@ -3,9 +3,14 @@ import 'server-only'
 import { and, count, eq, isNull } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
-import { assignments, checkpoints, submissionExemptions, submissions } from '@/db/schema'
+import { checkpoints, submissionExemptions, submissions } from '@/db/schema'
 import { parseArgentinaDateTime } from '@/lib/dates'
-import { findTeachingClassroom } from '@/lib/data/organizations'
+import {
+  KIND,
+  checkpointOwner,
+  findTeachingAssignment,
+  type AssignmentKind,
+} from '@/lib/data/assignment-kind'
 import { isForeignKeyViolation, isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
 
@@ -191,21 +196,11 @@ export async function listCheckpoints(
   session: Session,
   classroomSlug: string,
   assignmentSlug: string,
+  kind: AssignmentKind = 'individual',
 ): Promise<Checkpoint[] | null> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
-  if (!classroom) return null
-
-  const [assignment] = await db
-    .select({ id: assignments.id })
-    .from(assignments)
-    .where(
-      and(
-        eq(assignments.organizationId, classroom.id),
-        eq(assignments.slug, assignmentSlug),
-        isNull(assignments.deletedAt),
-      ),
-    )
-  if (!assignment) return null
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found?.assignment) return null
+  const assignmentId = found.assignment.id
 
   return db
     .select({
@@ -219,7 +214,7 @@ export async function listCheckpoints(
     })
     .from(checkpoints)
     .leftJoin(submissions, eq(submissions.checkpointId, checkpoints.id))
-    .where(eq(checkpoints.assignmentId, assignment.id))
+    .where(eq(KIND[kind].checkpointAssignmentId, assignmentId))
     .groupBy(checkpoints.id)
     // `id` breaks a tie on `position` — two rows can share one, e.g. right
     // after the race saveCheckpoints' jsdoc describes, and without a
@@ -271,28 +266,20 @@ export async function saveCheckpoints(
   assignmentSlug: string,
   rows: CheckpointInput[],
   knownIds?: number[],
+  kind: AssignmentKind = 'individual',
 ): Promise<CheckpointResult> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
-  if (!classroom) return { success: false, error: 'No encontramos ese classroom.' }
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found) return { success: false, error: 'No encontramos ese classroom.' }
 
-  if (classroom.archivedAt) {
+  if (found.classroom.archivedAt) {
     return {
       success: false,
       error: 'No se pueden modificar trabajos prácticos en un classroom archivado.',
     }
   }
 
-  const [assignment] = await db
-    .select({ id: assignments.id })
-    .from(assignments)
-    .where(
-      and(
-        eq(assignments.organizationId, classroom.id),
-        eq(assignments.slug, assignmentSlug),
-        isNull(assignments.deletedAt),
-      ),
-    )
-  if (!assignment) return { success: false, error: 'No encontramos ese trabajo práctico.' }
+  if (!found.assignment) return { success: false, error: 'No encontramos ese trabajo práctico.' }
+  const assignmentId = found.assignment.id
 
   const normalized = normalizeCheckpointRows(rows)
 
@@ -312,7 +299,7 @@ export async function saveCheckpoints(
     })
     .from(checkpoints)
     .leftJoin(submissions, eq(submissions.checkpointId, checkpoints.id))
-    .where(eq(checkpoints.assignmentId, assignment.id))
+    .where(eq(KIND[kind].checkpointAssignmentId, assignmentId))
     .groupBy(checkpoints.id)
 
   const existingById = new Map(existing.map((row) => [row.id, row]))
@@ -372,7 +359,7 @@ export async function saveCheckpoints(
       for (const [position, row] of normalized.entries()) {
         if (row.id === null) {
           await tx.insert(checkpoints).values({
-            assignmentId: assignment.id,
+            ...checkpointOwner(kind, assignmentId),
             title: row.title,
             deadlineAt: row.deadlineAt,
             autograderId: row.autograderId,

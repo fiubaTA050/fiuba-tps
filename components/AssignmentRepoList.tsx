@@ -14,6 +14,7 @@ import {
 import Link from 'next/link'
 import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react'
 
+import { assignmentPath, type AssignmentKind } from '@/lib/assignment-paths'
 import {
   hasSubmitted,
   submissionLabel,
@@ -47,10 +48,9 @@ import { SubmissionActionsMenu } from './SubmissionActionsMenu'
  * cohort is already in the browser; filtering it there is instant and free.
  *
  * "Passing/Failing" reads the automated grading of the open tab's entrega,
- * and only shows on a tab whose entrega has an autograder. The "On-time/Late"
- * options of the submission filter need deadlines, which checkpoints give the
- * individual dashboard — they are left out of the menu on the group one,
- * whose rows carry no submission data yet (no group checkpoints).
+ * and only shows on a tab whose entrega has an autograder. The individual and
+ * the group dashboards read their entregas the same way: a team's row is its
+ * repository's, exactly like a student's.
  *
  * **Pagination is client-side for the same reason**, over the rows the filters
  * left. The live site puts it in the URL, as Kaminari does — see
@@ -121,15 +121,15 @@ export function AssignmentRepoList({
   checkpoints,
   classroomSlug,
   assignmentSlug,
+  kind = 'individual',
   linkToStudent,
 }: {
   title: string
   rows: RepoRow[]
   /**
    * Every entrega of the assignment, individually. Undefined on a dashboard
-   * with no checkpoint concept at all (the group one, for now — group
-   * checkpoints do not exist yet), which leaves `rows` exactly as given, the
-   * way this component behaved before checkpoints existed. Passed as `[]`
+   * with no checkpoint concept at all, which leaves `rows` exactly as given,
+   * the way this component behaved before checkpoints existed. Passed as `[]`
    * means checkpoints are tracked but the teacher hasn't opened any yet — the
    * common single-TP case once one exists is a one-item array, which hides
    * the tab bar and reads no differently than the single-checkpoint days.
@@ -140,6 +140,8 @@ export function AssignmentRepoList({
   /** Only used to build the submission-history request of a confirmed row */
   classroomSlug: string
   assignmentSlug: string
+  /** Which assignment table the slug names: the routes of a team's entrega differ */
+  kind?: AssignmentKind
   linkToStudent?: LinkToStudent
 }) {
   const [query, setQuery] = useState('')
@@ -165,8 +167,7 @@ export function AssignmentRepoList({
   // assignment with a single checkpoint always did before this component
   // supported more than one) and on a dashboard that does not track
   // checkpoints at all, where `!tracksCheckpoints` skips this and every row
-  // passes through exactly as given — the group dashboard, unchanged, whose
-  // rows always set a fixed `label` of their own (`teamLabel`).
+  // passes through exactly as given.
   const resolvedRows = useMemo((): DisplayRow[] => {
     if (!tracksCheckpoints) return rows as DisplayRow[]
 
@@ -271,8 +272,7 @@ export function AssignmentRepoList({
     setSort('az')
   }
 
-  // Only a dashboard that tracks checkpoints carries submission data — the
-  // group one does not (no group checkpoints yet), whatever rows it has
+  // Only a dashboard that tracks checkpoints carries submission data
   const hasTimingData = tracksCheckpoints
   // The verdict is read off the open tab's entrega, so on one without an
   // autograder the menu could only ever empty the list
@@ -493,6 +493,7 @@ export function AssignmentRepoList({
                   checkpoint={activeCheckpoint}
                   classroomSlug={classroomSlug}
                   assignmentSlug={assignmentSlug}
+                  kind={kind}
                   linkToStudent={linkToStudent}
                 />
               ))}
@@ -583,6 +584,7 @@ function RepoListItem({
   checkpoint,
   classroomSlug,
   assignmentSlug,
+  kind,
   linkToStudent,
 }: {
   row: DisplayRow
@@ -593,6 +595,7 @@ function RepoListItem({
   checkpoint: CheckpointSubmissions | null
   classroomSlug: string
   assignmentSlug: string
+  kind: AssignmentKind
   linkToStudent?: LinkToStudent
 }) {
   const { snapshot } = row
@@ -702,6 +705,7 @@ function RepoListItem({
               checkpointId={checkpointId}
               classroomSlug={classroomSlug}
               assignmentSlug={assignmentSlug}
+              kind={kind}
             />
           </div>
         </div>
@@ -741,6 +745,7 @@ function RepoListItem({
                       extended,
                       classroomSlug,
                       assignmentSlug,
+                      kind,
                       checkpointId: checkpoint.id,
                       githubRepoId: row.repoId,
                     }
@@ -751,6 +756,7 @@ function RepoListItem({
                   ? {
                       classroomSlug,
                       assignmentSlug,
+                      kind,
                       githubRepoId: row.repoId,
                       submissionId: row.submission!.id!,
                       reason: row.submission!.justification?.reason ?? null,
@@ -760,7 +766,7 @@ function RepoListItem({
               feedback={
                 submissionId !== undefined
                   ? {
-                      href: `/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}/${submissionId}#devolucion`,
+                      href: `${assignmentPath(classroomSlug, kind, assignmentSlug)}/submissions/${row.repoId}/${submissionId}#devolucion`,
                       exists: row.submission?.hasFeedback === true,
                     }
                   : null
@@ -793,11 +799,13 @@ function SubmissionHistoryDetails({
   checkpointId,
   classroomSlug,
   assignmentSlug,
+  kind,
 }: {
   row: DisplayRow
   checkpointId: number | null
   classroomSlug: string
   assignmentSlug: string
+  kind: AssignmentKind
 }) {
   const [state, setState] = useState<'closed' | 'loading' | 'error' | SubmissionRow[]>('closed')
   const details = useRef<HTMLDetailsElement>(null)
@@ -805,7 +813,7 @@ function SubmissionHistoryDetails({
   const url =
     row.submission == null || row.repoId === null || checkpointId === null
       ? null
-      : `/api/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}?checkpointId=${checkpointId}`
+      : `/api/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}?checkpointId=${checkpointId}&kind=${kind}`
 
   // What the loaded history depends on beyond the URL: justifying or taking
   // it back from the ⋯ menu re-renders this row from the revalidated page,
@@ -879,13 +887,15 @@ function SubmissionHistoryDetails({
                 )}{' '}
                 <span className="color-fg-muted">({entry.ref})</span> el{' '}
                 {formatCommitDate(entry.submittedAt)}
+                {/* A team's entrega: any member may have confirmed this version */}
+                {kind === 'group' && entry.submittedBy && <> por @{entry.submittedBy}</>}
                 {entry.late && (
                   <span className="IssueLabel color-bg-attention ml-2">
                     {entry.lateJustified ? 'Tarde · justificada' : 'Tarde'}
                   </span>
                 )}{' '}
                 <Link
-                  href={`/classrooms/${classroomSlug}/assignments/${assignmentSlug}/submissions/${row.repoId}/${entry.id}`}
+                  href={`${assignmentPath(classroomSlug, kind, assignmentSlug)}/submissions/${row.repoId}/${entry.id}`}
                   className="Link--secondary ml-1"
                 >
                   Ver detalle

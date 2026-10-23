@@ -13,6 +13,7 @@ import { type ReactNode, type RefObject, useActionState, useRef } from 'react'
 
 import { setSubmissionExemptionAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
 import { EMPTY_STATE, type RosterActionState } from '@/app/classrooms/[slug]/roster/state'
+import type { AssignmentKind } from '@/lib/assignment-paths'
 
 import { LateJustificationDialog, type LateJustificationTarget } from './LateJustificationDialog'
 
@@ -23,6 +24,7 @@ type Extension = {
   extended: boolean
   classroomSlug: string
   assignmentSlug: string
+  kind: AssignmentKind
   checkpointId: number
   githubRepoId: number
 }
@@ -172,6 +174,7 @@ function ExtensionDialog({
   extended,
   classroomSlug,
   assignmentSlug,
+  kind,
   checkpointId,
   githubRepoId,
 }: Extension & { dialogRef: RefObject<HTMLDialogElement | null>; name: string }) {
@@ -237,6 +240,7 @@ function ExtensionDialog({
         <form action={formAction} className="Box-footer d-flex flex-justify-end">
           <input type="hidden" name="classroom_slug" value={classroomSlug} />
           <input type="hidden" name="assignment_slug" value={assignmentSlug} />
+          <input type="hidden" name="kind" value={kind} />
           <input type="hidden" name="checkpoint_id" value={checkpointId} />
           <input type="hidden" name="github_repo_id" value={githubRepoId} />
           <input type="hidden" name="exempt" value={extended ? '0' : '1'} />

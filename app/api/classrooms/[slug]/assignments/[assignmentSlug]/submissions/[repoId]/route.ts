@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { auth } from '@/auth'
+import { parseAssignmentKind } from '@/lib/assignment-paths'
 import { findSubmissionHistory } from '@/lib/data/submissions'
 import { positiveInteger } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
@@ -14,6 +15,10 @@ import { isUsableSession } from '@/lib/session'
  * `checkpointId` is a query param, not a path segment: it names which of the
  * assignment's entregas the open tab is showing, the same value
  * `listAssignmentSubmissions` already scoped the dashboard rows to.
+ *
+ * So is `kind=group`, which reads `assignmentSlug` as a group assignment and
+ * the repository as a team's — one route for both dashboards rather than a
+ * second tree under /group-assignments for the same handler.
  */
 export async function GET(
   request: Request,
@@ -29,12 +34,14 @@ export async function GET(
   // positiveInteger, not a bare `Number(...)`: an absent or blank param would
   // otherwise coerce to 0 and pass `Number.isInteger`, same pitfall its own
   // doc comment warns about for a missing hidden input.
-  const checkpointId = positiveInteger(new URL(request.url).searchParams.get('checkpointId'))
+  const query = new URL(request.url).searchParams
+  const checkpointId = positiveInteger(query.get('checkpointId'))
+  const kind = parseAssignmentKind(query.get('kind'))
   if (!Number.isInteger(id) || checkpointId === null) {
     return NextResponse.json({ history: null }, { status: 400 })
   }
 
-  const history = await findSubmissionHistory(session, slug, assignmentSlug, id, checkpointId)
+  const history = await findSubmissionHistory(session, slug, assignmentSlug, id, checkpointId, kind)
   if (history === null) {
     return NextResponse.json({ history: null }, { status: 404 })
   }

@@ -11,6 +11,7 @@ import { findGroupAssignment } from '@/lib/data/group-assignments'
 import { listGroupAssignmentAcceptances, type TeamAcceptance } from '@/lib/data/groups'
 import { currentInstallationId, findClassroomInstallation } from '@/lib/data/organizations'
 import { rosterSummary } from '@/lib/data/rosters'
+import { listAssignmentSubmissions } from '@/lib/data/submissions'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import type { RepositorySnapshot } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
@@ -23,8 +24,16 @@ export const dynamic = 'force-dynamic'
  * same header and counters as the individual one, with a row per team instead
  * of per student.
  *
- * The live site's per-team deadline extension is not here — deadlines are not
- * ported (db/schema.ts).
+ * The entregas read exactly as on the individual dashboard — one tab per
+ * entrega, "Entregado" meaning a confirmed SHA, the ⋯ with the extension
+ * (the live site's per-team "Extend deadline"), the justification and the
+ * devolución — over the team's repository. Any member confirms for the team.
+ *
+ * Until the teacher opens the first entrega, though, the dashboard keeps the
+ * commit-based "Entregado" it had before group entregas existed. Group
+ * assignments were already running then, and flipping every team with
+ * commits to "Sin confirmar" — something nobody can do yet — would read as
+ * the whole cohort having stopped handing in.
  */
 export default async function GroupAssignmentPage(
   props: PageProps<'/classrooms/[slug]/group-assignments/[assignmentSlug]'>,
@@ -36,14 +45,15 @@ export default async function GroupAssignmentPage(
 
   // The roster's size is the first tile's "alumnos en el roster"; it is an
   // indexed count
-  const [classroom, assignment, acceptances, roster] = await Promise.all([
+  const [classroom, assignment, acceptances, roster, submissions] = await Promise.all([
     findClassroomInstallation(session, slug),
     findGroupAssignment(session, slug, assignmentSlug),
     listGroupAssignmentAcceptances(session, slug, assignmentSlug),
     rosterSummary(session, slug),
+    listAssignmentSubmissions(session, slug, assignmentSlug, 'group'),
   ])
 
-  if (!classroom || !assignment || !acceptances) notFound()
+  if (!classroom || !assignment || !acceptances || !submissions) notFound()
 
   const searchParams = await props.searchParams
   const justCreated = searchParams.created === '1'
@@ -87,7 +97,23 @@ export default async function GroupAssignmentPage(
       : reads
 
   const accepted = acceptances.teams.filter((team) => team.status !== 'unaccepted').length
-  const submitted = repoIds.filter((id) => (snapshots.get(id)?.commitCount ?? 0) > 0).length
+
+  // See the jsdoc: with no entrega opened, "submitted" is still commits
+  const tracksEntregas = submissions.checkpoints.length > 0
+
+  // As on the individual dashboard: a team counts once it confirmed any
+  // entrega, and passed once it passed every entrega with an autograder
+  const confirmedRepoIds = new Set(submissions.checkpoints.flatMap((c) => [...c.byRepoId.keys()]))
+  const submitted = repoIds.filter((id) =>
+    tracksEntregas ? confirmedRepoIds.has(id) : (snapshots.get(id)?.commitCount ?? 0) > 0,
+  ).length
+  const autograded = submissions.checkpoints.filter((c) => c.autograded)
+  const passed = repoIds.filter((id) =>
+    autograded.every((c) => c.byRepoId.get(id)?.passed === true),
+  ).length
+  const failed = repoIds.filter((id) =>
+    autograded.some((c) => c.byRepoId.get(id)?.passed === false),
+  ).length
 
   return (
     <>
@@ -168,11 +194,24 @@ export default async function GroupAssignmentPage(
             {
               label: 'Entregas',
               total: accepted,
-              parts: [
-                { value: submitted, label: 'entregaron' },
-                { value: accepted - submitted, label: 'sin entregar' },
-              ],
+              parts: tracksEntregas
+                ? [
+                    { value: submitted, label: 'confirmaron' },
+                    { value: accepted - submitted, label: 'sin confirmar' },
+                  ]
+                : [
+                    { value: submitted, label: 'entregaron' },
+                    { value: accepted - submitted, label: 'sin entregar' },
+                  ],
             },
+            ...(autograded.length === 0
+              ? []
+              : [
+                  {
+                    label: 'Equipos aprobados',
+                    progress: { value: passed, failed, of: accepted, label: 'aprobados' },
+                  },
+                ]),
           ]}
         />
 
@@ -188,6 +227,8 @@ export default async function GroupAssignmentPage(
             title="Equipos"
             classroomSlug={classroom.slug}
             assignmentSlug={assignment.slug}
+            kind="group"
+            checkpoints={tracksEntregas ? submissions.checkpoints : undefined}
             rows={acceptances.teams.map((team): RepoRow => {
               const snapshot = team.repoId === null ? null : (snapshots.get(team.repoId) ?? null)
 
@@ -198,7 +239,7 @@ export default async function GroupAssignmentPage(
                 githubLogin: null,
                 visual: 'none',
                 members: team.members,
-                label: teamLabel(team, snapshot),
+                label: teamLabel(team, tracksEntregas ? undefined : snapshot),
                 snapshot,
                 repoId: team.repoId,
                 accepted: team.status !== 'unaccepted',
@@ -233,11 +274,18 @@ export default async function GroupAssignmentPage(
 }
 
 /**
- * A team's label. Unlike a student, a team carries the setup statuses of
- * SetupStatus — its repository is built by whichever member arrives first, and
- * a failure there is what the teacher has to see (docs/creacion-de-repos.md).
+ * A team's fixed label, before it has a repository. Unlike a student, a team
+ * carries the setup statuses of SetupStatus — its repository is built by
+ * whichever member arrives first, and a failure there is what the teacher has
+ * to see (docs/creacion-de-repos.md). Once the repository is there the label
+ * is the open tab's entrega, which `AssignmentRepoList` resolves — or, with
+ * no entrega opened yet, the commits in `snapshot`, which only that case
+ * passes.
  */
-function teamLabel(team: TeamAcceptance, snapshot: RepositorySnapshot | null): SubmissionLabel {
+function teamLabel(
+  team: TeamAcceptance,
+  snapshot?: RepositorySnapshot | null,
+): SubmissionLabel | undefined {
   if (team.status === 'unaccepted') return { text: 'Sin aceptar', tone: 'neutral' }
 
   if (team.status.startsWith('errored')) {
@@ -255,5 +303,5 @@ function teamLabel(team: TeamAcceptance, snapshot: RepositorySnapshot | null): S
     return { text: 'Creando el repo', tone: 'attention' }
   }
 
-  return submissionLabel(true, snapshot)
+  return snapshot === undefined ? undefined : submissionLabel(true, snapshot)
 }

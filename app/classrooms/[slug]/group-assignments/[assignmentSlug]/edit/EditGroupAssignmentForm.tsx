@@ -4,6 +4,10 @@ import { LockIcon, RepoIcon } from '@primer/octicons-react'
 import Link from 'next/link'
 import { useActionState, useState } from 'react'
 
+import {
+  CheckpointsField,
+  type CheckpointFieldValue,
+} from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/edit/CheckpointsField'
 import { StarterCodeField } from '@/components/StarterCodeField'
 import type { GroupAssignmentListItem } from '@/lib/data/group-assignments'
 import type { GitHubRepository } from '@/lib/github/repositories'
@@ -27,6 +31,7 @@ export function EditGroupAssignmentForm({
   templates,
   starterCodeFullName,
   teamCount,
+  entregas,
 }: {
   classroomSlug: string
   assignment: GroupAssignmentListItem
@@ -34,6 +39,8 @@ export function EditGroupAssignmentForm({
   starterCodeFullName: string
   /** What `max_teams_less_than_group_count` is measured against */
   teamCount: number
+  /** The assignment's entregas, already in Argentine time. Empty is legal */
+  entregas: CheckpointFieldValue[]
 }) {
   const [title, setTitle] = useState(assignment.title)
   const [slug, setSlug] = useState(assignment.slug)
@@ -200,6 +207,23 @@ export function EditGroupAssignmentForm({
                 creados quedan como están.
               </p>
             </div>
+
+            {/* The same entregas as an individual assignment, over the team's
+                repository — see docs/entregas.md */}
+            <h3 id="entregas" className="h5 mt-5 pt-4 border-top">
+              Entregas
+            </h3>
+            <p className="note mt-0 mb-3">
+              Cualquier integrante del equipo elige una rama, un tag o un commit del repositorio
+              del equipo y confirma por todos. Eso congela el árbol que vas a corregir, y si otro
+              integrante vuelve a confirmar, vale la última. Agregá una fila por entrega del mismo
+              repositorio; sin ninguna fila no hay nada que entregar. La fecha de cada una{' '}
+              <strong>no la cierra</strong>: lo que llegue después se acepta y queda marcado
+              tarde — para frenar una entrega puntual marcá &quot;Cerrar&quot;, y para frenar todo
+              el trabajo práctico ponelo en Inactivo.
+            </p>
+
+            <CheckpointsField initial={entregas} />
 
             <h3 className="h5 mt-5 pt-4 border-top">Opcional</h3>
 

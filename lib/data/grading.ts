@@ -3,8 +3,6 @@ import 'server-only'
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 
 import {
-  assignmentRepos,
-  assignments,
   checkpoints,
   gradingRuns,
   organizations,
@@ -12,6 +10,7 @@ import {
   submissionExemptions,
   submissions,
 } from '@/db/schema'
+import { KIND, type AssignmentKind } from '@/lib/data/assignment-kind'
 import { db } from '@/lib/db'
 import { mintRepositoryScopedToken } from '@/lib/github/client'
 import { findRepositoryOwnerAndName } from '@/lib/github/repositories'
@@ -26,9 +25,8 @@ import { findRepositoryOwnerAndName } from '@/lib/github/repositories'
  * directly, with no browser session behind it — the same exception
  * `lib/data/import.ts` documents, for the same reason.
  *
- * Group assignments are out of scope: `submissions` only references
- * `assignment_repos` today (see entregas-confirmadas-plan), so there is
- * nothing group-shaped to grade yet.
+ * A team's submission is graded exactly like a student's: the worker gets a
+ * repository and a SHA, and never needs to know whose it is.
  */
 
 /** Fixed, not configurable. No extension endpoint yet — see grading-runs-plan */
@@ -72,7 +70,7 @@ type Candidate = {
  * 1. Every classroom this user teaches — all of them, not one slug, unlike
  *    `findTeachingClassroom`.
  * 2. Among their current submissions (append-only: the last row per
- *    (assignmentRepo, checkpoint)) whose checkpoint has an `autograderId` and
+ *    (repository, checkpoint), of students and teams alike) whose checkpoint has an `autograderId` and
  *    is closed, the oldest one that is not already graded, not already
  *    leased and active, and under the attempt cap. A repository exempted
  *    from the close is skipped while the exemption lasts: the student can
@@ -227,53 +225,24 @@ async function isStillEligible(tx: Transaction, submissionId: number): Promise<b
 }
 
 /**
- * The current submission of every (assignmentRepo, checkpoint) across the
- * given classrooms whose assignment has automated grading configured, minus
- * the ones a `grading_runs` row already covers, oldest first (FIFO — the
- * simplest tie-break, not refined further per grading-runs-plan).
+ * The current submission of every (repository, checkpoint) across the given
+ * classrooms whose entrega has automated grading configured, minus the ones a
+ * `grading_runs` row already covers, oldest first (FIFO — the simplest
+ * tie-break, not refined further per grading-runs-plan). Students' and
+ * teams' repositories compete in the same queue.
  *
- * Two queries rather than one combined one: batching the attempt counts for
- * every candidate at once and filtering in JS reads far simpler than a
+ * Separate queries rather than one combined one: batching the attempt counts
+ * for every candidate at once and filtering in JS reads far simpler than a
  * `DISTINCT ON` joined to a conditional aggregate, and at this scale — the
  * assignments of one cátedra with automated grading turned on — the extra
- * round trip costs nothing next to the GraphQL call and token mint that
+ * round trips cost nothing next to the GraphQL call and token mint that
  * follow.
  */
 async function findOldestEligibleCandidate(orgIds: number[]): Promise<Candidate | null> {
-  const current = await db
-    .selectDistinctOn([submissions.assignmentRepoId, submissions.checkpointId], {
-      submissionId: submissions.id,
-      sha: submissions.sha,
-      submittedAt: submissions.submittedAt,
-      githubRepoId: assignmentRepos.githubRepoId,
-      autograderId: checkpoints.autograderId,
-      installationId: organizations.installationId,
-    })
-    .from(submissions)
-    .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissions.assignmentRepoId))
-    .innerJoin(
-      assignments,
-      and(eq(assignments.id, assignmentRepos.assignmentId), isNull(assignments.deletedAt)),
-    )
-    .innerJoin(organizations, eq(organizations.id, assignments.organizationId))
-    .innerJoin(checkpoints, eq(checkpoints.id, submissions.checkpointId))
-    .leftJoin(
-      submissionExemptions,
-      and(
-        eq(submissionExemptions.checkpointId, submissions.checkpointId),
-        eq(submissionExemptions.assignmentRepoId, submissions.assignmentRepoId),
-        isNull(submissionExemptions.revokedAt),
-      ),
-    )
-    .where(
-      and(
-        isNotNull(checkpoints.autograderId),
-        isNotNull(checkpoints.closedAt),
-        isNull(submissionExemptions.id),
-        inArray(organizations.id, orgIds),
-      ),
-    )
-    .orderBy(submissions.assignmentRepoId, submissions.checkpointId, desc(submissions.id))
+  const current = [
+    ...(await currentSubmissions(orgIds, 'individual')),
+    ...(await currentSubmissions(orgIds, 'group')),
+  ]
 
   if (current.length === 0) return null
 
@@ -303,7 +272,7 @@ async function findOldestEligibleCandidate(orgIds: number[]): Promise<Candidate 
     .sort((a, b) => a.submittedAt.getTime() - b.submittedAt.getTime())
 
   const winner = eligible[0]
-  // Only defensive: excluded by `isNotNull(checkpoints.autograderId)` above,
+  // Only defensive: excluded by `isNotNull(checkpoints.autograderId)` below,
   // Drizzle just does not narrow the column's type from the WHERE clause.
   if (!winner?.autograderId) return null
 
@@ -314,4 +283,44 @@ async function findOldestEligibleCandidate(orgIds: number[]): Promise<Candidate 
     githubRepoId: winner.githubRepoId,
     installationId: winner.installationId,
   }
+}
+
+/** The current submission of every repository of one kind on a closed, autograded entrega */
+async function currentSubmissions(orgIds: number[], kind: AssignmentKind) {
+  const k = KIND[kind]
+
+  return db
+    .selectDistinctOn([k.submissionRepoId, submissions.checkpointId], {
+      submissionId: submissions.id,
+      sha: submissions.sha,
+      submittedAt: submissions.submittedAt,
+      githubRepoId: k.repos.githubRepoId,
+      autograderId: checkpoints.autograderId,
+      installationId: organizations.installationId,
+    })
+    .from(submissions)
+    .innerJoin(k.repos, eq(k.repos.id, k.submissionRepoId))
+    .innerJoin(
+      k.assignments,
+      and(eq(k.assignments.id, k.reposAssignmentId), isNull(k.assignments.deletedAt)),
+    )
+    .innerJoin(organizations, eq(organizations.id, k.assignments.organizationId))
+    .innerJoin(checkpoints, eq(checkpoints.id, submissions.checkpointId))
+    .leftJoin(
+      submissionExemptions,
+      and(
+        eq(submissionExemptions.checkpointId, submissions.checkpointId),
+        eq(k.exemptionRepoId, k.submissionRepoId),
+        isNull(submissionExemptions.revokedAt),
+      ),
+    )
+    .where(
+      and(
+        isNotNull(checkpoints.autograderId),
+        isNotNull(checkpoints.closedAt),
+        isNull(submissionExemptions.id),
+        inArray(organizations.id, orgIds),
+      ),
+    )
+    .orderBy(k.submissionRepoId, submissions.checkpointId, desc(submissions.id))
 }

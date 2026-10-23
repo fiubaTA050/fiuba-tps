@@ -2,6 +2,7 @@ import { desc, sql } from 'drizzle-orm'
 import {
   bigint,
   boolean,
+  check,
   foreignKey,
   index,
   integer,
@@ -545,7 +546,8 @@ export const groupsUsers = pgTable(
 /**
  * Group assignments. Port of `group_assignments`, and the mirror of
  * `assignments` above — same columns, same divergences (no
- * `template_repos_enabled`, no deadlines), plus the set of teams and the two
+ * `template_repos_enabled`, no deadline column — its entregas are rows of
+ * `checkpoints`, like the individual ones), plus the set of teams and the two
  * limits.
  *
  * A separate table rather than a flag on `assignments`, as in the original: it
@@ -712,14 +714,23 @@ export const groupInviteStatuses = pgTable(
  * `deadline_at` is nullable — an entrega whose date is not decided yet — which
  * is why the order comes from `position` and not from the date. See
  * docs/entregas.md.
+ *
+ * It belongs to an individual assignment **or** a group one, exactly one of
+ * the two — the original's `deadlines` is polymorphic the same way
+ * (`assignment_type` + `assignment_id`), with two real foreign keys here
+ * instead of a type column. Everything hanging off a submission then serves
+ * both kinds unchanged.
  */
 export const checkpoints = pgTable(
   'checkpoints',
   {
     id: serial('id').primaryKey(),
-    assignmentId: integer('assignment_id')
-      .notNull()
-      .references(() => assignments.id, { onDelete: 'cascade' }),
+    assignmentId: integer('assignment_id').references(() => assignments.id, {
+      onDelete: 'cascade',
+    }),
+    groupAssignmentId: integer('group_assignment_id').references(() => groupAssignments.id, {
+      onDelete: 'cascade',
+    }),
     /** "2A". Null is the single unnamed entrega of an assignment with no parts */
     title: varchar('title', { length: 60 }),
     /** Decides late/on-time. It closes nothing — see docs/entregas.md */
@@ -757,12 +768,24 @@ export const checkpoints = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      'checkpoints_one_assignment',
+      sql`num_nonnulls(${table.assignmentId}, ${table.groupAssignmentId}) = 1`,
+    ),
     index('index_checkpoints_on_assignment_id').on(table.assignmentId),
+    index('index_checkpoints_on_group_assignment_id').on(table.groupAssignmentId),
     uniqueIndex('index_checkpoints_on_assignment_id_and_title').on(table.assignmentId, table.title),
+    uniqueIndex('index_checkpoints_on_group_assignment_id_and_title').on(
+      table.groupAssignmentId,
+      table.title,
+    ),
     // Two NULLs do not collide in a unique index, so the unnamed entrega needs
     // its own partial one — the shape of index_roster_entries_on_roster_id_and_user_id
     uniqueIndex('index_checkpoints_on_assignment_id_unnamed')
       .on(table.assignmentId)
+      .where(sql`${table.title} is null`),
+    uniqueIndex('index_checkpoints_on_group_assignment_id_unnamed')
+      .on(table.groupAssignmentId)
       .where(sql`${table.title} is null`),
   ],
 )
@@ -786,14 +809,25 @@ export const checkpoints = pgTable(
  *
  * See docs/entregas.md for why the student declares the SHA instead of a job
  * freezing it, and for the fork-network hole in resolving a ref.
+ *
+ * Of a student's repository or of a team's, exactly one — the same split as
+ * `checkpoints`. On a team's, any member confirms for the whole team. The
+ * repository and the checkpoint must belong to the same assignment, which the
+ * `entregas_same_assignment` trigger of migration 0020 enforces — Drizzle does
+ * not model triggers, so it lives only in that SQL. `submission_exemptions`
+ * carries the same trigger.
  */
 export const submissions = pgTable(
   'submissions',
   {
     id: serial('id').primaryKey(),
-    assignmentRepoId: integer('assignment_repo_id')
-      .notNull()
-      .references(() => assignmentRepos.id, { onDelete: 'cascade' }),
+    assignmentRepoId: integer('assignment_repo_id').references(() => assignmentRepos.id, {
+      onDelete: 'cascade',
+    }),
+    groupAssignmentRepoId: integer('group_assignment_repo_id').references(
+      () => groupAssignmentRepos.id,
+      { onDelete: 'cascade' },
+    ),
     // No cascade, unlike the rest: deleting a checkpoint that has submissions
     // would destroy the evidence of the grading, the same stance as DA-9 on
     // deleting an assignment. lib/data/checkpoints.ts refuses it instead.
@@ -819,10 +853,19 @@ export const submissions = pgTable(
       .references(() => users.id),
   },
   (table) => [
+    check(
+      'submissions_one_repo',
+      sql`num_nonnulls(${table.assignmentRepoId}, ${table.groupAssignmentRepoId}) = 1`,
+    ),
     // Serves the `distinct on (assignment_repo_id, checkpoint_id) … order by
     // id desc` that reads the current submission of every repository at once
     index('index_submissions_on_repo_and_checkpoint').on(
       table.assignmentRepoId,
+      table.checkpointId,
+      desc(table.id),
+    ),
+    index('index_submissions_on_group_repo_and_checkpoint').on(
+      table.groupAssignmentRepoId,
       table.checkpointId,
       desc(table.id),
     ),
@@ -845,7 +888,7 @@ export const submissions = pgTable(
  * so a submission confirmed after the close keeps the reason it exists.
  *
  * It changes nothing about "Tarde": that still reads against `deadline_at`.
- * Individual only, because only individual assignments have entregas yet.
+ * Of a student's repository or a team's, exactly one, like `submissions`.
  */
 export const submissionExemptions = pgTable(
   'submission_exemptions',
@@ -854,9 +897,13 @@ export const submissionExemptions = pgTable(
     checkpointId: integer('checkpoint_id')
       .notNull()
       .references(() => checkpoints.id, { onDelete: 'cascade' }),
-    assignmentRepoId: integer('assignment_repo_id')
-      .notNull()
-      .references(() => assignmentRepos.id, { onDelete: 'cascade' }),
+    assignmentRepoId: integer('assignment_repo_id').references(() => assignmentRepos.id, {
+      onDelete: 'cascade',
+    }),
+    groupAssignmentRepoId: integer('group_assignment_repo_id').references(
+      () => groupAssignmentRepos.id,
+      { onDelete: 'cascade' },
+    ),
     createdByUserId: integer('created_by_user_id')
       .notNull()
       .references(() => users.id),
@@ -865,9 +912,17 @@ export const submissionExemptions = pgTable(
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
   },
   (table) => [
+    check(
+      'submission_exemptions_one_repo',
+      sql`num_nonnulls(${table.assignmentRepoId}, ${table.groupAssignmentRepoId}) = 1`,
+    ),
     uniqueIndex('index_submission_exemptions_on_checkpoint_and_repo').on(
       table.checkpointId,
       table.assignmentRepoId,
+    ),
+    uniqueIndex('index_submission_exemptions_on_checkpoint_and_group_repo').on(
+      table.checkpointId,
+      table.groupAssignmentRepoId,
     ),
   ],
 )

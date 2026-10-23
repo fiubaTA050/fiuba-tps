@@ -4,8 +4,10 @@ import { notFound, redirect } from 'next/navigation'
 import { auth } from '@/auth'
 import { InvitationShell } from '@/components/InvitationShell'
 import { SetupProgress } from '@/components/SetupProgress'
+import { SubmissionPanel } from '@/components/SubmissionPanel'
 import { findGroupInvitation } from '@/lib/data/group-invitations'
 import { claimPendingTeamInvitation, findTeamRepository } from '@/lib/data/repositories'
+import { findSubmissionPanels } from '@/lib/data/submissions'
 import { findInstallationAccount } from '@/lib/github/organizations'
 import { isUsableSession } from '@/lib/session'
 
@@ -38,9 +40,11 @@ export default async function GroupAssignmentSetupPage(
     redirect(`/group-assignment-invitations/${key}/accept`)
   }
 
-  const [organization, repository] = await Promise.all([
+  const [organization, repository, panels] = await Promise.all([
     findInstallationAccount(invitation.classroom.installationId),
     findTeamRepository(session, key),
+    // The team's entregas, from the database alone, as on the individual setup
+    findSubmissionPanels(session, key, 'group'),
   ])
 
   if (repository) await claimPendingTeamInvitation(session, key)
@@ -78,6 +82,17 @@ export default async function GroupAssignmentSetupPage(
         repoName={`${invitation.assignmentSlug}-${invitation.team.slug}`}
         teamName={invitation.team.title}
       />
+
+      {/* Only once the team's repository is there, as on the individual setup */}
+      {repository && panels && (
+        <SubmissionPanel
+          invitationKey={key}
+          repoUrl={repository.htmlUrl}
+          defaultBranch={repository.defaultBranch}
+          panels={panels}
+          group
+        />
+      )}
     </InvitationShell>
   )
 }

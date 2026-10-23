@@ -1131,7 +1131,13 @@ describe('findSubmissionDetail', () => {
 
     const detail = await findSubmissionDetail(profe, classroomSlug, assignmentSlug, githubRepoId, submissionId)
 
-    expect(detail).toMatchObject({ submission: { id: submissionId, sha: 'a'.repeat(40) }, gradingRuns: [] })
+    expect(detail).toMatchObject({
+      assignment: { slug: assignmentSlug },
+      // A student's repository has no team, and the join must not fail on it
+      team: null,
+      submission: { id: submissionId, sha: 'a'.repeat(40), submittedBy: 'alumna' },
+      gradingRuns: [],
+    })
   })
 
   it('returns gradingRuns newest first', async () => {

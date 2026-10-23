@@ -54,11 +54,9 @@ export type RepoRow = {
   repoId: number | null
   /**
    * The repo's current confirmed submission, on whichever checkpoint is the
-   * active tab. `undefined` on a dashboard with no checkpoint concept at all
-   * (the group one, for now — group checkpoints do not exist yet); `null`
-   * once a checkpoint is tracked but this repo has not confirmed. Built here
-   * server-side only for that group case — on the individual dashboard it is
-   * filled in by `AssignmentRepoList` itself, since which checkpoint is
+   * active tab. `undefined` on a dashboard with no checkpoint concept at all;
+   * `null` once a checkpoint is tracked but this repo has not confirmed.
+   * Filled in by `AssignmentRepoList` itself, since which checkpoint is
    * "current" is chosen client-side by the tab the teacher has open.
    */
   submission?: RepoSubmission | null
@@ -92,9 +90,10 @@ export type RepoRow = {
  * says "Submitted: students who've committed to repository".
  *
  * That commit-based reading is the whole story only where no checkpoint is
- * tracked — the group dashboard today, which calls this with `submission`
- * left `undefined`. Where one is (the individual dashboard), "Entregado" means
- * the stronger fact: the student named a SHA and confirmed it. A repo with
+ * tracked — a group assignment with no entrega opened yet — which calls this
+ * with `submission` left `undefined`. Where one is, "Entregado" means the
+ * stronger fact: the student, or a member of the team, named a SHA and
+ * confirmed it. A repo with
  * commits and no confirmation reads as "Sin confirmar" instead, per
  * docs/entregas.md.
  *
@@ -110,7 +109,7 @@ export function submissionLabel(
   if (!hasRepo) return { text: 'Sin repo', tone: 'neutral' }
   if (!snapshot) return { text: 'Repo inaccesible', tone: 'attention' }
 
-  // No checkpoint tracked on this dashboard at all (the group one, for now)
+  // No checkpoint tracked on this dashboard at all
   if (submission === undefined) {
     return snapshot.commitCount > 0
       ? { text: 'Entregado', tone: 'success' }

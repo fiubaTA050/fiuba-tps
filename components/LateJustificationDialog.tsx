@@ -5,12 +5,14 @@ import { type RefObject, useActionState, useRef, useState } from 'react'
 
 import { setLateJustificationAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
 import { EMPTY_STATE, type RosterActionState } from '@/app/classrooms/[slug]/roster/state'
+import type { AssignmentKind } from '@/lib/assignment-paths'
 
 const MAX_REASON_LENGTH = 2000
 
 export type LateJustificationTarget = {
   classroomSlug: string
   assignmentSlug: string
+  kind: AssignmentKind
   githubRepoId: number
   submissionId: number
   /** The active justification's reason; null when the submission is not justified */
@@ -165,6 +167,7 @@ export function LateJustificationDialog({
         <div className="Box-footer d-flex flex-justify-end">
           <input type="hidden" name="classroom_slug" value={target.classroomSlug} />
           <input type="hidden" name="assignment_slug" value={target.assignmentSlug} />
+          <input type="hidden" name="kind" value={target.kind} />
           <input type="hidden" name="github_repo_id" value={target.githubRepoId} />
           <input type="hidden" name="submission_id" value={target.submissionId} />
           <input type="hidden" name="justify" value={justified ? '0' : '1'} />

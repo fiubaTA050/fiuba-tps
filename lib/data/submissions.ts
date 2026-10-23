@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import type { Session } from 'next-auth'
 
@@ -10,6 +10,11 @@ import {
   assignments,
   checkpoints,
   gradingRuns,
+  groupAssignmentInvitations,
+  groupAssignmentRepos,
+  groupAssignments,
+  groups,
+  groupsUsers,
   lateSubmissionJustifications,
   organizations,
   submissionExemptions,
@@ -17,8 +22,14 @@ import {
   submissions,
   users,
 } from '@/db/schema'
+import {
+  KIND,
+  findTeachingAssignment,
+  repoOwner,
+  type AssignmentKind,
+  type RepoRef,
+} from '@/lib/data/assignment-kind'
 import { disabledState } from '@/lib/data/invitations'
-import { findTeachingClassroom } from '@/lib/data/organizations'
 import { isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
 import { isReachableFromDefaultBranch, resolveRepositoryRef } from '@/lib/github/repositories'
@@ -29,7 +40,9 @@ import { isReachableFromDefaultBranch, resolveRepositoryRef } from '@/lib/github
  *
  * DA-4: both functions take the session and reach the row through the
  * invitation key **and** the caller's own user id, so one student can never
- * read or write another's submission.
+ * read or write another's submission. On a group assignment the user id goes
+ * through `groups_users`: any member of the team reads and confirms the
+ * team's entrega, and nobody else does.
  *
  * There is no equivalent in the original, whose `submission_sha` was written
  * by `DeadlineJob` with whatever HEAD the worker found when it woke up. The
@@ -49,6 +62,12 @@ export type SubmissionRow = {
   aiDeclaration: string | null
   committedAt: Date
   submittedAt: Date
+  /**
+   * Login of whoever confirmed it; null if the account is gone from GitHub.
+   * On a team's repository this is the column that matters: any member
+   * confirms for the whole team.
+   */
+  submittedBy: string | null
   /** `submitted_at` past the deadline. Accepted anyway — it closes nothing */
   late: boolean
   /**
@@ -209,17 +228,22 @@ export type AssignmentSubmissions = {
  * `distinct on` that `index_submissions_on_repo_and_checkpoint`'s comment
  * anticipates, one distinct group per (repo, checkpoint) instead of per repo.
  *
- * DA-4: verifies the caller teaches this classroom independently, the same
- * way `setClassroomArchived` does, rather than trusting a sibling call in the
+ * DA-4: verifies the caller teaches this classroom independently
+ * (`findTeachingAssignment`), rather than trusting a sibling call in the
  * page's `Promise.all` to have checked.
  */
 export async function listAssignmentSubmissions(
   session: Session,
   classroomSlug: string,
   assignmentSlug: string,
+  kind: AssignmentKind = 'individual',
 ): Promise<AssignmentSubmissions | null> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
-  if (!classroom) return null
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found) return null
+  if (!found.assignment) return { checkpoints: [] }
+
+  const assignmentId = found.assignment.id
+  const k = KIND[kind]
 
   const checkpointRows = await db
     .select({
@@ -230,14 +254,7 @@ export async function listAssignmentSubmissions(
       autograderId: checkpoints.autograderId,
     })
     .from(checkpoints)
-    .innerJoin(assignments, eq(assignments.id, checkpoints.assignmentId))
-    .where(
-      and(
-        eq(assignments.organizationId, classroom.id),
-        eq(assignments.slug, assignmentSlug),
-        isNull(assignments.deletedAt),
-      ),
-    )
+    .where(eq(k.checkpointAssignmentId, assignmentId))
     // `id` breaks a tie on `position` — see the same comment on listCheckpoints
     .orderBy(checkpoints.position, checkpoints.id)
 
@@ -247,17 +264,17 @@ export async function listAssignmentSubmissions(
   const deadlineById = new Map(checkpointRows.map((row) => [row.id, row.deadlineAt]))
 
   const rows = await db
-    .selectDistinctOn([submissions.assignmentRepoId, submissions.checkpointId], {
+    .selectDistinctOn([k.submissionRepoId, submissions.checkpointId], {
       id: submissions.id,
       checkpointId: submissions.checkpointId,
-      githubRepoId: assignmentRepos.githubRepoId,
+      githubRepoId: k.repos.githubRepoId,
       sha: submissions.sha,
       submittedAt: submissions.submittedAt,
     })
     .from(submissions)
-    .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissions.assignmentRepoId))
+    .innerJoin(k.repos, eq(k.repos.id, k.submissionRepoId))
     .where(inArray(submissions.checkpointId, checkpointIds))
-    .orderBy(submissions.assignmentRepoId, submissions.checkpointId, desc(submissions.id))
+    .orderBy(k.submissionRepoId, submissions.checkpointId, desc(submissions.id))
 
   // Only the current submissions' runs, and only the succeeded ones: a
   // `failed` run is the worker failing, not the student, and says nothing
@@ -332,10 +349,10 @@ export async function listAssignmentSubmissions(
   const exemptions = await db
     .select({
       checkpointId: submissionExemptions.checkpointId,
-      githubRepoId: assignmentRepos.githubRepoId,
+      githubRepoId: k.repos.githubRepoId,
     })
     .from(submissionExemptions)
-    .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissionExemptions.assignmentRepoId))
+    .innerJoin(k.repos, eq(k.repos.id, k.exemptionRepoId))
     .where(
       and(
         inArray(submissionExemptions.checkpointId, checkpointIds),
@@ -410,8 +427,9 @@ export const STUDENT_OUTPUT_MAX_CHARS = 16_000
 export async function findSubmissionPanels(
   session: Session,
   key: string,
+  kind: AssignmentKind = 'individual',
 ): Promise<CheckpointPanel[] | null> {
-  const context = await loadContext(session, key)
+  const context = await loadContext(session, key, kind)
   if (!context) return null
 
   const base = disabledState(context.invitationsEnabled, context.archivedAt)
@@ -445,12 +463,12 @@ export async function findSubmissionPanels(
       feedback: null,
     }
 
-    if (context.repoId === null) {
+    if (context.repo === null) {
       panels.push(panel)
       continue
     }
 
-    const history = await listSubmissions(context.repoId, checkpoint.id, checkpoint.deadlineAt)
+    const history = await listSubmissions(context.repo, checkpoint.id, checkpoint.deadlineAt)
     // Append-only: the current submission is the last row, and the serial id
     // is what breaks the tie — `submitted_at` can repeat
     const current = history[0] ?? null
@@ -492,38 +510,49 @@ export async function findSubmissionHistory(
   assignmentSlug: string,
   githubRepoId: number,
   checkpointId: number,
+  kind: AssignmentKind = 'individual',
 ): Promise<SubmissionRow[] | null> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
-  if (!classroom) return null
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found) return null
 
-  const [row] = await db
-    .select({
-      repoId: assignmentRepos.id,
-      deadlineAt: checkpoints.deadlineAt,
-    })
-    .from(assignmentRepos)
-    .innerJoin(
-      assignments,
-      and(eq(assignments.id, assignmentRepos.assignmentId), isNull(assignments.deletedAt)),
-    )
-    .innerJoin(
-      checkpoints,
-      and(eq(checkpoints.id, checkpointId), eq(checkpoints.assignmentId, assignments.id)),
-    )
-    .where(
-      and(
-        eq(assignments.organizationId, classroom.id),
-        eq(assignments.slug, assignmentSlug),
-        eq(assignmentRepos.githubRepoId, githubRepoId),
-      ),
-    )
+  const row = found.assignment
+    ? await findTeacherRepo(found.assignment.id, githubRepoId, checkpointId, kind)
+    : null
 
   // No such checkpoint on this assignment, or this repo isn't this
   // assignment's — nothing to show, never "not yours to see" (that
   // classroom check already happened above)
   if (!row) return []
 
-  return listSubmissions(row.repoId, checkpointId, row.deadlineAt)
+  return listSubmissions({ kind, id: row.repoId }, checkpointId, row.deadlineAt)
+}
+
+/**
+ * One repository of an assignment the caller teaches, with one of that
+ * assignment's checkpoints — the pair a teacher's dashboard row names. Null
+ * when either does not belong, never telling which.
+ */
+async function findTeacherRepo(
+  assignmentId: number,
+  githubRepoId: number,
+  checkpointId: number,
+  kind: AssignmentKind,
+) {
+  const k = KIND[kind]
+  const [row] = await db
+    .select({
+      repoId: k.repos.id,
+      deadlineAt: checkpoints.deadlineAt,
+      closedAt: checkpoints.closedAt,
+    })
+    .from(k.repos)
+    .innerJoin(
+      checkpoints,
+      and(eq(checkpoints.id, checkpointId), eq(k.checkpointAssignmentId, assignmentId)),
+    )
+    .where(and(eq(k.reposAssignmentId, assignmentId), eq(k.repos.githubRepoId, githubRepoId)))
+
+  return row ?? null
 }
 
 export type GradingRunRow = {
@@ -538,6 +567,10 @@ export type GradingRunRow = {
 }
 
 export type SubmissionDetail = {
+  /** The assignment it belongs to, for the page's breadcrumb */
+  assignment: { title: string; slug: string }
+  /** The team's name on a group assignment; null on an individual one */
+  team: string | null
   submission: SubmissionRow
   /** Login of whoever confirmed it; null if the account is gone from GitHub */
   submittedBy: string | null
@@ -571,11 +604,12 @@ export async function findSubmissionDetail(
   assignmentSlug: string,
   githubRepoId: number,
   submissionId: number,
+  kind: AssignmentKind = 'individual',
 ): Promise<SubmissionDetail | null> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
-  if (!classroom) return null
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found?.assignment) return null
 
-  const row = await findTeacherSubmission(classroom.id, assignmentSlug, githubRepoId, submissionId)
+  const row = await findTeacherSubmission(found.assignment.id, githubRepoId, submissionId, kind)
   // Not this classroom's, not this assignment's repo, or not this
   // submission's id — never distinguished from each other, same stance as
   // findSubmissionHistory's "nothing to show" above
@@ -630,10 +664,7 @@ export async function findSubmissionDetail(
     .select({ id: submissions.id, sha: submissions.sha, submittedAt: submissions.submittedAt })
     .from(submissions)
     .where(
-      and(
-        eq(submissions.assignmentRepoId, row.assignmentRepoId),
-        eq(submissions.checkpointId, row.checkpointId),
-      ),
+      and(eq(KIND[kind].submissionRepoId, row.repoId), eq(submissions.checkpointId, row.checkpointId)),
     )
     .orderBy(desc(submissions.id))
     .limit(1)
@@ -641,6 +672,8 @@ export async function findSubmissionDetail(
   const late = isLate(row.submittedAt, row.deadlineAt)
 
   return {
+    assignment: { title: found.assignment.title, slug: found.assignment.slug },
+    team: row.team,
     submission: {
       id: row.id,
       sha: row.sha,
@@ -648,6 +681,7 @@ export async function findSubmissionDetail(
       aiDeclaration: row.aiDeclaration,
       committedAt: row.committedAt,
       submittedAt: row.submittedAt,
+      submittedBy: row.submittedBy,
       late,
       lateJustified: late && justifications.some((justification) => justification.revokedAt === null),
     },
@@ -661,16 +695,17 @@ export async function findSubmissionDetail(
 }
 
 /**
- * One submission of one of this classroom's assignments, reached the way a
- * teacher's URL names it: assignment slug, GitHub repo id, submission id.
- * Null for any mismatch, never telling them apart.
+ * One submission of an assignment the caller teaches, reached the way a
+ * teacher's URL names it: assignment, GitHub repo id, submission id. Null for
+ * any mismatch, never telling them apart.
  */
 async function findTeacherSubmission(
-  classroomId: number,
-  assignmentSlug: string,
+  assignmentId: number,
   githubRepoId: number,
   submissionId: number,
+  kind: AssignmentKind,
 ) {
+  const k = KIND[kind]
   const [row] = await db
     .select({
       id: submissions.id,
@@ -680,7 +715,9 @@ async function findTeacherSubmission(
       committedAt: submissions.committedAt,
       submittedAt: submissions.submittedAt,
       submittedBy: users.githubLogin,
-      assignmentRepoId: submissions.assignmentRepoId,
+      repoId: k.repos.id,
+      // Left-joined on the team of a group repository; an individual one has none
+      team: groups.title,
       checkpointId: submissions.checkpointId,
       checkpointTitle: checkpoints.title,
       deadlineAt: checkpoints.deadlineAt,
@@ -688,17 +725,14 @@ async function findTeacherSubmission(
     })
     .from(submissions)
     .leftJoin(users, eq(users.id, submissions.submittedByUserId))
-    .innerJoin(assignmentRepos, eq(assignmentRepos.id, submissions.assignmentRepoId))
-    .innerJoin(
-      assignments,
-      and(eq(assignments.id, assignmentRepos.assignmentId), isNull(assignments.deletedAt)),
-    )
+    .innerJoin(k.repos, eq(k.repos.id, k.submissionRepoId))
+    // `group_assignment_repos` is only in the FROM on a group assignment
+    .leftJoin(groups, kind === 'group' ? eq(groups.id, groupAssignmentRepos.groupId) : sql`false`)
     .innerJoin(checkpoints, eq(checkpoints.id, submissions.checkpointId))
     .where(
       and(
-        eq(assignments.organizationId, classroomId),
-        eq(assignments.slug, assignmentSlug),
-        eq(assignmentRepos.githubRepoId, githubRepoId),
+        eq(k.reposAssignmentId, assignmentId),
+        eq(k.repos.githubRepoId, githubRepoId),
         eq(submissions.id, submissionId),
       ),
     )
@@ -732,6 +766,7 @@ export async function justifyLateSubmission(
   githubRepoId: number,
   submissionId: number,
   reason: string,
+  kind: AssignmentKind = 'individual',
 ): Promise<LateJustificationResult | null> {
   const trimmed = reason.trim()
 
@@ -743,12 +778,14 @@ export async function justifyLateSubmission(
     return { success: false, error: 'Ese motivo es demasiado largo.' }
   }
 
-  const classroom = await findTeachingClassroom(session, classroomSlug)
-  if (!classroom) return null
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found) return null
 
-  if (classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
+  if (found.classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
 
-  const row = await findTeacherSubmission(classroom.id, assignmentSlug, githubRepoId, submissionId)
+  const row = found.assignment
+    ? await findTeacherSubmission(found.assignment.id, githubRepoId, submissionId, kind)
+    : null
   if (!row) return { success: false, error: 'No encontramos esa entrega.' }
 
   if (!isLate(row.submittedAt, row.deadlineAt)) {
@@ -784,13 +821,16 @@ export async function revokeLateSubmissionJustification(
   assignmentSlug: string,
   githubRepoId: number,
   submissionId: number,
+  kind: AssignmentKind = 'individual',
 ): Promise<LateJustificationResult | null> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
-  if (!classroom) return null
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found) return null
 
-  if (classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
+  if (found.classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
 
-  const row = await findTeacherSubmission(classroom.id, assignmentSlug, githubRepoId, submissionId)
+  const row = found.assignment
+    ? await findTeacherSubmission(found.assignment.id, githubRepoId, submissionId, kind)
+    : null
   if (!row) return { success: false, error: 'No encontramos esa entrega.' }
 
   await db
@@ -836,6 +876,7 @@ export async function saveSubmissionFeedback(
   submissionId: number,
   body: string,
   basedOnId: number | null,
+  kind: AssignmentKind = 'individual',
 ): Promise<SubmissionFeedbackResult | null> {
   // A browser posts a textarea's line breaks as CRLF
   const trimmed = body.replace(/\r\n?/g, '\n').trim()
@@ -844,12 +885,14 @@ export async function saveSubmissionFeedback(
     return { success: false, error: 'Esa devolución es demasiado larga.' }
   }
 
-  const classroom = await findTeachingClassroom(session, classroomSlug)
-  if (!classroom) return null
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found) return null
 
-  if (classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
+  if (found.classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
 
-  const row = await findTeacherSubmission(classroom.id, assignmentSlug, githubRepoId, submissionId)
+  const row = found.assignment
+    ? await findTeacherSubmission(found.assignment.id, githubRepoId, submissionId, kind)
+    : null
   if (!row) return { success: false, error: 'No encontramos esa entrega.' }
 
   const [latest] = await db
@@ -957,30 +1000,17 @@ export async function setSubmissionExemption(
   checkpointId: number,
   githubRepoId: number,
   exempt: boolean,
+  kind: AssignmentKind = 'individual',
 ): Promise<SubmissionExemptionResult | null> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
-  if (!classroom) return null
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found) return null
 
-  if (classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
+  if (found.classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
 
-  const [row] = await db
-    .select({ repoId: assignmentRepos.id, closedAt: checkpoints.closedAt })
-    .from(assignmentRepos)
-    .innerJoin(
-      assignments,
-      and(eq(assignments.id, assignmentRepos.assignmentId), isNull(assignments.deletedAt)),
-    )
-    .innerJoin(
-      checkpoints,
-      and(eq(checkpoints.id, checkpointId), eq(checkpoints.assignmentId, assignments.id)),
-    )
-    .where(
-      and(
-        eq(assignments.organizationId, classroom.id),
-        eq(assignments.slug, assignmentSlug),
-        eq(assignmentRepos.githubRepoId, githubRepoId),
-      ),
-    )
+  const row = found.assignment
+    ? await findTeacherRepo(found.assignment.id, githubRepoId, checkpointId, kind)
+    : null
+  const k = KIND[kind]
 
   if (!row) return { success: false, error: 'No encontramos esa entrega.' }
 
@@ -993,11 +1023,11 @@ export async function setSubmissionExemption(
       .insert(submissionExemptions)
       .values({
         checkpointId,
-        assignmentRepoId: row.repoId,
+        ...repoOwner({ kind, id: row.repoId }),
         createdByUserId: Number(session.user.id),
       })
       .onConflictDoUpdate({
-        target: [submissionExemptions.checkpointId, submissionExemptions.assignmentRepoId],
+        target: [submissionExemptions.checkpointId, k.exemptionRepoId],
         set: { revokedAt: null, createdByUserId: Number(session.user.id), createdAt: new Date() },
       })
   } else {
@@ -1009,7 +1039,7 @@ export async function setSubmissionExemption(
       .where(
         and(
           eq(submissionExemptions.checkpointId, checkpointId),
-          eq(submissionExemptions.assignmentRepoId, row.repoId),
+          eq(k.exemptionRepoId, row.repoId),
           isNull(submissionExemptions.revokedAt),
         ),
       )
@@ -1032,6 +1062,7 @@ export async function confirmSubmission(
   checkpointId: number,
   ref: string,
   aiDeclaration: string,
+  kind: AssignmentKind = 'individual',
 ): Promise<ConfirmSubmissionResult> {
   const trimmed = ref.trim()
 
@@ -1056,7 +1087,7 @@ export async function confirmSubmission(
     return { success: false, error: 'Esa declaración es demasiado larga.' }
   }
 
-  const context = await loadContext(session, key)
+  const context = await loadContext(session, key, kind)
   if (!context) return { success: false, error: 'No encontramos ese trabajo práctico.' }
 
   const { enabled, disabledReason } = disabledState(context.invitationsEnabled, context.archivedAt)
@@ -1075,8 +1106,15 @@ export async function confirmSubmission(
     return { success: false, error: CHECKPOINT_CLOSED }
   }
 
-  if (context.repoId === null || context.githubRepoId === null) {
-    return { success: false, error: 'Todavía no tenés un repositorio para este trabajo práctico.' }
+  const { repo, githubRepoId } = context
+  if (repo === null || githubRepoId === null) {
+    return {
+      success: false,
+      error:
+        kind === 'group'
+          ? 'Tu equipo todavía no tiene un repositorio para este trabajo práctico.'
+          : 'Todavía no tenés un repositorio para este trabajo práctico.',
+    }
   }
 
   const [last] = await db
@@ -1087,10 +1125,7 @@ export async function confirmSubmission(
     })
     .from(submissions)
     .where(
-      and(
-        eq(submissions.assignmentRepoId, context.repoId),
-        eq(submissions.checkpointId, checkpoint.id),
-      ),
+      and(eq(KIND[kind].submissionRepoId, repo.id), eq(submissions.checkpointId, checkpoint.id)),
     )
     .orderBy(desc(submissions.id))
     .limit(1)
@@ -1104,7 +1139,7 @@ export async function confirmSubmission(
 
   // DA-2: the repository is asked for by id, and the same call brings back the
   // name and the default branch. Nothing is written if the ref does not resolve.
-  const resolved = await resolveRepositoryRef(context.installationId, context.githubRepoId, trimmed)
+  const resolved = await resolveRepositoryRef(context.installationId, githubRepoId, trimmed)
 
   if (!resolved) {
     return {
@@ -1124,7 +1159,7 @@ export async function confirmSubmission(
   }
 
   await db.insert(submissions).values({
-    assignmentRepoId: context.repoId,
+    ...repoOwner(repo),
     checkpointId: checkpoint.id,
     sha,
     ref: trimmed,
@@ -1288,7 +1323,7 @@ export function studentGradingView(
 
 /** Newest first, with the deadline applied to each row */
 async function listSubmissions(
-  repoId: number,
+  repo: RepoRef,
   checkpointId: number,
   deadlineAt: Date | null,
 ): Promise<SubmissionRow[]> {
@@ -1300,10 +1335,12 @@ async function listSubmissions(
       aiDeclaration: submissions.aiDeclaration,
       committedAt: submissions.committedAt,
       submittedAt: submissions.submittedAt,
+      submittedBy: users.githubLogin,
     })
     .from(submissions)
+    .leftJoin(users, eq(users.id, submissions.submittedByUserId))
     .where(
-      and(eq(submissions.assignmentRepoId, repoId), eq(submissions.checkpointId, checkpointId)),
+      and(eq(KIND[repo.kind].submissionRepoId, repo.id), eq(submissions.checkpointId, checkpointId)),
     )
     .orderBy(desc(submissions.id))
 
@@ -1333,30 +1370,62 @@ async function listSubmissions(
 
 /**
  * The invitation, every one of the assignment's entregas and this student's
- * own repository row, in one query — one result row per entrega, since
- * `checkpoints` is left-joined on the assignment alone.
+ * own repository row — or, on a group assignment, their team's — in one
+ * query: one result row per entrega, since `checkpoints` is left-joined on
+ * the assignment alone.
  *
  * The repository and the checkpoints are left joins on purpose: "no
  * repository yet" and "the teacher has not opened entregas" are different
  * answers, and both have their own message on the screen.
  */
-async function loadContext(session: Session, key: string) {
+async function loadContext(session: Session, key: string, kind: AssignmentKind) {
+  const rows =
+    kind === 'group' ? await loadGroupRows(session, key) : await loadIndividualRows(session, key)
+
+  const [first] = rows
+  if (!first) return null
+
+  return {
+    repo: first.repoId === null ? null : ({ kind, id: first.repoId } satisfies RepoRef),
+    githubRepoId: first.githubRepoId,
+    installationId: first.installationId,
+    invitationsEnabled: first.invitationsEnabled,
+    archivedAt: first.archivedAt,
+    checkpoints: rows
+      .filter((row) => row.checkpointId !== null)
+      .map((row) => ({
+        id: row.checkpointId!,
+        title: row.title,
+        deadlineAt: row.deadlineAt,
+        closedAt: row.closedAt,
+        autograderId: row.autograderId,
+        resultsPublishedAt: row.resultsPublishedAt,
+        exempt: row.exemptionId !== null,
+      })),
+  }
+}
+
+const checkpointFields = {
+  checkpointId: checkpoints.id,
+  title: checkpoints.title,
+  deadlineAt: checkpoints.deadlineAt,
+  closedAt: checkpoints.closedAt,
+  autograderId: checkpoints.autograderId,
+  resultsPublishedAt: checkpoints.resultsPublishedAt,
+  exemptionId: submissionExemptions.id,
+}
+
+async function loadIndividualRows(session: Session, key: string) {
   const userId = Number(session.user.id)
 
-  const rows = await db
+  return db
     .select({
       repoId: assignmentRepos.id,
       githubRepoId: assignmentRepos.githubRepoId,
       installationId: organizations.installationId,
       invitationsEnabled: assignments.invitationsEnabled,
       archivedAt: organizations.archivedAt,
-      checkpointId: checkpoints.id,
-      title: checkpoints.title,
-      deadlineAt: checkpoints.deadlineAt,
-      closedAt: checkpoints.closedAt,
-      autograderId: checkpoints.autograderId,
-      resultsPublishedAt: checkpoints.resultsPublishedAt,
-      exemptionId: submissionExemptions.id,
+      ...checkpointFields,
     })
     .from(assignmentInvitations)
     .innerJoin(
@@ -1384,26 +1453,59 @@ async function loadContext(session: Session, key: string) {
     .where(and(eq(assignmentInvitations.key, key), isNull(assignmentInvitations.deletedAt)))
     // `id` breaks a tie on `position` — see the same comment on listCheckpoints
     .orderBy(checkpoints.position, checkpoints.id)
+}
 
-  const [first] = rows
-  if (!first) return null
+/**
+ * The team is the caller's own in the assignment's set of teams — at most
+ * one, by `index_groups_users_on_grouping_id_and_user_id` — so a student who
+ * is not on a team, or whose team has no repository yet, gets no `repoId`.
+ */
+async function loadGroupRows(session: Session, key: string) {
+  const userId = Number(session.user.id)
 
-  return {
-    repoId: first.repoId,
-    githubRepoId: first.githubRepoId,
-    installationId: first.installationId,
-    invitationsEnabled: first.invitationsEnabled,
-    archivedAt: first.archivedAt,
-    checkpoints: rows
-      .filter((row) => row.checkpointId !== null)
-      .map((row) => ({
-        id: row.checkpointId!,
-        title: row.title,
-        deadlineAt: row.deadlineAt,
-        closedAt: row.closedAt,
-        autograderId: row.autograderId,
-        resultsPublishedAt: row.resultsPublishedAt,
-        exempt: row.exemptionId !== null,
-      })),
-  }
+  return db
+    .select({
+      repoId: groupAssignmentRepos.id,
+      githubRepoId: groupAssignmentRepos.githubRepoId,
+      installationId: organizations.installationId,
+      invitationsEnabled: groupAssignments.invitationsEnabled,
+      archivedAt: organizations.archivedAt,
+      ...checkpointFields,
+    })
+    .from(groupAssignmentInvitations)
+    .innerJoin(
+      groupAssignments,
+      and(
+        eq(groupAssignments.id, groupAssignmentInvitations.groupAssignmentId),
+        isNull(groupAssignments.deletedAt),
+      ),
+    )
+    .innerJoin(
+      organizations,
+      and(eq(organizations.id, groupAssignments.organizationId), isNull(organizations.deletedAt)),
+    )
+    .leftJoin(
+      groupsUsers,
+      and(eq(groupsUsers.groupingId, groupAssignments.groupingId), eq(groupsUsers.userId, userId)),
+    )
+    .leftJoin(
+      groupAssignmentRepos,
+      and(
+        eq(groupAssignmentRepos.groupAssignmentId, groupAssignments.id),
+        eq(groupAssignmentRepos.groupId, groupsUsers.groupId),
+      ),
+    )
+    .leftJoin(checkpoints, eq(checkpoints.groupAssignmentId, groupAssignments.id))
+    .leftJoin(
+      submissionExemptions,
+      and(
+        eq(submissionExemptions.checkpointId, checkpoints.id),
+        eq(submissionExemptions.groupAssignmentRepoId, groupAssignmentRepos.id),
+        isNull(submissionExemptions.revokedAt),
+      ),
+    )
+    .where(
+      and(eq(groupAssignmentInvitations.key, key), isNull(groupAssignmentInvitations.deletedAt)),
+    )
+    .orderBy(checkpoints.position, checkpoints.id)
 }
