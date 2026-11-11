@@ -241,6 +241,9 @@ export const assignments = pgTable(
     uniqueIndex('index_assignments_on_organization_id_and_title')
       .on(table.organizationId, table.title)
       .where(sql`${table.deletedAt} is null`),
+    // What `teaching_assistant_allocations` points at, so that an allocation
+    // cannot pair a TA of one classroom with an assignment of another
+    unique('assignments_id_organization_id_key').on(table.id, table.organizationId),
   ],
 )
 
@@ -603,6 +606,9 @@ export const groupAssignments = pgTable(
     uniqueIndex('index_group_assignments_on_organization_id_and_title')
       .on(table.organizationId, table.title)
       .where(sql`${table.deletedAt} is null`),
+    // What `teaching_assistant_allocations` points at, so that a team can only
+    // be allocated in an assignment that runs on that team's grouping
+    unique('group_assignments_id_grouping_id_key').on(table.id, table.groupingId),
   ],
 )
 
@@ -1094,6 +1100,127 @@ export const gradingRuns = pgTable(
   (table) => [index('index_grading_runs_on_submission_id').on(table.submissionId)],
 )
 
+/**
+ * The classroom's teaching assistants. No equivalent in the original, where
+ * "TAs and Admins" is `organizations_users` and being one means being an owner
+ * of the GitHub organization — which makes a TA admin of every repository.
+ * Here a TA is a role of this app and not an org member, so that the
+ * per-team repository access planned next restricts something. See
+ * docs/teaching-assistants.md.
+ *
+ * A table of its own rather than a role column on `organizations_users`: every
+ * existing read and write in `lib/data/` authorizes by joining that table, so
+ * a column would have let TAs through all of them as teachers. Kept apart,
+ * each function a TA may reach is opened explicitly (`findClassroomRole`).
+ */
+export const teachingAssistants = pgTable(
+  'teaching_assistants',
+  {
+    id: serial('id').primaryKey(),
+    organizationId: integer('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** The teacher who added them */
+    createdByUserId: integer('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('index_teaching_assistants_on_organization_id_and_user_id').on(
+      table.organizationId,
+      table.userId,
+    ),
+    index('index_teaching_assistants_on_user_id').on(table.userId),
+    // What the composite foreign key in `teaching_assistant_allocations` points at
+    unique('teaching_assistants_id_organization_id_key').on(table.id, table.organizationId),
+  ],
+)
+
+/**
+ * What a TA corrects in one assignment: a roster entry (padrón) of an
+ * individual one, or a team of a group one. A TA sees only these rows.
+ *
+ * Per assignment, even when two group assignments share a grouping, so a team
+ * can have one TA in TP1 and another in TP2. A row can have several TAs.
+ *
+ * One foreign key per kind of assignment, exactly one pair set — the shape of
+ * `checkpoints`. `organization_id` and `grouping_id` are denormalised so that
+ * composite foreign keys hold the pairing together: the TA, the assignment and
+ * the grouping all belong to the same classroom, and the team belongs to the
+ * assignment's grouping. That the roster entry belongs to the classroom's
+ * roster is checked in `lib/data/` — a roster can be shared between
+ * classrooms, so there is no column to pin it to.
+ */
+export const teachingAssistantAllocations = pgTable(
+  'teaching_assistant_allocations',
+  {
+    id: serial('id').primaryKey(),
+    teachingAssistantId: integer('teaching_assistant_id').notNull(),
+    organizationId: integer('organization_id').notNull(),
+    assignmentId: integer('assignment_id'),
+    rosterEntryId: integer('roster_entry_id').references(() => rosterEntries.id, {
+      onDelete: 'cascade',
+    }),
+    groupAssignmentId: integer('group_assignment_id'),
+    groupingId: integer('grouping_id'),
+    groupId: integer('group_id'),
+    createdByUserId: integer('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'teaching_assistant_allocations_one_target',
+      sql`(${table.assignmentId} is not null and ${table.rosterEntryId} is not null
+        and ${table.groupAssignmentId} is null and ${table.groupingId} is null and ${table.groupId} is null)
+       or (${table.assignmentId} is null and ${table.rosterEntryId} is null
+        and ${table.groupAssignmentId} is not null and ${table.groupingId} is not null and ${table.groupId} is not null)`,
+    ),
+    foreignKey({
+      columns: [table.teachingAssistantId, table.organizationId],
+      foreignColumns: [teachingAssistants.id, teachingAssistants.organizationId],
+      name: 'ta_allocations_teaching_assistant_fkey',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.assignmentId, table.organizationId],
+      foreignColumns: [assignments.id, assignments.organizationId],
+      name: 'ta_allocations_assignment_fkey',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.groupAssignmentId, table.groupingId],
+      foreignColumns: [groupAssignments.id, groupAssignments.groupingId],
+      name: 'ta_allocations_group_assignment_fkey',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.groupingId, table.organizationId],
+      foreignColumns: [groupings.id, groupings.organizationId],
+      name: 'ta_allocations_grouping_fkey',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.groupId, table.groupingId],
+      foreignColumns: [groups.id, groups.groupingId],
+      name: 'ta_allocations_group_fkey',
+    }).onDelete('cascade'),
+    // Allocating the same row twice is a no-op, not a second row
+    uniqueIndex('index_ta_allocations_on_ta_and_roster_entry')
+      .on(table.teachingAssistantId, table.assignmentId, table.rosterEntryId)
+      .where(sql`${table.assignmentId} is not null`),
+    uniqueIndex('index_ta_allocations_on_ta_and_group')
+      .on(table.teachingAssistantId, table.groupAssignmentId, table.groupId)
+      .where(sql`${table.groupAssignmentId} is not null`),
+    // The teacher's dashboard reads every allocation of one assignment
+    index('index_ta_allocations_on_assignment_id').on(table.assignmentId),
+    index('index_ta_allocations_on_group_assignment_id').on(table.groupAssignmentId),
+    index('index_ta_allocations_on_roster_entry_id').on(table.rosterEntryId),
+    index('index_ta_allocations_on_group_id').on(table.groupId),
+  ],
+)
+
 export type User = typeof users.$inferSelect
 export type Organization = typeof organizations.$inferSelect
 export type Assignment = typeof assignments.$inferSelect
@@ -1114,3 +1241,5 @@ export type SubmissionExemption = typeof submissionExemptions.$inferSelect
 export type ApiKey = typeof apiKeys.$inferSelect
 export type GradingRun = typeof gradingRuns.$inferSelect
 export type SubmissionFeedback = typeof submissionFeedbacks.$inferSelect
+export type TeachingAssistant = typeof teachingAssistants.$inferSelect
+export type TeachingAssistantAllocation = typeof teachingAssistantAllocations.$inferSelect

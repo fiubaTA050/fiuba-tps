@@ -3,7 +3,13 @@ import 'server-only'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
-import { assignments, groupAssignments, organizations, organizationsUsers } from '@/db/schema'
+import {
+  assignments,
+  groupAssignments,
+  organizations,
+  organizationsUsers,
+  teachingAssistants,
+} from '@/db/schema'
 import { isUniqueViolation } from '@/lib/data/postgres'
 import { organizationSlug } from '@/lib/data/slug'
 import { db } from '@/lib/db'
@@ -350,6 +356,79 @@ export async function findTeachingClassroom(
     )
 
   return row ?? null
+}
+
+/** Who the caller is in one classroom: see `findClassroomRole` */
+export type ClassroomRole =
+  | { role: 'teacher'; classroom: TeachingClassroom }
+  | {
+      role: 'assistant'
+      classroom: TeachingClassroom
+      /** `teaching_assistants.id`, what the allocations of the TA hang off */
+      teachingAssistantId: number
+    }
+
+/**
+ * `findTeachingClassroom` for the few reads a teaching assistant may also
+ * reach — the list in docs/teaching-assistants.md. Everything else keeps
+ * calling `findTeachingClassroom`, which only joins `organizations_users`, so
+ * a TA is shut out of it without that code knowing TAs exist.
+ *
+ * A teacher wins over a TA when someone is in both tables: a TA later made an
+ * owner of the org is linked as a teacher by the classroom index, and keeps
+ * their stale TA row until somebody removes it.
+ *
+ * A session built from an API key (`via: 'api-key'`) never gets the TA role.
+ * Anyone can create a key, and a TA of one classroom can be a teacher of
+ * another, so refusing the key would not do; refusing the role does, and the
+ * MCP tools — which call these same functions — stay closed to TAs untouched.
+ */
+export async function findClassroomRole(
+  session: Session,
+  slug: string,
+): Promise<ClassroomRole | null> {
+  const userId = Number(session.user.id)
+  const [row] = await db
+    .select({
+      id: organizations.id,
+      githubId: organizations.githubId,
+      installationId: organizations.installationId,
+      archivedAt: organizations.archivedAt,
+      teacherId: organizationsUsers.userId,
+      teachingAssistantId: teachingAssistants.id,
+    })
+    .from(organizations)
+    .leftJoin(
+      organizationsUsers,
+      and(
+        eq(organizationsUsers.organizationId, organizations.id),
+        eq(organizationsUsers.userId, userId),
+      ),
+    )
+    .leftJoin(
+      teachingAssistants,
+      and(
+        eq(teachingAssistants.organizationId, organizations.id),
+        eq(teachingAssistants.userId, userId),
+      ),
+    )
+    .where(and(eq(organizations.slug, slug), isNull(organizations.deletedAt)))
+
+  if (!row) return null
+
+  const classroom: TeachingClassroom = {
+    id: row.id,
+    githubId: row.githubId,
+    installationId: row.installationId,
+    archivedAt: row.archivedAt,
+  }
+
+  if (row.teacherId !== null) return { role: 'teacher', classroom }
+  if (row.teachingAssistantId !== null && session.via !== 'api-key') {
+    return { role: 'assistant', classroom, teachingAssistantId: row.teachingAssistantId }
+  }
+
+  return null
 }
 
 /**

@@ -15,6 +15,13 @@ declare module 'next-auth' {
     accessToken: string
     /** Presente cuando la sesión no sirve para operar; la UI fuerza re-login */
     error?: SessionError
+    /**
+     * 'api-key' on the one-request session `sessionFromApiKey` builds. A
+     * teaching assistant's role is never granted through it, so an API key
+     * only ever reaches what its owner can do as a teacher — see
+     * `findClassroomRole` and docs/teaching-assistants.md.
+     */
+    via?: 'api-key'
     user: {
       /** PK en la tabla `users` */
       id: string

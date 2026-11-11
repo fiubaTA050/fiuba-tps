@@ -1,0 +1,404 @@
+import { eq } from 'drizzle-orm'
+import type { Session } from 'next-auth'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import {
+  assignments,
+  groupAssignments,
+  groupings,
+  groups,
+  organizations,
+  organizationsUsers,
+  rosterEntries,
+  rosters,
+  teachingAssistantAllocations,
+  teachingAssistants,
+  users,
+} from '@/db/schema'
+
+import { createTestDatabase } from './helpers/db'
+
+/**
+ * The schema and the authorization boundary of docs/teaching-assistants.md.
+ * Nothing to port: the original has no teaching-assistant role.
+ */
+
+let db: Awaited<ReturnType<typeof createTestDatabase>>['db']
+
+vi.mock('@/lib/db', () => ({
+  get db() {
+    return db
+  },
+}))
+
+vi.mock('@/lib/github/organizations', () => ({
+  listUserOrganizations: vi.fn(),
+  setDefaultRepositoryPermissionToNone: vi.fn(),
+  findOrganizationByInstallation: vi.fn(),
+  findInstallationAccount: vi.fn(),
+}))
+
+const { findClassroomRole, findTeachingClassroom } = await import('@/lib/data/organizations')
+const { createApiKey, sessionFromApiKey } = await import('@/lib/data/api-keys')
+
+let nextUid = 1
+
+async function user(login: string): Promise<Session> {
+  const uid = nextUid++
+  const [row] = await db
+    .insert(users)
+    .values({ uid, githubLogin: login })
+    .returning({ id: users.id })
+
+  return {
+    accessToken: 'gho_test',
+    expires: new Date(Date.now() + 3_600_000).toISOString(),
+    user: { id: String(row.id), uid, githubLogin: login },
+  } as Session
+}
+
+const idOf = (session: Session) => Number(session.user.id)
+
+async function classroom(slug: string, teacher: Session): Promise<number> {
+  const [row] = await db
+    .insert(organizations)
+    .values({ githubId: 4321, installationId: 99, title: slug, slug })
+    .returning({ id: organizations.id })
+  await db.insert(organizationsUsers).values({ organizationId: row.id, userId: idOf(teacher) })
+  return row.id
+}
+
+async function assistant(organizationId: number, ta: Session, teacher: Session): Promise<number> {
+  const [row] = await db
+    .insert(teachingAssistants)
+    .values({ organizationId, userId: idOf(ta), createdByUserId: idOf(teacher) })
+    .returning({ id: teachingAssistants.id })
+  return row.id
+}
+
+async function assignment(organizationId: number, teacher: Session, slug: string) {
+  const [row] = await db
+    .insert(assignments)
+    .values({ organizationId, creatorId: idOf(teacher), title: slug, slug })
+    .returning({ id: assignments.id })
+  return row.id
+}
+
+async function rosterEntry(identifier: string): Promise<number> {
+  const [roster] = await db
+    .insert(rosters)
+    .values({ identifierName: 'Padrón' })
+    .returning({ id: rosters.id })
+  const [entry] = await db
+    .insert(rosterEntries)
+    .values({ rosterId: roster.id, identifier })
+    .returning({ id: rosterEntries.id })
+  return entry.id
+}
+
+async function grouping(organizationId: number, title: string): Promise<number> {
+  const [row] = await db
+    .insert(groupings)
+    .values({ organizationId, title, slug: title })
+    .returning({ id: groupings.id })
+  return row.id
+}
+
+async function team(groupingId: number, organizationId: number, title: string) {
+  const [row] = await db
+    .insert(groups)
+    .values({ groupingId, organizationId, title, slug: title })
+    .returning({ id: groups.id })
+  return row.id
+}
+
+async function groupAssignment(
+  organizationId: number,
+  groupingId: number,
+  teacher: Session,
+  slug: string,
+) {
+  const [row] = await db
+    .insert(groupAssignments)
+    .values({ organizationId, groupingId, creatorId: idOf(teacher), title: slug, slug })
+    .returning({ id: groupAssignments.id })
+  return row.id
+}
+
+let profe: Session
+let ta: Session
+
+beforeEach(async () => {
+  ;({ db } = await createTestDatabase())
+  nextUid = 1
+  profe = await user('profe')
+  ta = await user('ayudante')
+})
+
+describe('teaching_assistant_allocations', () => {
+  it('allocates a roster entry in an individual assignment, once', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+    const tp = await assignment(org, profe, 'tp0')
+    const entry = await rosterEntry('100000')
+    const row = {
+      teachingAssistantId: taId,
+      organizationId: org,
+      assignmentId: tp,
+      rosterEntryId: entry,
+      createdByUserId: idOf(profe),
+    }
+
+    await db.insert(teachingAssistantAllocations).values(row)
+
+    await expect(db.insert(teachingAssistantAllocations).values(row)).rejects.toThrow()
+  })
+
+  it('refuses a row that names both kinds, or neither', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+    const tp = await assignment(org, profe, 'tp0')
+    const entry = await rosterEntry('100000')
+    const set = await grouping(org, 'equipos')
+    const tp1 = await groupAssignment(org, set, profe, 'tp1')
+    const los = await team(set, org, 'los-raft')
+    const base = { teachingAssistantId: taId, organizationId: org, createdByUserId: idOf(profe) }
+
+    await expect(
+      db.insert(teachingAssistantAllocations).values({
+        ...base,
+        assignmentId: tp,
+        rosterEntryId: entry,
+        groupAssignmentId: tp1,
+        groupingId: set,
+        groupId: los,
+      }),
+    ).rejects.toThrow()
+    await expect(db.insert(teachingAssistantAllocations).values(base)).rejects.toThrow()
+    // Half a pair is not a target either
+    await expect(
+      db.insert(teachingAssistantAllocations).values({ ...base, assignmentId: tp }),
+    ).rejects.toThrow()
+  })
+
+  it('refuses an assignment of another classroom', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const other = await classroom('sd-2025-2', profe)
+    const taId = await assistant(org, ta, profe)
+    const foreign = await assignment(other, profe, 'tp0-viejo')
+    const entry = await rosterEntry('100000')
+
+    await expect(
+      db.insert(teachingAssistantAllocations).values({
+        teachingAssistantId: taId,
+        organizationId: org,
+        assignmentId: foreign,
+        rosterEntryId: entry,
+        createdByUserId: idOf(profe),
+      }),
+    ).rejects.toThrow()
+  })
+
+  it('refuses a TA of another classroom', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const other = await classroom('sd-2025-2', profe)
+    const taOfOther = await assistant(other, ta, profe)
+    const tp = await assignment(org, profe, 'tp0')
+    const entry = await rosterEntry('100000')
+
+    await expect(
+      db.insert(teachingAssistantAllocations).values({
+        teachingAssistantId: taOfOther,
+        organizationId: org,
+        assignmentId: tp,
+        rosterEntryId: entry,
+        createdByUserId: idOf(profe),
+      }),
+    ).rejects.toThrow()
+  })
+
+  it('refuses a team outside the grouping the assignment runs on', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+    const set = await grouping(org, 'equipos')
+    const otherSet = await grouping(org, 'otros-equipos')
+    const tp1 = await groupAssignment(org, set, profe, 'tp1')
+    const stranger = await team(otherSet, org, 'ajenos')
+    const base = {
+      teachingAssistantId: taId,
+      organizationId: org,
+      groupAssignmentId: tp1,
+      groupId: stranger,
+      createdByUserId: idOf(profe),
+    }
+
+    // Claiming the assignment's grouping: the team is not in it
+    await expect(
+      db.insert(teachingAssistantAllocations).values({ ...base, groupingId: set }),
+    ).rejects.toThrow()
+    // Claiming the team's grouping: the assignment does not run on it
+    await expect(
+      db.insert(teachingAssistantAllocations).values({ ...base, groupingId: otherSet }),
+    ).rejects.toThrow()
+  })
+
+  it('lets a team have several TAs in the same assignment', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const otro = await user('otro-ayudante')
+    const set = await grouping(org, 'equipos')
+    const tp1 = await groupAssignment(org, set, profe, 'tp1')
+    const los = await team(set, org, 'los-raft')
+
+    for (const who of [ta, otro]) {
+      await db.insert(teachingAssistantAllocations).values({
+        teachingAssistantId: await assistant(org, who, profe),
+        organizationId: org,
+        groupAssignmentId: tp1,
+        groupingId: set,
+        groupId: los,
+        createdByUserId: idOf(profe),
+      })
+    }
+
+    expect(await db.select().from(teachingAssistantAllocations)).toHaveLength(2)
+  })
+
+  it('goes away with the TA, the roster entry or the team', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+    const tp = await assignment(org, profe, 'tp0')
+    const entry = await rosterEntry('100000')
+    const set = await grouping(org, 'equipos')
+    const tp1 = await groupAssignment(org, set, profe, 'tp1')
+    const los = await team(set, org, 'los-raft')
+    const allocate = () =>
+      db.insert(teachingAssistantAllocations).values([
+        {
+          teachingAssistantId: taId,
+          organizationId: org,
+          assignmentId: tp,
+          rosterEntryId: entry,
+          createdByUserId: idOf(profe),
+        },
+        {
+          teachingAssistantId: taId,
+          organizationId: org,
+          groupAssignmentId: tp1,
+          groupingId: set,
+          groupId: los,
+          createdByUserId: idOf(profe),
+        },
+      ])
+
+    await allocate()
+    await db.delete(rosterEntries).where(eq(rosterEntries.id, entry))
+    await db.delete(groups).where(eq(groups.id, los))
+    expect(await db.select().from(teachingAssistantAllocations)).toHaveLength(0)
+
+    const entry2 = await rosterEntry('100001')
+    const los2 = await team(set, org, 'los-paxos')
+    await db.insert(teachingAssistantAllocations).values({
+      teachingAssistantId: taId,
+      organizationId: org,
+      assignmentId: tp,
+      rosterEntryId: entry2,
+      createdByUserId: idOf(profe),
+    })
+    await db.insert(teachingAssistantAllocations).values({
+      teachingAssistantId: taId,
+      organizationId: org,
+      groupAssignmentId: tp1,
+      groupingId: set,
+      groupId: los2,
+      createdByUserId: idOf(profe),
+    })
+    await db.delete(teachingAssistants).where(eq(teachingAssistants.id, taId))
+    expect(await db.select().from(teachingAssistantAllocations)).toHaveLength(0)
+  })
+
+  it('refuses the same user twice as TA of one classroom', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+
+    await expect(assistant(org, ta, profe)).rejects.toThrow()
+  })
+})
+
+describe('findClassroomRole', () => {
+  it('is teacher for a row of organizations_users', async () => {
+    const org = await classroom('sd-2026-1', profe)
+
+    expect(await findClassroomRole(profe, 'sd-2026-1')).toMatchObject({
+      role: 'teacher',
+      classroom: { id: org },
+    })
+  })
+
+  it('is assistant for a row of teaching_assistants', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+
+    expect(await findClassroomRole(ta, 'sd-2026-1')).toEqual({
+      role: 'assistant',
+      classroom: { id: org, githubId: 4321, installationId: 99, archivedAt: null },
+      teachingAssistantId: taId,
+    })
+  })
+
+  it('is null for anybody else, and for a classroom that does not exist', async () => {
+    await classroom('sd-2026-1', profe)
+    const alumno = await user('alumno')
+
+    expect(await findClassroomRole(alumno, 'sd-2026-1')).toBeNull()
+    expect(await findClassroomRole(profe, 'no-existe')).toBeNull()
+  })
+
+  it('is null in a classroom where the user is TA of another one', async () => {
+    await classroom('sd-2026-1', profe)
+    const other = await classroom('sd-2025-2', profe)
+    await assistant(other, ta, profe)
+
+    expect(await findClassroomRole(ta, 'sd-2026-1')).toBeNull()
+  })
+
+  it('is null for a soft-deleted classroom', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+    await db.update(organizations).set({ deletedAt: new Date() }).where(eq(organizations.id, org))
+
+    expect(await findClassroomRole(profe, 'sd-2026-1')).toBeNull()
+    expect(await findClassroomRole(ta, 'sd-2026-1')).toBeNull()
+  })
+
+  it('makes a teacher win over a stale TA row', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+    await db.insert(organizationsUsers).values({ organizationId: org, userId: idOf(ta) })
+
+    expect(await findClassroomRole(ta, 'sd-2026-1')).toMatchObject({ role: 'teacher' })
+  })
+
+  it('never grants the TA role through an API key, and still grants teacher', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+    const taKey = await createApiKey(ta, 'mia', ['classroom:read'])
+    const profeKey = await createApiKey(profe, 'mia', ['classroom:read'])
+
+    const taSession = (await sessionFromApiKey(taKey.rawKey))!.session
+    const profeSession = (await sessionFromApiKey(profeKey.rawKey))!.session
+
+    expect(taSession.via).toBe('api-key')
+    expect(await findClassroomRole(taSession, 'sd-2026-1')).toBeNull()
+    expect(await findClassroomRole(profeSession, 'sd-2026-1')).toMatchObject({ role: 'teacher' })
+  })
+})
+
+describe('the boundary every existing function uses', () => {
+  it('keeps a TA out of findTeachingClassroom', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+
+    expect(await findTeachingClassroom(ta, 'sd-2026-1')).toBeNull()
+    expect(await findTeachingClassroom(profe, 'sd-2026-1')).toMatchObject({ id: org })
+  })
+})

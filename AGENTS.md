@@ -299,6 +299,10 @@ reference code without mental translation. The confusing one:
   `docs/edicion-y-borrado-de-assignments.md`**, which records why closing
   submissions belongs in the edit screen and not in a toggle, and what must
   *not* propagate to existing repositories.
+- **Teaching assistants follow `docs/teaching-assistants.md`**, which records
+  why a TA is a role of this app and not an org owner, and why it lives in its
+  own table instead of a role column on `organizations_users`. The tables and
+  `findClassroomRole` exist; no screen uses them yet.
 - **Importing an export of the live GitHub Classroom follows
   `docs/importar-el-export-de-github-classroom.md`**. The export is a dump of
   the public Classroom API, so what it cannot answer — the App installation,
