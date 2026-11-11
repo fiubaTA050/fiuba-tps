@@ -1,9 +1,19 @@
 import 'server-only'
 
-import { and, asc, eq, exists } from 'drizzle-orm'
+import { and, asc, eq, exists, inArray } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
-import { organizations, organizationsUsers, teachingAssistants, users } from '@/db/schema'
+import {
+  groupAssignments,
+  groups,
+  organizations,
+  organizationsUsers,
+  rosterEntries,
+  teachingAssistantAllocations,
+  teachingAssistants,
+  users,
+} from '@/db/schema'
+import { type AssignmentKind, findTeachingAssignment } from '@/lib/data/assignment-kind'
 import { asFlag, isStudentOf } from '@/lib/data/classroom-students'
 import { findTeachingClassroom } from '@/lib/data/organizations'
 import { isUniqueViolation } from '@/lib/data/postgres'
@@ -273,6 +283,184 @@ export async function removeTeachingAssistant(
   if (removed.length === 0) {
     return { success: false, error: 'Ese ayudante ya no está en el classroom.' }
   }
+
+  return { success: true }
+}
+
+/** A TA as the dashboard's menus offer it */
+export type AllocatableAssistant = { id: number; githubLogin: string | null }
+
+/**
+ * Who corrects what in one assignment, for the teacher's dashboard. A target
+ * is the row the allocation hangs off: a roster entry's id on an individual
+ * assignment, a team's id on a group one.
+ */
+export type AssignmentAllocations = {
+  /** Every TA of the classroom, the options of the menus */
+  assistants: AllocatableAssistant[]
+  /** target id → the ids of the TAs allocated to it */
+  byTarget: Map<number, number[]>
+}
+
+/**
+ * The allocations of one assignment, teacher-only. Null when the caller does
+ * not teach the classroom or there is no live assignment by that slug.
+ */
+export async function listAllocations(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  kind: AssignmentKind,
+): Promise<AssignmentAllocations | null> {
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found?.assignment) return null
+
+  const individual = kind === 'individual'
+  const [assistants, rows] = await Promise.all([
+    db
+      .select({ id: teachingAssistants.id, githubLogin: users.githubLogin })
+      .from(teachingAssistants)
+      .innerJoin(users, eq(users.id, teachingAssistants.userId))
+      .where(eq(teachingAssistants.organizationId, found.classroom.id))
+      .orderBy(asc(users.githubLogin)),
+    db
+      .select({
+        teachingAssistantId: teachingAssistantAllocations.teachingAssistantId,
+        target: individual
+          ? teachingAssistantAllocations.rosterEntryId
+          : teachingAssistantAllocations.groupId,
+      })
+      .from(teachingAssistantAllocations)
+      .where(
+        individual
+          ? eq(teachingAssistantAllocations.assignmentId, found.assignment.id)
+          : eq(teachingAssistantAllocations.groupAssignmentId, found.assignment.id),
+      ),
+  ])
+
+  const byTarget = new Map<number, number[]>()
+  for (const row of rows) {
+    if (row.target === null) continue
+    const list = byTarget.get(row.target)
+    if (list) list.push(row.teachingAssistantId)
+    else byTarget.set(row.target, [row.teachingAssistantId])
+  }
+
+  return { assistants, byTarget }
+}
+
+/** More rows than any cohort has: a bound on what one request can write */
+const MAX_TARGETS = 2000
+
+export type AllocationResult = { success: true } | { success: false; error: string }
+
+/**
+ * Allocates one TA to several rows of an assignment, or takes them off —
+ * the per-row menu and the bulk bar of the dashboard both land here.
+ * Allocating twice is a no-op (the unique indexes), and so is taking off a TA
+ * who was not there.
+ *
+ * Every target must belong to this assignment: a team of the grouping it runs
+ * on, or a padrón of the classroom's roster. The second is checked only here —
+ * a roster can be shared between classrooms and replaced, so the database has
+ * nothing to pin it to (docs/teaching-assistants.md) — and it is what keeps a
+ * TA of one classroom from being handed a student of another.
+ */
+export async function setAllocation(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  kind: AssignmentKind,
+  input: { teachingAssistantId: number; targetIds: number[]; allocate: boolean },
+): Promise<AllocationResult> {
+  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found?.assignment) return { success: false, error: 'No se encontró el trabajo práctico.' }
+  if (found.classroom.archivedAt) {
+    return { success: false, error: 'El classroom está archivado: no se pueden asignar ayudantes.' }
+  }
+
+  const targetIds = [...new Set(input.targetIds)]
+  if (targetIds.length === 0) return { success: true }
+  if (targetIds.length > MAX_TARGETS) {
+    return { success: false, error: 'Son demasiadas filas para una sola asignación.' }
+  }
+
+  const [assistant] = await db
+    .select({ id: teachingAssistants.id })
+    .from(teachingAssistants)
+    .where(
+      and(
+        eq(teachingAssistants.id, input.teachingAssistantId),
+        eq(teachingAssistants.organizationId, found.classroom.id),
+      ),
+    )
+  if (!assistant) return { success: false, error: 'Ese ayudante ya no está en el classroom.' }
+
+  const individual = kind === 'individual'
+  const assignmentId = found.assignment.id
+
+  // The grouping is only needed for a group assignment: the teams must be its
+  // own, and the allocation row carries it for the composite foreign keys
+  let groupingId: number | null = null
+  if (individual) {
+    const valid = await db
+      .select({ id: rosterEntries.id })
+      .from(rosterEntries)
+      .innerJoin(organizations, eq(organizations.rosterId, rosterEntries.rosterId))
+      .where(and(eq(organizations.id, found.classroom.id), inArray(rosterEntries.id, targetIds)))
+    if (valid.length !== targetIds.length) {
+      return { success: false, error: 'Algún alumno ya no está en la lista. Recargá la página.' }
+    }
+  } else {
+    const [assignment] = await db
+      .select({ groupingId: groupAssignments.groupingId })
+      .from(groupAssignments)
+      .where(eq(groupAssignments.id, assignmentId))
+    groupingId = assignment.groupingId
+    const valid = await db
+      .select({ id: groups.id })
+      .from(groups)
+      .where(and(eq(groups.groupingId, groupingId), inArray(groups.id, targetIds)))
+    if (valid.length !== targetIds.length) {
+      return { success: false, error: 'Algún equipo ya no existe. Recargá la página.' }
+    }
+  }
+
+  if (!input.allocate) {
+    await db
+      .delete(teachingAssistantAllocations)
+      .where(
+        and(
+          eq(teachingAssistantAllocations.teachingAssistantId, assistant.id),
+          individual
+            ? and(
+                eq(teachingAssistantAllocations.assignmentId, assignmentId),
+                inArray(teachingAssistantAllocations.rosterEntryId, targetIds),
+              )
+            : and(
+                eq(teachingAssistantAllocations.groupAssignmentId, assignmentId),
+                inArray(teachingAssistantAllocations.groupId, targetIds),
+              ),
+        ),
+      )
+    return { success: true }
+  }
+
+  const base = {
+    teachingAssistantId: assistant.id,
+    organizationId: found.classroom.id,
+    createdByUserId: Number(session.user.id),
+  }
+  await db
+    .insert(teachingAssistantAllocations)
+    .values(
+      targetIds.map((target) =>
+        individual
+          ? { ...base, assignmentId, rosterEntryId: target }
+          : { ...base, groupAssignmentId: assignmentId, groupingId, groupId: target },
+      ),
+    )
+    .onConflictDoNothing()
 
   return { success: true }
 }

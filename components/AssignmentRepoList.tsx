@@ -12,7 +12,9 @@ import {
   XIcon,
 } from '@primer/octicons-react'
 import Link from 'next/link'
-import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react'
+import { type ComponentProps, useEffect, useMemo, useRef, useState, useTransition } from 'react'
+
+import { setAllocationAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
 
 import { assignmentPath, type AssignmentKind } from '@/lib/assignment-paths'
 import {
@@ -23,8 +25,10 @@ import {
   type SubmissionTone,
 } from '@/lib/assignment-rows'
 import type { CheckpointSubmissions, SubmissionRow } from '@/lib/data/submissions'
+import type { AllocatableAssistant } from '@/lib/data/teaching-assistants'
 import { formatArgentina } from '@/lib/dates'
 
+import { AllocationBar, AssistantRowMenu } from './AllocationControls'
 import { CheckboxMenu } from './CheckboxMenu'
 import { LinkToStudentDialog } from './LinkToStudentDialog'
 import { Pagination } from './Pagination'
@@ -111,6 +115,27 @@ export type LinkToStudent = Omit<
   'userId' | 'login'
 >
 
+/**
+ * Who corrects each row, for a teacher. Absent for a TA and on a classroom
+ * with no TAs, where there is nothing to show or pick.
+ */
+export type Allocation = {
+  assistants: AllocatableAssistant[]
+  /** False on an archived classroom: the names show, the menus do not */
+  editable: boolean
+}
+
+/** Each allocatable row's TAs, keyed by `allocationTarget` */
+function allocationsOf(rows: RepoRow[]): Map<number, number[]> {
+  const byTarget = new Map<number, number[]>()
+  for (const row of rows) {
+    if (row.allocationTarget !== undefined) {
+      byTarget.set(row.allocationTarget, row.assistantIds ?? [])
+    }
+  }
+  return byTarget
+}
+
 /** A `RepoRow` once `label` (and, where checkpoints are tracked, `submission`)
  *  is resolved against the active tab — what every row below actually renders */
 type DisplayRow = RepoRow & { label: SubmissionLabel }
@@ -123,6 +148,7 @@ export function AssignmentRepoList({
   assignmentSlug,
   kind = 'individual',
   linkToStudent,
+  allocation,
 }: {
   title: string
   rows: RepoRow[]
@@ -143,8 +169,61 @@ export function AssignmentRepoList({
   /** Which assignment table the slug names: the routes of a team's entrega differ */
   kind?: AssignmentKind
   linkToStudent?: LinkToStudent
+  allocation?: Allocation
 }) {
   const [query, setQuery] = useState('')
+  /** 'none' or a TA id: the "Filtrar por ayudante" menu */
+  const [assistantFilter, setAssistantFilter] = useState<Set<string>>(new Set())
+
+  // Who corrects each row, kept here rather than re-read from the server: an
+  // allocation answers with success and the list applies it itself, because
+  // revalidating would re-read every repository from GitHub. Re-seeded from
+  // `rows` whenever the page does re-render, for any other reason.
+  const [allocated, setAllocated] = useState(() => allocationsOf(rows))
+  const [allocatedFrom, setAllocatedFrom] = useState(rows)
+  if (allocatedFrom !== rows) {
+    setAllocatedFrom(rows)
+    setAllocated(allocationsOf(rows))
+  }
+  /** The `allocationTarget`s of the rows ticked for the bulk bar */
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [allocationError, setAllocationError] = useState<string | null>(null)
+  const [allocating, startAllocating] = useTransition()
+
+  function applyAllocation(teachingAssistantId: number, targetIds: number[], allocate: boolean) {
+    setAllocationError(null)
+    startAllocating(async () => {
+      const result = await setAllocationAction({
+        classroomSlug,
+        assignmentSlug,
+        kind,
+        teachingAssistantId,
+        targetIds,
+        allocate,
+      })
+      if (result.error) {
+        setAllocationError(result.error)
+        return
+      }
+      setAllocated((previous) => {
+        const next = new Map(previous)
+        for (const target of targetIds) {
+          const current = next.get(target) ?? []
+          next.set(
+            target,
+            allocate
+              ? [...new Set([...current, teachingAssistantId])]
+              : current.filter((id) => id !== teachingAssistantId),
+          )
+        }
+        return next
+      })
+    })
+  }
+
+  // Only a filter by TA reads the allocations; depending on them otherwise
+  // would send the teacher back to page 1 on every toggle of a row's menu
+  const allocationsForFilter = assistantFilter.size > 0 ? allocated : null
   const [submission, setSubmission] = useState<Set<SubmissionFilter>>(new Set())
   const [passing, setPassing] = useState<Set<PassingFilter>>(new Set())
   const [accepted, setAccepted] = useState<Set<AcceptedFilter>>(new Set())
@@ -230,18 +309,43 @@ export function AssignmentRepoList({
         if (!matches) return false
       }
 
+      // A row nothing can be allocated to is uncovered too: it shows under
+      // "Sin asignar", which is what the teacher splitting the cohort looks for
+      if (allocationsForFilter) {
+        const ids =
+          row.allocationTarget === undefined
+            ? []
+            : (allocationsForFilter.get(row.allocationTarget) ?? [])
+        const matches =
+          (assistantFilter.has('none') && ids.length === 0) ||
+          ids.some((id) => assistantFilter.has(String(id)))
+        if (!matches) return false
+      }
+
       return true
     })
 
     return [...kept].sort(compareBy(sort))
-  }, [resolvedRows, query, submission, passing, accepted, unlinked, sort])
+  }, [
+    resolvedRows,
+    query,
+    submission,
+    passing,
+    accepted,
+    unlinked,
+    sort,
+    assistantFilter,
+    allocationsForFilter,
+  ])
 
   // Back to the first page whenever the list underneath changes — a filter, a
   // sort or a search. `filtered` is a memo, so its identity is that change.
+  // The selection goes too: the bulk bar acts on rows the teacher can see
   const [lastFiltered, setLastFiltered] = useState(filtered)
   if (lastFiltered !== filtered) {
     setLastFiltered(filtered)
     setPage(1)
+    setSelected(new Set())
   }
 
   const pageCount = Math.ceil(filtered.length / PER_PAGE)
@@ -261,6 +365,7 @@ export function AssignmentRepoList({
     passing.size > 0 ||
     accepted.size > 0 ||
     unlinked.size > 0 ||
+    assistantFilter.size > 0 ||
     sort !== 'az'
 
   function clear() {
@@ -269,6 +374,7 @@ export function AssignmentRepoList({
     setPassing(new Set())
     setAccepted(new Set())
     setUnlinked(new Set())
+    setAssistantFilter(new Set())
     setSort('az')
   }
 
@@ -412,6 +518,22 @@ export function AssignmentRepoList({
             />
           )}
 
+          {allocation && (
+            <CheckboxMenu
+              label="Filtrar por ayudante"
+              heading="Filtrar por ayudante:"
+              options={[
+                { value: 'none', label: 'Sin asignar' },
+                ...allocation.assistants.map((assistant) => ({
+                  value: String(assistant.id),
+                  label: assistant.githubLogin ? `@${assistant.githubLogin}` : 'Ayudante',
+                })),
+              ]}
+              selected={assistantFilter}
+              onToggle={(value) => setAssistantFilter(toggle(assistantFilter, value))}
+            />
+          )}
+
           <details className="dropdown details-reset details-overlay d-inline-block mr-2 mb-2 mb-lg-0">
             <summary className="btn" role="button" aria-haspopup="menu">
               Orden
@@ -465,11 +587,37 @@ export function AssignmentRepoList({
         </div>
       )}
 
+      {allocationError && <div className="flash flash-error mt-3">{allocationError}</div>}
+
+      {allocation?.editable && selected.size > 0 && (
+        <AllocationBar
+          assistants={allocation.assistants}
+          selectedCount={selected.size}
+          pending={allocating}
+          onApply={(id, allocate) => {
+            applyAllocation(id, [...selected], allocate)
+            setSelected(new Set())
+          }}
+          onClear={() => setSelected(new Set())}
+        />
+      )}
+
       {/* `<div class="mt-3">` around the list on the live site */}
       <div className="Box Box--condensed mt-3" ref={listTop}>
         <div className="Box-header">
           <div className="d-table col-12">
-            <div className="Box-title col-6 d-table-cell">{title}</div>
+            <div className="Box-title col-6 d-table-cell">
+              {allocation?.editable && (
+                <SelectVisible
+                  targets={visible.flatMap((row) =>
+                    row.allocationTarget === undefined ? [] : [row.allocationTarget],
+                  )}
+                  selected={selected}
+                  onChange={setSelected}
+                />
+              )}
+              {title}
+            </div>
             <div className="col-6 d-table-cell text-right color-fg-muted text-small">
               {filtered.length === resolvedRows.length
                 ? `${resolvedRows.length}`
@@ -495,6 +643,29 @@ export function AssignmentRepoList({
                   assignmentSlug={assignmentSlug}
                   kind={kind}
                   linkToStudent={linkToStudent}
+                  selectionGutter={allocation?.editable === true}
+                  allocation={
+                    allocation && row.allocationTarget !== undefined
+                      ? {
+                          assistants: allocation.assistants,
+                          editable: allocation.editable,
+                          assigned: allocated.get(row.allocationTarget) ?? [],
+                          selected: selected.has(row.allocationTarget),
+                          pending: allocating,
+                          onSelect: (on) => {
+                            const target = row.allocationTarget!
+                            setSelected((previous) => {
+                              const next = new Set(previous)
+                              if (on) next.add(target)
+                              else next.delete(target)
+                              return next
+                            })
+                          },
+                          onToggle: (id, allocate) =>
+                            applyAllocation(id, [row.allocationTarget!], allocate),
+                        }
+                      : undefined
+                  }
                 />
               ))}
             </div>
@@ -552,6 +723,41 @@ function CheckpointTabs({
   )
 }
 
+/** The header's checkbox: ticks or unticks every allocatable row of the page */
+function SelectVisible({
+  targets,
+  selected,
+  onChange,
+}: {
+  targets: number[]
+  selected: Set<number>
+  onChange: (next: Set<number>) => void
+}) {
+  const ticked = targets.filter((target) => selected.has(target)).length
+  const all = targets.length > 0 && ticked === targets.length
+
+  return (
+    <input
+      type="checkbox"
+      className="mr-2 v-align-middle"
+      aria-label="Seleccionar las filas de esta página"
+      disabled={targets.length === 0}
+      checked={all}
+      ref={(input) => {
+        if (input) input.indeterminate = ticked > 0 && !all
+      }}
+      onChange={() => {
+        const next = new Set(selected)
+        for (const target of targets) {
+          if (all) next.delete(target)
+          else next.add(target)
+        }
+        onChange(next)
+      }}
+    />
+  )
+}
+
 function compareBy(sort: Sort): (a: RepoRow, b: RepoRow) => number {
   if (sort === 'az') return (a, b) => a.name.localeCompare(b.name, 'es')
   if (sort === 'za') return (a, b) => b.name.localeCompare(a.name, 'es')
@@ -586,6 +792,8 @@ function RepoListItem({
   assignmentSlug,
   kind,
   linkToStudent,
+  selectionGutter,
+  allocation,
 }: {
   row: DisplayRow
   /** Which entrega's history "Ver entregas anteriores" asks for — null when
@@ -597,6 +805,18 @@ function RepoListItem({
   assignmentSlug: string
   kind: AssignmentKind
   linkToStudent?: LinkToStudent
+  /** The list has selection checkboxes: a row without one keeps the gap */
+  selectionGutter: boolean
+  /** Set only on a row a TA can be allocated to, for a teacher */
+  allocation?: {
+    assistants: AllocatableAssistant[]
+    editable: boolean
+    assigned: number[]
+    selected: boolean
+    pending: boolean
+    onSelect: (selected: boolean) => void
+    onToggle: (teachingAssistantId: number, allocate: boolean) => void
+  }
 }) {
   const { snapshot } = row
   const extended = row.repoId !== null && checkpoint?.exemptRepoIds.has(row.repoId) === true
@@ -607,6 +827,28 @@ function RepoListItem({
     <div className="d-table col-12 assignment-repo-list-item">
       <div className="col-8 d-table-cell">
         <div className="d-flex width-full">
+          {allocation?.editable ? (
+            <input
+              type="checkbox"
+              className="mr-3 flex-self-center"
+              aria-label={`Seleccionar ${row.name}`}
+              checked={allocation.selected}
+              onChange={(event) => allocation.onSelect(event.target.checked)}
+            />
+          ) : (
+            // An account that skipped the roster cannot be allocated, but its
+            // avatar should still line up with the rows that can
+            selectionGutter && (
+              <input
+                type="checkbox"
+                className="mr-3 flex-self-center"
+                style={{ visibility: 'hidden' }}
+                aria-hidden
+                tabIndex={-1}
+                disabled
+              />
+            )
+          )}
           <Visual row={row} />
 
           <div className={`flex-column ${row.visual === 'none' ? '' : 'ml-3'}`}>
@@ -674,6 +916,17 @@ function RepoListItem({
                   {...linkToStudent}
                   userId={row.userId}
                   login={row.githubLogin}
+                />
+              )}
+
+              {allocation && (
+                <AssistantRowMenu
+                  assistants={allocation.assistants}
+                  assigned={allocation.assigned}
+                  editable={allocation.editable}
+                  pending={allocation.pending}
+                  onToggle={allocation.onToggle}
+                  rowName={row.name}
                 />
               )}
 

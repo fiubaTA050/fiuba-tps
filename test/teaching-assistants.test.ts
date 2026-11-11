@@ -51,9 +51,13 @@ vi.mock('@/lib/github/users', () => ({
 const { classroomCounters, findClassroomRole, findTeachingClassroom } = await import(
   '@/lib/data/organizations'
 )
-const { addTeachingAssistant, listClassroomStaff, removeTeachingAssistant } = await import(
-  '@/lib/data/teaching-assistants'
-)
+const {
+  addTeachingAssistant,
+  listAllocations,
+  listClassroomStaff,
+  removeTeachingAssistant,
+  setAllocation,
+} = await import('@/lib/data/teaching-assistants')
 const { createApiKey, sessionFromApiKey } = await import('@/lib/data/api-keys')
 
 let nextUid = 1
@@ -803,5 +807,145 @@ describe('the fixes of the review of the Docentes tab', () => {
       students: 2,
       staff: 2,
     })
+  })
+})
+
+/** A classroom with a roster of `identifiers`, returning the entry ids in order */
+async function rosterOf(organizationId: number, identifiers: string[]): Promise<number[]> {
+  const [roster] = await db
+    .insert(rosters)
+    .values({ identifierName: 'Padrón' })
+    .returning({ id: rosters.id })
+  await db
+    .update(organizations)
+    .set({ rosterId: roster.id })
+    .where(eq(organizations.id, organizationId))
+  const rows = await db
+    .insert(rosterEntries)
+    .values(identifiers.map((identifier) => ({ rosterId: roster.id, identifier })))
+    .returning({ id: rosterEntries.id })
+  return rows.map((row) => row.id)
+}
+
+describe('setAllocation and listAllocations', () => {
+  it('allocates and takes off a TA over several padrones of an individual assignment', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+    await assignment(org, profe, 'tp0')
+    const [a, b, c] = await rosterOf(org, ['100000', '100001', '100002'])
+    const allocate = (targetIds: number[], on: boolean) =>
+      setAllocation(profe, 'sd-2026-1', 'tp0', 'individual', {
+        teachingAssistantId: taId,
+        targetIds,
+        allocate: on,
+      })
+
+    expect(await allocate([a, b, b], true)).toEqual({ success: true })
+    // Again, overlapping: a no-op for what was already there
+    expect(await allocate([b, c], true)).toEqual({ success: true })
+
+    let listed = await listAllocations(profe, 'sd-2026-1', 'tp0', 'individual')
+    expect(listed?.assistants).toEqual([{ id: taId, githubLogin: 'ayudante' }])
+    expect(Object.fromEntries(listed!.byTarget)).toEqual({ [a]: [taId], [b]: [taId], [c]: [taId] })
+
+    expect(await allocate([a, c], false)).toEqual({ success: true })
+    listed = await listAllocations(profe, 'sd-2026-1', 'tp0', 'individual')
+    expect(Object.fromEntries(listed!.byTarget)).toEqual({ [b]: [taId] })
+  })
+
+  it('keeps assignments apart, and gives a row several TAs', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const otro = await user('otro-ayudante')
+    const taId = await assistant(org, ta, profe)
+    const otroId = await assistant(org, otro, profe)
+    await assignment(org, profe, 'tp0')
+    await assignment(org, profe, 'tp3')
+    const [a] = await rosterOf(org, ['100000'])
+
+    for (const id of [taId, otroId]) {
+      await setAllocation(profe, 'sd-2026-1', 'tp0', 'individual', {
+        teachingAssistantId: id,
+        targetIds: [a],
+        allocate: true,
+      })
+    }
+
+    const tp0 = await listAllocations(profe, 'sd-2026-1', 'tp0', 'individual')
+    const tp3 = await listAllocations(profe, 'sd-2026-1', 'tp3', 'individual')
+    expect(tp0?.byTarget.get(a)?.sort()).toEqual([taId, otroId].sort())
+    expect(tp3?.byTarget.size).toBe(0)
+  })
+
+  it('refuses a padrón of another classroom', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const other = await classroom('sd-2025-2', profe)
+    const taId = await assistant(org, ta, profe)
+    await assignment(org, profe, 'tp0')
+    await rosterOf(org, ['100000'])
+    const [foreign] = await rosterOf(other, ['200000'])
+
+    expect(
+      await setAllocation(profe, 'sd-2026-1', 'tp0', 'individual', {
+        teachingAssistantId: taId,
+        targetIds: [foreign],
+        allocate: true,
+      }),
+    ).toEqual({ success: false, error: 'Algún alumno ya no está en la lista. Recargá la página.' })
+    expect(await db.select().from(teachingAssistantAllocations)).toHaveLength(0)
+  })
+
+  it('allocates teams of a group assignment, and refuses a team of another grouping', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+    const set = await grouping(org, 'equipos')
+    const otherSet = await grouping(org, 'otros')
+    await groupAssignment(org, set, profe, 'tp1')
+    const los = await team(set, org, 'los-raft')
+    const ajenos = await team(otherSet, org, 'ajenos')
+    const allocate = (targetIds: number[]) =>
+      setAllocation(profe, 'sd-2026-1', 'tp1', 'group', {
+        teachingAssistantId: taId,
+        targetIds,
+        allocate: true,
+      })
+
+    expect(await allocate([los])).toEqual({ success: true })
+    expect(await allocate([ajenos])).toEqual({
+      success: false,
+      error: 'Algún equipo ya no existe. Recargá la página.',
+    })
+
+    const listed = await listAllocations(profe, 'sd-2026-1', 'tp1', 'group')
+    expect(Object.fromEntries(listed!.byTarget)).toEqual({ [los]: [taId] })
+  })
+
+  it('refuses a TA of another classroom, an archived classroom, and anybody but a teacher', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const other = await classroom('sd-2025-2', profe)
+    const taId = await assistant(org, ta, profe)
+    const foreignTa = await assistant(other, await user('ajeno'), profe)
+    await assignment(org, profe, 'tp0')
+    const [a] = await rosterOf(org, ['100000'])
+    const input = (teachingAssistantId: number) => ({
+      teachingAssistantId,
+      targetIds: [a],
+      allocate: true,
+    })
+
+    expect(await setAllocation(profe, 'sd-2026-1', 'tp0', 'individual', input(foreignTa))).toEqual({
+      success: false,
+      error: 'Ese ayudante ya no está en el classroom.',
+    })
+    // The TA cannot hand themselves rows
+    expect(await setAllocation(ta, 'sd-2026-1', 'tp0', 'individual', input(taId))).toMatchObject({
+      success: false,
+    })
+    expect(await listAllocations(ta, 'sd-2026-1', 'tp0', 'individual')).toBeNull()
+
+    await db.update(organizations).set({ archivedAt: new Date() }).where(eq(organizations.id, org))
+    expect(await setAllocation(profe, 'sd-2026-1', 'tp0', 'individual', input(taId))).toMatchObject({
+      success: false,
+    })
+    expect(await db.select().from(teachingAssistantAllocations)).toHaveLength(0)
   })
 })

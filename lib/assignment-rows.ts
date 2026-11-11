@@ -71,6 +71,14 @@ export type RepoRow = {
    * row: it is the `user_id` the original's `_link_to_student_modal` posts.
    */
   userId?: number
+  /**
+   * What a TA is allocated to on this row: the roster entry's id on an
+   * individual assignment, the team's id on a group one. Unset on a row
+   * nothing can be allocated to — an account that skipped the roster.
+   */
+  allocationTarget?: number
+  /** The TAs allocated to `allocationTarget`, by `teaching_assistants.id` */
+  assistantIds?: number[]
 }
 
 /**

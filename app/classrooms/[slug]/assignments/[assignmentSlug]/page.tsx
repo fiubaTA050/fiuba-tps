@@ -9,6 +9,7 @@ import { listAssignmentAcceptances } from '@/lib/data/invitations'
 import { currentInstallationId, findClassroomInstallation } from '@/lib/data/organizations'
 import { listUnlinkedEntries } from '@/lib/data/rosters'
 import { listAssignmentSubmissions } from '@/lib/data/submissions'
+import { listAllocations } from '@/lib/data/teaching-assistants'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
 import { baseUrl, invitationUrl } from '@/lib/url'
@@ -38,7 +39,8 @@ export default async function AssignmentPage(
 
   const { slug, assignmentSlug } = await props.params
 
-  const [classroom, assignment, acceptances, unlinkedEntries, submissions] = await Promise.all([
+  const [classroom, assignment, acceptances, unlinkedEntries, submissions, allocations] =
+    await Promise.all([
     findClassroomInstallation(session, slug),
     findAssignment(session, slug, assignmentSlug),
     listAssignmentAcceptances(session, slug, assignmentSlug),
@@ -51,6 +53,8 @@ export default async function AssignmentPage(
     // every row below reads correctly as "sin confirmar" without a special
     // case here.
     listAssignmentSubmissions(session, slug, assignmentSlug),
+    // Who corrects each padrón: the menus on every row
+    listAllocations(session, slug, assignmentSlug, 'individual'),
   ])
 
   if (!classroom || !assignment || !acceptances || !submissions) notFound()
@@ -229,6 +233,8 @@ export default async function AssignmentPage(
           classroomSlug={classroom.slug}
           assignmentSlug={assignment.slug}
           unlinkedEntries={unlinkedEntries}
+          allocations={allocations}
+          archived={classroom.archivedAt !== null}
         />
       </div>
     </>

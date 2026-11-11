@@ -12,6 +12,7 @@ import {
   saveSubmissionFeedback,
   setSubmissionExemption,
 } from '@/lib/data/submissions'
+import { setAllocation } from '@/lib/data/teaching-assistants'
 import { positiveInteger } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
@@ -193,4 +194,46 @@ export async function saveSubmissionFeedbackAction(
   revalidatePath(`${path}/submissions/${githubRepoId}/${submissionId}`)
 
   return result.success ? EMPTY_STATE : { error: result.error, notice: null }
+}
+
+/**
+ * Allocates one TA to the selected rows of a dashboard, or takes them off.
+ * Called directly from the client, not through a form: the per-row menu and
+ * the bulk bar both hand over a list of row ids. No revalidation — the
+ * dashboard re-reads every repository from GitHub on render, and the list
+ * already updated itself from the answer (AssignmentRepoList).
+ */
+export async function setAllocationAction(input: {
+  classroomSlug: string
+  assignmentSlug: string
+  kind: string
+  teachingAssistantId: number
+  targetIds: number[]
+  allocate: boolean
+}): Promise<{ error: string | null }> {
+  const session = await auth()
+  if (!isUsableSession(session)) redirect('/')
+
+  // From the client, so typed only by the caller's good faith
+  const teachingAssistantId = positiveInteger(String(input.teachingAssistantId))
+  const targetIds = Array.isArray(input.targetIds)
+    ? input.targetIds.map((id) => positiveInteger(String(id)))
+    : []
+  if (teachingAssistantId === null || targetIds.some((id) => id === null)) {
+    return { error: 'No pudimos asignar al ayudante. Recargá la página.' }
+  }
+
+  const result = await setAllocation(
+    session,
+    String(input.classroomSlug),
+    String(input.assignmentSlug),
+    parseAssignmentKind(input.kind),
+    {
+      teachingAssistantId,
+      targetIds: targetIds as number[],
+      allocate: input.allocate === true,
+    },
+  )
+
+  return { error: result.success ? null : result.error }
 }

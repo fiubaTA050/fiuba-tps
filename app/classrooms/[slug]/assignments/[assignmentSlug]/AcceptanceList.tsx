@@ -2,6 +2,7 @@ import { AssignmentRepoList } from '@/components/AssignmentRepoList'
 import type { RepoRow } from '@/lib/assignment-rows'
 import type { AssignmentAcceptances } from '@/lib/data/invitations'
 import type { AssignmentSubmissions } from '@/lib/data/submissions'
+import type { AssignmentAllocations } from '@/lib/data/teaching-assistants'
 import type { RepositorySnapshot } from '@/lib/github/repositories'
 
 import { linkAccountAction } from './actions'
@@ -29,6 +30,8 @@ export function AcceptanceList({
   classroomSlug,
   assignmentSlug,
   unlinkedEntries,
+  allocations,
+  archived,
 }: {
   acceptances: AssignmentAcceptances
   assignmentTitle: string
@@ -40,6 +43,9 @@ export function AcceptanceList({
   assignmentSlug: string
   /** The identifiers "Link to student" offers — empty when there is no roster */
   unlinkedEntries: { id: number; identifier: string }[]
+  /** Who corrects each padrón; null for anybody but a teacher */
+  allocations: AssignmentAllocations | null
+  archived: boolean
 }) {
   const { identifierName, entries, unlinkedAccounts, acceptedCount } = acceptances
 
@@ -82,6 +88,10 @@ export function AcceptanceList({
         accepted: entry.state === 'accepted',
         unlinkedIdentifier: entry.state === 'not_joined',
         unlinkedAccount: false,
+        // A TA is allocated the padrón, not the account or the repository:
+        // it can be done before anyone accepts, and survives a relink
+        allocationTarget: entry.entryId,
+        assistantIds: allocations?.byTarget.get(entry.entryId) ?? [],
       }
     }),
 
@@ -123,6 +133,11 @@ export function AcceptanceList({
                 entries: unlinkedEntries,
                 action: linkAccountAction,
               }
+        }
+        allocation={
+          allocations && allocations.assistants.length > 0
+            ? { assistants: allocations.assistants, editable: !archived }
+            : undefined
         }
       />
 

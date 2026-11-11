@@ -303,8 +303,9 @@ reference code without mental translation. The confusing one:
 - **Teaching assistants follow `docs/teaching-assistants.md`**, which records
   why a TA is a role of this app and not an org owner, and why it lives in its
   own table instead of a role column on `organizations_users`. The tables and
-  `findClassroomRole` exist, and the "Docentes" tab adds and removes TAs;
-  nothing lets a TA in yet.
+  `findClassroomRole` exist, the "Docentes" tab adds and removes TAs, and
+  both assignment dashboards allocate them to padrones or teams; nothing lets
+  a TA in yet.
 - **Importing an export of the live GitHub Classroom follows
   `docs/importar-el-export-de-github-classroom.md`**. The export is a dump of
   the public Classroom API, so what it cannot answer — the App installation,

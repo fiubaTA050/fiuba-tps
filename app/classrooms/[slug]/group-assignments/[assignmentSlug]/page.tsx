@@ -12,6 +12,7 @@ import { listGroupAssignmentAcceptances, type TeamAcceptance } from '@/lib/data/
 import { currentInstallationId, findClassroomInstallation } from '@/lib/data/organizations'
 import { rosterSummary } from '@/lib/data/rosters'
 import { listAssignmentSubmissions } from '@/lib/data/submissions'
+import { listAllocations } from '@/lib/data/teaching-assistants'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import type { RepositorySnapshot } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
@@ -45,12 +46,14 @@ export default async function GroupAssignmentPage(
 
   // The roster's size is the first tile's "alumnos en el roster"; it is an
   // indexed count
-  const [classroom, assignment, acceptances, roster, submissions] = await Promise.all([
+  const [classroom, assignment, acceptances, roster, submissions, allocations] = await Promise.all([
     findClassroomInstallation(session, slug),
     findGroupAssignment(session, slug, assignmentSlug),
     listGroupAssignmentAcceptances(session, slug, assignmentSlug),
     rosterSummary(session, slug),
     listAssignmentSubmissions(session, slug, assignmentSlug, 'group'),
+    // Who corrects each team: the menus on every row
+    listAllocations(session, slug, assignmentSlug, 'group'),
   ])
 
   if (!classroom || !assignment || !acceptances || !submissions) notFound()
@@ -229,6 +232,11 @@ export default async function GroupAssignmentPage(
             assignmentSlug={assignment.slug}
             kind="group"
             checkpoints={tracksEntregas ? submissions.checkpoints : undefined}
+            allocation={
+              allocations && allocations.assistants.length > 0
+                ? { assistants: allocations.assistants, editable: classroom.archivedAt === null }
+                : undefined
+            }
             rows={acceptances.teams.map((team): RepoRow => {
               const snapshot = team.repoId === null ? null : (snapshots.get(team.repoId) ?? null)
 
@@ -245,6 +253,8 @@ export default async function GroupAssignmentPage(
                 accepted: team.status !== 'unaccepted',
                 unlinkedIdentifier: false,
                 unlinkedAccount: false,
+                allocationTarget: team.id,
+                assistantIds: allocations?.byTarget.get(team.id) ?? [],
               }
             })}
           />
