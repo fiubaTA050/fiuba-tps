@@ -16,7 +16,7 @@ import {
 import { type AssignmentKind, findTeachingAssignment } from '@/lib/data/assignment-kind'
 import { asFlag, isStudentOf } from '@/lib/data/classroom-students'
 import { findTeachingClassroom } from '@/lib/data/organizations'
-import { isUniqueViolation } from '@/lib/data/postgres'
+import { isForeignKeyViolation, isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
 import { findGitHubUserByLogin } from '@/lib/github/users'
 
@@ -315,28 +315,31 @@ export async function listAllocations(
   const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
   if (!found?.assignment) return null
 
+  const assistants = await db
+    .select({ id: teachingAssistants.id, githubLogin: users.githubLogin })
+    .from(teachingAssistants)
+    .innerJoin(users, eq(users.id, teachingAssistants.userId))
+    .where(eq(teachingAssistants.organizationId, found.classroom.id))
+    .orderBy(asc(users.githubLogin))
+
+  // Most classrooms have no TAs, and the dashboard shows nothing then: no
+  // reason to read allocations that cannot exist
+  if (assistants.length === 0) return { assistants, byTarget: new Map() }
+
   const individual = kind === 'individual'
-  const [assistants, rows] = await Promise.all([
-    db
-      .select({ id: teachingAssistants.id, githubLogin: users.githubLogin })
-      .from(teachingAssistants)
-      .innerJoin(users, eq(users.id, teachingAssistants.userId))
-      .where(eq(teachingAssistants.organizationId, found.classroom.id))
-      .orderBy(asc(users.githubLogin)),
-    db
-      .select({
-        teachingAssistantId: teachingAssistantAllocations.teachingAssistantId,
-        target: individual
-          ? teachingAssistantAllocations.rosterEntryId
-          : teachingAssistantAllocations.groupId,
-      })
-      .from(teachingAssistantAllocations)
-      .where(
-        individual
-          ? eq(teachingAssistantAllocations.assignmentId, found.assignment.id)
-          : eq(teachingAssistantAllocations.groupAssignmentId, found.assignment.id),
-      ),
-  ])
+  const rows = await db
+    .select({
+      teachingAssistantId: teachingAssistantAllocations.teachingAssistantId,
+      target: individual
+        ? teachingAssistantAllocations.rosterEntryId
+        : teachingAssistantAllocations.groupId,
+    })
+    .from(teachingAssistantAllocations)
+    .where(
+      individual
+        ? eq(teachingAssistantAllocations.assignmentId, found.assignment.id)
+        : eq(teachingAssistantAllocations.groupAssignmentId, found.assignment.id),
+    )
 
   const byTarget = new Map<number, number[]>()
   for (const row of rows) {
@@ -408,22 +411,17 @@ export async function setAllocation(
       .from(rosterEntries)
       .innerJoin(organizations, eq(organizations.rosterId, rosterEntries.rosterId))
       .where(and(eq(organizations.id, found.classroom.id), inArray(rosterEntries.id, targetIds)))
-    if (valid.length !== targetIds.length) {
-      return { success: false, error: 'Algún alumno ya no está en la lista. Recargá la página.' }
-    }
+    if (valid.length !== targetIds.length) return { success: false, error: goneMessage(kind) }
   } else {
-    const [assignment] = await db
-      .select({ groupingId: groupAssignments.groupingId })
-      .from(groupAssignments)
-      .where(eq(groupAssignments.id, assignmentId))
-    groupingId = assignment.groupingId
+    // The teams of the grouping this assignment runs on, and the grouping
+    // with them, in one query
     const valid = await db
-      .select({ id: groups.id })
+      .select({ id: groups.id, groupingId: groups.groupingId })
       .from(groups)
-      .where(and(eq(groups.groupingId, groupingId), inArray(groups.id, targetIds)))
-    if (valid.length !== targetIds.length) {
-      return { success: false, error: 'Algún equipo ya no existe. Recargá la página.' }
-    }
+      .innerJoin(groupAssignments, eq(groupAssignments.groupingId, groups.groupingId))
+      .where(and(eq(groupAssignments.id, assignmentId), inArray(groups.id, targetIds)))
+    if (valid.length !== targetIds.length) return { success: false, error: goneMessage(kind) }
+    groupingId = valid[0].groupingId
   }
 
   if (!input.allocate) {
@@ -451,16 +449,28 @@ export async function setAllocation(
     organizationId: found.classroom.id,
     createdByUserId: Number(session.user.id),
   }
-  await db
-    .insert(teachingAssistantAllocations)
-    .values(
-      targetIds.map((target) =>
-        individual
-          ? { ...base, assignmentId, rosterEntryId: target }
-          : { ...base, groupAssignmentId: assignmentId, groupingId, groupId: target },
-      ),
-    )
-    .onConflictDoNothing()
+  try {
+    await db
+      .insert(teachingAssistantAllocations)
+      .values(
+        targetIds.map((target) =>
+          individual
+            ? { ...base, assignmentId, rosterEntryId: target }
+            : { ...base, groupAssignmentId: assignmentId, groupingId, groupId: target },
+        ),
+      )
+      .onConflictDoNothing()
+  } catch (error) {
+    // A padrón, a team or the TA deleted between the check above and here
+    if (isForeignKeyViolation(error)) return { success: false, error: goneMessage(kind) }
+    throw error
+  }
 
   return { success: true }
+}
+
+function goneMessage(kind: AssignmentKind): string {
+  return kind === 'individual'
+    ? 'Algún alumno ya no está en la lista. Recargá la página.'
+    : 'Algún equipo ya no existe. Recargá la página.'
 }

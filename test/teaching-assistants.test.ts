@@ -949,3 +949,32 @@ describe('setAllocation and listAllocations', () => {
     expect(await db.select().from(teachingAssistantAllocations)).toHaveLength(0)
   })
 })
+
+describe('the fixes of the review of the allocation', () => {
+  it('reads no allocations on a classroom with no TAs', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assignment(org, profe, 'tp0')
+
+    expect(await listAllocations(profe, 'sd-2026-1', 'tp0', 'individual')).toEqual({
+      assistants: [],
+      byTarget: new Map(),
+    })
+  })
+
+  it('answers a team that no longer exists with a message to reload', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+    const set = await grouping(org, 'equipos')
+    await groupAssignment(org, set, profe, 'tp1')
+    const los = await team(set, org, 'los-raft')
+    await db.delete(groups).where(eq(groups.id, los))
+
+    expect(
+      await setAllocation(profe, 'sd-2026-1', 'tp1', 'group', {
+        teachingAssistantId: taId,
+        targetIds: [los],
+        allocate: true,
+      }),
+    ).toEqual({ success: false, error: 'Algún equipo ya no existe. Recargá la página.' })
+  })
+})

@@ -12,9 +12,7 @@ import {
   XIcon,
 } from '@primer/octicons-react'
 import Link from 'next/link'
-import { type ComponentProps, useEffect, useMemo, useRef, useState, useTransition } from 'react'
-
-import { setAllocationAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
+import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react'
 
 import { assignmentPath, type AssignmentKind } from '@/lib/assignment-paths'
 import {
@@ -28,7 +26,7 @@ import type { CheckpointSubmissions, SubmissionRow } from '@/lib/data/submission
 import type { AllocatableAssistant } from '@/lib/data/teaching-assistants'
 import { formatArgentina } from '@/lib/dates'
 
-import { AllocationBar, AssistantRowMenu } from './AllocationControls'
+import { type Allocation, AllocationBar, AssistantRowMenu, useAllocations } from './AllocationControls'
 import { CheckboxMenu } from './CheckboxMenu'
 import { LinkToStudentDialog } from './LinkToStudentDialog'
 import { Pagination } from './Pagination'
@@ -115,27 +113,6 @@ export type LinkToStudent = Omit<
   'userId' | 'login'
 >
 
-/**
- * Who corrects each row, for a teacher. Absent for a TA and on a classroom
- * with no TAs, where there is nothing to show or pick.
- */
-export type Allocation = {
-  assistants: AllocatableAssistant[]
-  /** False on an archived classroom: the names show, the menus do not */
-  editable: boolean
-}
-
-/** Each allocatable row's TAs, keyed by `allocationTarget` */
-function allocationsOf(rows: RepoRow[]): Map<number, number[]> {
-  const byTarget = new Map<number, number[]>()
-  for (const row of rows) {
-    if (row.allocationTarget !== undefined) {
-      byTarget.set(row.allocationTarget, row.assistantIds ?? [])
-    }
-  }
-  return byTarget
-}
-
 /** A `RepoRow` once `label` (and, where checkpoints are tracked, `submission`)
  *  is resolved against the active tab — what every row below actually renders */
 type DisplayRow = RepoRow & { label: SubmissionLabel }
@@ -148,7 +125,7 @@ export function AssignmentRepoList({
   assignmentSlug,
   kind = 'individual',
   linkToStudent,
-  allocation,
+  allocation: allocationOption,
 }: {
   title: string
   rows: RepoRow[]
@@ -171,55 +148,25 @@ export function AssignmentRepoList({
   linkToStudent?: LinkToStudent
   allocation?: Allocation
 }) {
+  // Only where some row can take a TA: on a classroom with no roster every
+  // row is an account that skipped it, and the controls could do nothing
+  const allocation =
+    allocationOption && rows.some((row) => row.allocationTarget !== undefined)
+      ? allocationOption
+      : undefined
   const [query, setQuery] = useState('')
   /** 'none' or a TA id: the "Filtrar por ayudante" menu */
   const [assistantFilter, setAssistantFilter] = useState<Set<string>>(new Set())
 
-  // Who corrects each row, kept here rather than re-read from the server: an
-  // allocation answers with success and the list applies it itself, because
-  // revalidating would re-read every repository from GitHub. Re-seeded from
-  // `rows` whenever the page does re-render, for any other reason.
-  const [allocated, setAllocated] = useState(() => allocationsOf(rows))
-  const [allocatedFrom, setAllocatedFrom] = useState(rows)
-  if (allocatedFrom !== rows) {
-    setAllocatedFrom(rows)
-    setAllocated(allocationsOf(rows))
-  }
-  /** The `allocationTarget`s of the rows ticked for the bulk bar */
-  const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [allocationError, setAllocationError] = useState<string | null>(null)
-  const [allocating, startAllocating] = useTransition()
-
-  function applyAllocation(teachingAssistantId: number, targetIds: number[], allocate: boolean) {
-    setAllocationError(null)
-    startAllocating(async () => {
-      const result = await setAllocationAction({
-        classroomSlug,
-        assignmentSlug,
-        kind,
-        teachingAssistantId,
-        targetIds,
-        allocate,
-      })
-      if (result.error) {
-        setAllocationError(result.error)
-        return
-      }
-      setAllocated((previous) => {
-        const next = new Map(previous)
-        for (const target of targetIds) {
-          const current = next.get(target) ?? []
-          next.set(
-            target,
-            allocate
-              ? [...new Set([...current, teachingAssistantId])]
-              : current.filter((id) => id !== teachingAssistantId),
-          )
-        }
-        return next
-      })
-    })
-  }
+  const {
+    allocated,
+    selected,
+    setSelected,
+    toggleSelected,
+    error: allocationError,
+    pending: allocating,
+    apply: applyAllocation,
+  } = useAllocations({ rows, classroomSlug, assignmentSlug, kind })
 
   // Only a filter by TA reads the allocations; depending on them otherwise
   // would send the teacher back to page 1 on every toggle of a row's menu
@@ -340,7 +287,8 @@ export function AssignmentRepoList({
 
   // Back to the first page whenever the list underneath changes — a filter, a
   // sort or a search. `filtered` is a memo, so its identity is that change.
-  // The selection goes too: the bulk bar acts on rows the teacher can see
+  // The selection goes too, here and on a page change: the bulk bar acts on
+  // the rows the teacher can see
   const [lastFiltered, setLastFiltered] = useState(filtered)
   if (lastFiltered !== filtered) {
     setLastFiltered(filtered)
@@ -353,6 +301,7 @@ export function AssignmentRepoList({
 
   function goToPage(next: number) {
     setPage(next)
+    setSelected(new Set())
     // The live site navigates, so the browser lands at the top of the new
     // page; here the rows are replaced under a paginator that sits below the
     // fold, and without this the teacher would be left staring at its end
@@ -594,10 +543,9 @@ export function AssignmentRepoList({
           assistants={allocation.assistants}
           selectedCount={selected.size}
           pending={allocating}
-          onApply={(id, allocate) => {
-            applyAllocation(id, [...selected], allocate)
-            setSelected(new Set())
-          }}
+          // The selection is cleared once it went through, not before: a
+          // refused allocation leaves it there to retry
+          onApply={(id, allocate) => applyAllocation(id, [...selected], allocate, true)}
           onClear={() => setSelected(new Set())}
         />
       )}
@@ -652,15 +600,7 @@ export function AssignmentRepoList({
                           assigned: allocated.get(row.allocationTarget) ?? [],
                           selected: selected.has(row.allocationTarget),
                           pending: allocating,
-                          onSelect: (on) => {
-                            const target = row.allocationTarget!
-                            setSelected((previous) => {
-                              const next = new Set(previous)
-                              if (on) next.add(target)
-                              else next.delete(target)
-                              return next
-                            })
-                          },
+                          onSelect: (on) => toggleSelected(row.allocationTarget!, on),
                           onToggle: (id, allocate) =>
                             applyAllocation(id, [row.allocationTarget!], allocate),
                         }

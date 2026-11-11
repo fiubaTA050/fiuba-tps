@@ -1,7 +1,11 @@
 'use client'
 
 import { CheckIcon, PersonIcon, TriangleDownIcon } from '@primer/octicons-react'
+import { useState, useTransition } from 'react'
 
+import { setAllocationAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
+import type { AssignmentKind } from '@/lib/assignment-paths'
+import type { RepoRow } from '@/lib/assignment-rows'
 import type { AllocatableAssistant } from '@/lib/data/teaching-assistants'
 
 /**
@@ -10,6 +14,122 @@ import type { AllocatableAssistant } from '@/lib/data/teaching-assistants'
  * docs/teaching-assistants.md). Built from the same `<details>` + ActionList
  * markup as CheckboxMenu, so the menus read like the filter bar above them.
  */
+
+/**
+ * Who corrects each row, for a teacher. Absent for a TA and on a classroom
+ * with no TAs, where there is nothing to show or pick.
+ */
+export type Allocation = {
+  assistants: AllocatableAssistant[]
+  /** False on an archived classroom: the names show, the menus do not */
+  editable: boolean
+}
+
+/** Each allocatable row's TAs, keyed by `allocationTarget` */
+function allocationsOf(rows: RepoRow[]): Map<number, number[]> {
+  const byTarget = new Map<number, number[]>()
+  for (const row of rows) {
+    if (row.allocationTarget !== undefined) {
+      byTarget.set(row.allocationTarget, row.assistantIds ?? [])
+    }
+  }
+  return byTarget
+}
+
+/**
+ * The allocations of a dashboard's rows and the selection of the bulk bar.
+ *
+ * Kept on the client rather than re-read from the server: an allocation
+ * answers with success and the list applies it itself, because revalidating
+ * would re-read every repository from GitHub. Re-seeded from `rows` whenever
+ * the page does re-render, for any other reason.
+ */
+export function useAllocations({
+  rows,
+  classroomSlug,
+  assignmentSlug,
+  kind,
+}: {
+  rows: RepoRow[]
+  classroomSlug: string
+  assignmentSlug: string
+  kind: AssignmentKind
+}) {
+  const [allocated, setAllocated] = useState(() => allocationsOf(rows))
+  const [seededFrom, setSeededFrom] = useState(rows)
+  if (seededFrom !== rows) {
+    setSeededFrom(rows)
+    setAllocated(allocationsOf(rows))
+  }
+
+  /** The `allocationTarget`s of the rows ticked for the bulk bar */
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [error, setError] = useState<string | null>(null)
+  const [pending, startTransition] = useTransition()
+
+  function toggleSelected(target: number, on: boolean) {
+    setSelected((previous) => {
+      const next = new Set(previous)
+      if (on) next.add(target)
+      else next.delete(target)
+      return next
+    })
+  }
+
+  /**
+   * Allocates a TA to `targetIds`, or takes them off. `clearSelection` is the
+   * bulk bar's: the ticks go once the change went through, and stay for a
+   * retry when it did not.
+   */
+  function apply(
+    teachingAssistantId: number,
+    targetIds: number[],
+    allocate: boolean,
+    clearSelection = false,
+  ) {
+    setError(null)
+    startTransition(async () => {
+      let result: { error: string | null }
+      try {
+        result = await setAllocationAction({
+          classroomSlug,
+          assignmentSlug,
+          kind,
+          teachingAssistantId,
+          targetIds,
+          allocate,
+        })
+      } catch {
+        // A dropped connection or a server failure. Uncaught, React would
+        // hand it to the error boundary and take the whole dashboard with it
+        setError('No pudimos guardar la asignación. Probá de nuevo.')
+        return
+      }
+
+      if (result.error) {
+        setError(result.error)
+        return
+      }
+
+      setAllocated((previous) => {
+        const next = new Map(previous)
+        for (const target of targetIds) {
+          const current = next.get(target) ?? []
+          next.set(
+            target,
+            allocate
+              ? [...new Set([...current, teachingAssistantId])]
+              : current.filter((id) => id !== teachingAssistantId),
+          )
+        }
+        return next
+      })
+      if (clearSelection) setSelected(new Set())
+    })
+  }
+
+  return { allocated, selected, setSelected, toggleSelected, error, pending, apply }
+}
 
 function loginOf(assistants: AllocatableAssistant[], id: number): string {
   const login = assistants.find((assistant) => assistant.id === id)?.githubLogin
