@@ -7,6 +7,7 @@ import { ClassroomNav, type ClassroomTab } from '@/components/ClassroomNav'
 import { countAssignments } from '@/lib/data/assignments'
 import type { ClassroomListItem } from '@/lib/data/organizations'
 import { rosterSummary } from '@/lib/data/rosters'
+import { countClassroomStaff } from '@/lib/data/teaching-assistants'
 
 /**
  * The frame around a classroom screen: breadcrumb, title band, tabs.
@@ -35,11 +36,12 @@ export async function ClassroomShell({
   tab: ClassroomTab
   children: React.ReactNode
 }) {
-  // Both are indexed counts, and `findClassroom` — the expensive part of the
+  // All three are indexed counts, and `findClassroom` — the expensive part of the
   // page, two GitHub calls — is already memoised per request
-  const [assignmentCount, roster] = await Promise.all([
+  const [assignmentCount, roster, staffCount] = await Promise.all([
     countAssignments(session, classroom.slug),
     rosterSummary(session, classroom.slug),
+    countClassroomStaff(session, classroom.slug),
   ])
 
   return (
@@ -91,6 +93,7 @@ export async function ClassroomShell({
                 tab={tab}
                 assignmentCount={assignmentCount}
                 studentCount={roster?.count ?? null}
+                staffCount={staffCount}
               />
             </div>
           </div>

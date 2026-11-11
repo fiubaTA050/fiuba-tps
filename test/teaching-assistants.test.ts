@@ -3,10 +3,12 @@ import type { Session } from 'next-auth'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  assignmentRepos,
   assignments,
   groupAssignments,
   groupings,
   groups,
+  groupsUsers,
   organizations,
   organizationsUsers,
   rosterEntries,
@@ -38,7 +40,19 @@ vi.mock('@/lib/github/organizations', () => ({
   findInstallationAccount: vi.fn(),
 }))
 
+const findGitHubUserByLogin = vi.fn()
+
+vi.mock('@/lib/github/users', () => ({
+  findGitHubUserByLogin: (...args: unknown[]) => findGitHubUserByLogin(...args),
+}))
+
 const { findClassroomRole, findTeachingClassroom } = await import('@/lib/data/organizations')
+const {
+  addTeachingAssistant,
+  countClassroomStaff,
+  listClassroomStaff,
+  removeTeachingAssistant,
+} = await import('@/lib/data/teaching-assistants')
 const { createApiKey, sessionFromApiKey } = await import('@/lib/data/api-keys')
 
 let nextUid = 1
@@ -152,6 +166,7 @@ let ta: Session
 beforeEach(async () => {
   ;({ db } = await createTestDatabase())
   nextUid = 1
+  findGitHubUserByLogin.mockReset()
   profe = await user('profe')
   ta = await user('ayudante')
 })
@@ -447,5 +462,238 @@ describe('the boundary every existing function uses', () => {
 
     expect(await findTeachingClassroom(ta, 'sd-2026-1')).toBeNull()
     expect(await findTeachingClassroom(profe, 'sd-2026-1')).toMatchObject({ id: org })
+  })
+})
+
+/** What `GET /users/{login}` answers for an account that exists */
+function githubAccount(id: number, login: string) {
+  return {
+    id,
+    login,
+    name: null,
+    avatarUrl: `https://avatars.githubusercontent.com/u/${id}`,
+    htmlUrl: `https://github.com/${login}`,
+  }
+}
+
+describe('addTeachingAssistant', () => {
+  it('adds an account that never signed in, creating its users row by GitHub id', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    findGitHubUserByLogin.mockResolvedValue(githubAccount(517713, 'eespina-hu'))
+
+    const result = await addTeachingAssistant(profe, 'sd-2026-1', '  @eespina-hu ')
+
+    expect(result).toEqual({ success: true, login: 'eespina-hu' })
+    expect(findGitHubUserByLogin).toHaveBeenCalledWith(profe, 'eespina-hu')
+    const [row] = await db
+      .select({ uid: users.uid, organizationId: teachingAssistants.organizationId })
+      .from(teachingAssistants)
+      .innerJoin(users, eq(users.id, teachingAssistants.userId))
+    expect(row).toEqual({ uid: 517713, organizationId: org })
+  })
+
+  it('reuses the users row of an account that already signed in, and catches a rename', async () => {
+    await classroom('sd-2026-1', profe)
+    findGitHubUserByLogin.mockResolvedValue(githubAccount(ta.user.uid, 'ayudante-renombrado'))
+
+    await addTeachingAssistant(profe, 'sd-2026-1', 'ayudante-renombrado')
+
+    const all = await db.select().from(users)
+    expect(all).toHaveLength(2)
+    expect(all.find((u) => u.id === idOf(ta))?.githubLogin).toBe('ayudante-renombrado')
+    expect(await findClassroomRole(ta, 'sd-2026-1')).toMatchObject({ role: 'assistant' })
+  })
+
+  it('refuses a malformed login without asking GitHub', async () => {
+    await classroom('sd-2026-1', profe)
+
+    for (const login of ['', 'con espacio', '-guion', 'doble--guion', 'a'.repeat(40)]) {
+      expect(await addTeachingAssistant(profe, 'sd-2026-1', login)).toMatchObject({
+        success: false,
+      })
+    }
+    expect(findGitHubUserByLogin).not.toHaveBeenCalled()
+  })
+
+  it('refuses an account GitHub does not know', async () => {
+    await classroom('sd-2026-1', profe)
+    findGitHubUserByLogin.mockResolvedValue(null)
+
+    expect(await addTeachingAssistant(profe, 'sd-2026-1', 'nadie')).toEqual({
+      success: false,
+      error: 'No existe la cuenta @nadie en GitHub.',
+    })
+    expect(await db.select().from(teachingAssistants)).toHaveLength(0)
+  })
+
+  it('refuses an account that is already a TA or a teacher of the classroom', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+
+    findGitHubUserByLogin.mockResolvedValue(githubAccount(ta.user.uid, 'ayudante'))
+    expect(await addTeachingAssistant(profe, 'sd-2026-1', 'ayudante')).toEqual({
+      success: false,
+      error: '@ayudante ya es ayudante de este classroom.',
+    })
+
+    findGitHubUserByLogin.mockResolvedValue(githubAccount(profe.user.uid, 'profe'))
+    expect(await addTeachingAssistant(profe, 'sd-2026-1', 'profe')).toEqual({
+      success: false,
+      error: '@profe ya es profesor de este classroom.',
+    })
+  })
+
+  it('refuses a student of the classroom, however they are one', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const porPadron = await user('por-padron')
+    const porRepo = await user('por-repo')
+    const porEquipo = await user('por-equipo')
+
+    const [roster] = await db
+      .insert(rosters)
+      .values({ identifierName: 'Padrón' })
+      .returning({ id: rosters.id })
+    await db.update(organizations).set({ rosterId: roster.id }).where(eq(organizations.id, org))
+    await db
+      .insert(rosterEntries)
+      .values({ rosterId: roster.id, identifier: '100000', userId: idOf(porPadron) })
+
+    const tp0 = await assignment(org, profe, 'tp0')
+    await db
+      .insert(assignmentRepos)
+      .values({ githubRepoId: 1, assignmentId: tp0, userId: idOf(porRepo) })
+
+    const set = await grouping(org, 'equipos')
+    const los = await team(set, org, 'los-raft')
+    await db
+      .insert(groupsUsers)
+      .values({ groupId: los, groupingId: set, userId: idOf(porEquipo) })
+
+    for (const student of [porPadron, porRepo, porEquipo]) {
+      const login = student.user.githubLogin
+      findGitHubUserByLogin.mockResolvedValue(githubAccount(student.user.uid, login))
+      expect(await addTeachingAssistant(profe, 'sd-2026-1', login)).toEqual({
+        success: false,
+        error: `@${login} es alumno de este classroom: no puede ser ayudante.`,
+      })
+    }
+    expect(await db.select().from(teachingAssistants)).toHaveLength(0)
+  })
+
+  it('accepts a student of another classroom', async () => {
+    await classroom('sd-2026-1', profe)
+    const other = await classroom('sd-2025-2', profe)
+    const exAlumno = await user('ex-alumno')
+    const tp0 = await assignment(other, profe, 'tp0-viejo')
+    await db
+      .insert(assignmentRepos)
+      .values({ githubRepoId: 1, assignmentId: tp0, userId: idOf(exAlumno) })
+    findGitHubUserByLogin.mockResolvedValue(githubAccount(exAlumno.user.uid, 'ex-alumno'))
+
+    expect(await addTeachingAssistant(profe, 'sd-2026-1', 'ex-alumno')).toMatchObject({
+      success: true,
+    })
+  })
+
+  it('refuses on an archived classroom', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await db.update(organizations).set({ archivedAt: new Date() }).where(eq(organizations.id, org))
+
+    expect(await addTeachingAssistant(profe, 'sd-2026-1', 'ayudante')).toMatchObject({
+      success: false,
+    })
+    expect(findGitHubUserByLogin).not.toHaveBeenCalled()
+  })
+
+  it('is closed to a TA of the classroom', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+    const otro = await user('otro')
+    findGitHubUserByLogin.mockResolvedValue(githubAccount(otro.user.uid, 'otro'))
+
+    expect(await addTeachingAssistant(ta, 'sd-2026-1', 'otro')).toEqual({
+      success: false,
+      error: 'No se encontró el classroom.',
+    })
+  })
+})
+
+describe('removeTeachingAssistant', () => {
+  it('removes the TA and its allocations', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+    await db.insert(teachingAssistantAllocations).values({
+      teachingAssistantId: taId,
+      organizationId: org,
+      assignmentId: await assignment(org, profe, 'tp0'),
+      rosterEntryId: await rosterEntry('100000'),
+      createdByUserId: idOf(profe),
+    })
+
+    expect(await removeTeachingAssistant(profe, 'sd-2026-1', taId)).toEqual({
+      success: true,
+      login: 'ayudante',
+    })
+    expect(await db.select().from(teachingAssistantAllocations)).toHaveLength(0)
+    expect(await findClassroomRole(ta, 'sd-2026-1')).toBeNull()
+  })
+
+  it('refuses the TA id of another classroom', async () => {
+    await classroom('sd-2026-1', profe)
+    const other = await classroom('sd-2025-2', await user('otro-profe'))
+    const taId = await assistant(other, ta, profe)
+
+    expect(await removeTeachingAssistant(profe, 'sd-2026-1', taId)).toMatchObject({
+      success: false,
+    })
+    expect(await db.select().from(teachingAssistants)).toHaveLength(1)
+  })
+
+  it('works on an archived classroom', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+    await db.update(organizations).set({ archivedAt: new Date() }).where(eq(organizations.id, org))
+
+    expect(await removeTeachingAssistant(profe, 'sd-2026-1', taId)).toMatchObject({
+      success: true,
+    })
+  })
+
+  it('is closed to a TA, even to remove themselves', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const taId = await assistant(org, ta, profe)
+
+    expect(await removeTeachingAssistant(ta, 'sd-2026-1', taId)).toMatchObject({
+      success: false,
+    })
+    expect(await db.select().from(teachingAssistants)).toHaveLength(1)
+  })
+})
+
+describe('listClassroomStaff and countClassroomStaff', () => {
+  it('lists teachers and TAs, flagging a TA who is also a teacher', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    const ascendido = await user('ascendido')
+    await assistant(org, ta, profe)
+    await assistant(org, ascendido, profe)
+    await db.insert(organizationsUsers).values({ organizationId: org, userId: idOf(ascendido) })
+
+    const staff = await listClassroomStaff(profe, 'sd-2026-1')
+
+    expect(staff?.teachers.map((t) => t.githubLogin)).toEqual(['ascendido', 'profe'])
+    expect(staff?.assistants).toEqual([
+      expect.objectContaining({ githubLogin: 'ascendido', alsoTeacher: true }),
+      expect.objectContaining({ githubLogin: 'ayudante', alsoTeacher: false }),
+    ])
+    // Three people: `ascendido` is on both lists
+    expect(await countClassroomStaff(profe, 'sd-2026-1')).toBe(3)
+  })
+
+  it('is null for a TA, who gets no tab', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+
+    expect(await listClassroomStaff(ta, 'sd-2026-1')).toBeNull()
+    expect(await countClassroomStaff(ta, 'sd-2026-1')).toBeNull()
   })
 })

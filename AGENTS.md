@@ -50,8 +50,9 @@ reference code without mental translation. The confusing one:
   views have a GeoPattern banner and a side menu. The cátedra uses the live one
   every day, so `components/ClassroomShell` and `components/ClassroomNav` copy
   its markup, and `app/globals.css` its `.UnderlineNav` / `.Counter` /
-  `.breadcrumb-item` rules. Only two tabs exist here — the other two have
-  nothing behind them yet. The shell is composed by each page instead of being
+  `.breadcrumb-item` rules. Three tabs exist here: "TAs and Admins" is
+  "Docentes", drawn only for a teacher, and Settings has nothing behind it
+  yet. The shell is composed by each page instead of being
   a layout, because the new-assignment screen and the two assignment dashboards
   wear only the breadcrumb, the same as the live site, and a layout cannot opt
   a route out. **The screens inside the shell are still ported from the Rails
@@ -302,7 +303,8 @@ reference code without mental translation. The confusing one:
 - **Teaching assistants follow `docs/teaching-assistants.md`**, which records
   why a TA is a role of this app and not an org owner, and why it lives in its
   own table instead of a role column on `organizations_users`. The tables and
-  `findClassroomRole` exist; no screen uses them yet.
+  `findClassroomRole` exist, and the "Docentes" tab adds and removes TAs;
+  nothing lets a TA in yet.
 - **Importing an export of the live GitHub Classroom follows
   `docs/importar-el-export-de-github-classroom.md`**. The export is a dump of
   the public Classroom API, so what it cannot answer — the App installation,
