@@ -113,6 +113,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
 
     async session({ session, token }) {
       session.accessToken = token.accessToken as string
+      // The only path that marks a session as a browser login, which is what
+      // `findClassroomRole` asks before granting a teaching assistant's role
+      session.via = 'browser'
       session.user.uid = token.uid as number
       session.user.githubLogin = token.githubLogin as string
 

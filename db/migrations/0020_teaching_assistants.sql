@@ -15,10 +15,9 @@ CREATE TABLE "teaching_assistant_allocations" (
 	"group_id" integer,
 	"created_by_user_id" integer NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "teaching_assistant_allocations_one_target" CHECK (("teaching_assistant_allocations"."assignment_id" is not null and "teaching_assistant_allocations"."roster_entry_id" is not null
-        and "teaching_assistant_allocations"."group_assignment_id" is null and "teaching_assistant_allocations"."grouping_id" is null and "teaching_assistant_allocations"."group_id" is null)
-       or ("teaching_assistant_allocations"."assignment_id" is null and "teaching_assistant_allocations"."roster_entry_id" is null
-        and "teaching_assistant_allocations"."group_assignment_id" is not null and "teaching_assistant_allocations"."grouping_id" is not null and "teaching_assistant_allocations"."group_id" is not null))
+	CONSTRAINT "teaching_assistant_allocations_one_target" CHECK (num_nonnulls("teaching_assistant_allocations"."assignment_id", "teaching_assistant_allocations"."roster_entry_id") in (0, 2)
+        and num_nonnulls("teaching_assistant_allocations"."group_assignment_id", "teaching_assistant_allocations"."grouping_id", "teaching_assistant_allocations"."group_id") in (0, 3)
+        and num_nonnulls("teaching_assistant_allocations"."assignment_id", "teaching_assistant_allocations"."group_assignment_id") = 1)
 );
 --> statement-breakpoint
 CREATE TABLE "teaching_assistants" (

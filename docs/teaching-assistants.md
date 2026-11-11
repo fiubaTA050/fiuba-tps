@@ -175,10 +175,13 @@ solo para profesores **sin tocarlo**. A los TAs se les abren, una por una,
   repositorios del TA.
 - **Sesiones de API key.** Cualquier usuario puede crear una API key en
   `/settings/api-keys`, y un TA también puede ser profesor en otro classroom,
-  así que no alcanza con impedirle crearla. `sessionFromApiKey` marca la
-  sesión (por ejemplo `session.via = 'api-key'`) y `findClassroomRole` nunca
-  devuelve `assistant` para una sesión así. Las herramientas MCP llaman a las
-  mismas funciones, de modo que quedan cerradas para los TAs sin tocarlas.
+  así que no alcanza con impedirle crearla. El callback `session` de
+  `auth.ts` marca cada login del navegador con `via: 'browser'`, y
+  `findClassroomRole` solo devuelve `assistant` para una sesión con esa marca.
+  `sessionFromApiKey` pone `via: 'api-key'`, y una sesión armada a mano en
+  otro lado no tiene ninguna: las dos quedan afuera por defecto. Las
+  herramientas MCP llaman a las mismas funciones, de modo que quedan cerradas
+  para los TAs sin tocarlas.
 - **Worker de corrección.** `leaseSubmissionForGrading` solo mira
   `organizations_users`. No cambia.
 

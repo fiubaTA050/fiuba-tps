@@ -1174,12 +1174,12 @@ export const teachingAssistantAllocations = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    // Each pair complete or empty, and exactly one of the two set
     check(
       'teaching_assistant_allocations_one_target',
-      sql`(${table.assignmentId} is not null and ${table.rosterEntryId} is not null
-        and ${table.groupAssignmentId} is null and ${table.groupingId} is null and ${table.groupId} is null)
-       or (${table.assignmentId} is null and ${table.rosterEntryId} is null
-        and ${table.groupAssignmentId} is not null and ${table.groupingId} is not null and ${table.groupId} is not null)`,
+      sql`num_nonnulls(${table.assignmentId}, ${table.rosterEntryId}) in (0, 2)
+        and num_nonnulls(${table.groupAssignmentId}, ${table.groupingId}, ${table.groupId}) in (0, 3)
+        and num_nonnulls(${table.assignmentId}, ${table.groupAssignmentId}) = 1`,
     ),
     foreignKey({
       columns: [table.teachingAssistantId, table.organizationId],

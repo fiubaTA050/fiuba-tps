@@ -378,10 +378,13 @@ export type ClassroomRole =
  * owner of the org is linked as a teacher by the classroom index, and keeps
  * their stale TA row until somebody removes it.
  *
- * A session built from an API key (`via: 'api-key'`) never gets the TA role.
- * Anyone can create a key, and a TA of one classroom can be a teacher of
- * another, so refusing the key would not do; refusing the role does, and the
- * MCP tools — which call these same functions — stay closed to TAs untouched.
+ * The TA role is only granted to a browser login (`via: 'browser'`, set by the
+ * `session` callback of auth.ts). An API key session never gets it: anyone can
+ * create a key, and a TA of one classroom can be a teacher of another, so
+ * refusing the key would not do; refusing the role does, and the MCP tools —
+ * which call these same functions — stay closed to TAs untouched. Asking for
+ * the positive mark rather than the absence of 'api-key' keeps any session
+ * built by hand elsewhere out by default.
  */
 export async function findClassroomRole(
   session: Session,
@@ -424,7 +427,7 @@ export async function findClassroomRole(
   }
 
   if (row.teacherId !== null) return { role: 'teacher', classroom }
-  if (row.teachingAssistantId !== null && session.via !== 'api-key') {
+  if (row.teachingAssistantId !== null && session.via === 'browser') {
     return { role: 'assistant', classroom, teachingAssistantId: row.teachingAssistantId }
   }
 

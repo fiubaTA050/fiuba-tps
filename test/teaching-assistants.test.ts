@@ -53,8 +53,29 @@ async function user(login: string): Promise<Session> {
   return {
     accessToken: 'gho_test',
     expires: new Date(Date.now() + 3_600_000).toISOString(),
+    // What the `session` callback of auth.ts sets on every browser login
+    via: 'browser',
     user: { id: String(row.id), uid, githubLogin: login },
   } as Session
+}
+
+/**
+ * The name of the constraint a write was refused by. Asserting it, rather than
+ * just that the write threw, keeps each test on the rule it claims to cover:
+ * a fixture mistake would throw too. Drizzle wraps the driver error, so walk
+ * the cause chain — the same walk as `hasPostgresCode` in lib/data/postgres.ts.
+ */
+async function refusedBy(write: Promise<unknown>): Promise<string | undefined> {
+  try {
+    await write
+  } catch (error) {
+    for (let current = error; current; current = (current as { cause?: unknown }).cause) {
+      const constraint = (current as { constraint?: string }).constraint
+      if (constraint) return constraint
+    }
+    throw error
+  }
+  throw new Error('the write went through')
 }
 
 const idOf = (session: Session) => Number(session.user.id)
@@ -151,7 +172,9 @@ describe('teaching_assistant_allocations', () => {
 
     await db.insert(teachingAssistantAllocations).values(row)
 
-    await expect(db.insert(teachingAssistantAllocations).values(row)).rejects.toThrow()
+    expect(await refusedBy(db.insert(teachingAssistantAllocations).values(row))).toBe(
+      'index_ta_allocations_on_ta_and_roster_entry',
+    )
   })
 
   it('refuses a row that names both kinds, or neither', async () => {
@@ -164,21 +187,26 @@ describe('teaching_assistant_allocations', () => {
     const los = await team(set, org, 'los-raft')
     const base = { teachingAssistantId: taId, organizationId: org, createdByUserId: idOf(profe) }
 
-    await expect(
-      db.insert(teachingAssistantAllocations).values({
-        ...base,
+    const insert = (values: Partial<typeof teachingAssistantAllocations.$inferInsert>) =>
+      refusedBy(db.insert(teachingAssistantAllocations).values({ ...base, ...values }))
+
+    for (const values of [
+      // both kinds
+      {
         assignmentId: tp,
         rosterEntryId: entry,
         groupAssignmentId: tp1,
         groupingId: set,
         groupId: los,
-      }),
-    ).rejects.toThrow()
-    await expect(db.insert(teachingAssistantAllocations).values(base)).rejects.toThrow()
-    // Half a pair is not a target either
-    await expect(
-      db.insert(teachingAssistantAllocations).values({ ...base, assignmentId: tp }),
-    ).rejects.toThrow()
+      },
+      // neither
+      {},
+      // half a pair is not a target either
+      { assignmentId: tp },
+      { groupAssignmentId: tp1, groupingId: set },
+    ]) {
+      expect(await insert(values)).toBe('teaching_assistant_allocations_one_target')
+    }
   })
 
   it('refuses an assignment of another classroom', async () => {
@@ -188,15 +216,17 @@ describe('teaching_assistant_allocations', () => {
     const foreign = await assignment(other, profe, 'tp0-viejo')
     const entry = await rosterEntry('100000')
 
-    await expect(
-      db.insert(teachingAssistantAllocations).values({
-        teachingAssistantId: taId,
-        organizationId: org,
-        assignmentId: foreign,
-        rosterEntryId: entry,
-        createdByUserId: idOf(profe),
-      }),
-    ).rejects.toThrow()
+    expect(
+      await refusedBy(
+        db.insert(teachingAssistantAllocations).values({
+          teachingAssistantId: taId,
+          organizationId: org,
+          assignmentId: foreign,
+          rosterEntryId: entry,
+          createdByUserId: idOf(profe),
+        }),
+      ),
+    ).toBe('ta_allocations_assignment_fkey')
   })
 
   it('refuses a TA of another classroom', async () => {
@@ -206,15 +236,17 @@ describe('teaching_assistant_allocations', () => {
     const tp = await assignment(org, profe, 'tp0')
     const entry = await rosterEntry('100000')
 
-    await expect(
-      db.insert(teachingAssistantAllocations).values({
-        teachingAssistantId: taOfOther,
-        organizationId: org,
-        assignmentId: tp,
-        rosterEntryId: entry,
-        createdByUserId: idOf(profe),
-      }),
-    ).rejects.toThrow()
+    expect(
+      await refusedBy(
+        db.insert(teachingAssistantAllocations).values({
+          teachingAssistantId: taOfOther,
+          organizationId: org,
+          assignmentId: tp,
+          rosterEntryId: entry,
+          createdByUserId: idOf(profe),
+        }),
+      ),
+    ).toBe('ta_allocations_teaching_assistant_fkey')
   })
 
   it('refuses a team outside the grouping the assignment runs on', async () => {
@@ -233,13 +265,17 @@ describe('teaching_assistant_allocations', () => {
     }
 
     // Claiming the assignment's grouping: the team is not in it
-    await expect(
-      db.insert(teachingAssistantAllocations).values({ ...base, groupingId: set }),
-    ).rejects.toThrow()
+    expect(
+      await refusedBy(
+        db.insert(teachingAssistantAllocations).values({ ...base, groupingId: set }),
+      ),
+    ).toBe('ta_allocations_group_fkey')
     // Claiming the team's grouping: the assignment does not run on it
-    await expect(
-      db.insert(teachingAssistantAllocations).values({ ...base, groupingId: otherSet }),
-    ).rejects.toThrow()
+    expect(
+      await refusedBy(
+        db.insert(teachingAssistantAllocations).values({ ...base, groupingId: otherSet }),
+      ),
+    ).toBe('ta_allocations_group_assignment_fkey')
   })
 
   it('lets a team have several TAs in the same assignment', async () => {
@@ -320,7 +356,9 @@ describe('teaching_assistant_allocations', () => {
     const org = await classroom('sd-2026-1', profe)
     await assistant(org, ta, profe)
 
-    await expect(assistant(org, ta, profe)).rejects.toThrow()
+    expect(await refusedBy(assistant(org, ta, profe))).toBe(
+      'index_teaching_assistants_on_organization_id_and_user_id',
+    )
   })
 })
 
@@ -376,6 +414,15 @@ describe('findClassroomRole', () => {
     await db.insert(organizationsUsers).values({ organizationId: org, userId: idOf(ta) })
 
     expect(await findClassroomRole(ta, 'sd-2026-1')).toMatchObject({ role: 'teacher' })
+  })
+
+  it('never grants the TA role to a session not marked as a browser login', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+    // A session built by hand somewhere, with no `via` at all
+    const unmarked = { ...ta, via: undefined }
+
+    expect(await findClassroomRole(unmarked, 'sd-2026-1')).toBeNull()
   })
 
   it('never grants the TA role through an API key, and still grants teacher', async () => {

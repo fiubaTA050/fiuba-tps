@@ -293,7 +293,7 @@ export async function repositoryExists(
   }
 }
 
-function isNotFound(error: unknown): boolean {
+export function isNotFound(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'status' in error && error.status === 404
 }
 
