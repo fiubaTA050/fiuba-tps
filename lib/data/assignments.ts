@@ -1,9 +1,9 @@
 import 'server-only'
 
-import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, ne } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
-import { assignmentInvitations, assignments, checkpoints, groupAssignments } from '@/db/schema'
+import { assignmentInvitations, assignments, checkpoints } from '@/db/schema'
 import {
   findSlugClash,
   invitationKey,
@@ -116,33 +116,6 @@ export async function listAssignments(
     .orderBy(asc(assignments.id))
 
   return rows
-}
-
-/**
- * The counter of the Assignments tab. `@organization.assignments.count` in the
- * original's terms, except the original never showed one — the tab bar with
- * counters comes from the live site, see components/ClassroomNav.
- *
- * Counts both kinds: the tab lists both, so a counter that only saw the
- * individual ones would contradict the page under it.
- */
-export async function countAssignments(session: Session, classroomSlug: string): Promise<number> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
-  if (!classroom) return 0
-
-  const [individual] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(assignments)
-    .where(and(eq(assignments.organizationId, classroom.id), isNull(assignments.deletedAt)))
-
-  const [group] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(groupAssignments)
-    .where(
-      and(eq(groupAssignments.organizationId, classroom.id), isNull(groupAssignments.deletedAt)),
-    )
-
-  return individual.count + group.count
 }
 
 /**

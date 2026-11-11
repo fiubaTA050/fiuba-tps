@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
 
 import { EMPTY_STATE } from '@/app/classrooms/[slug]/roster/state'
 
@@ -13,6 +13,19 @@ import { addTeachingAssistantAction } from './actions'
  */
 export function AddTeachingAssistantForm({ classroomSlug }: { classroomSlug: string }) {
   const [state, action, pending] = useActionState(addTeachingAssistantAction, EMPTY_STATE)
+
+  // Controlled, the way AddStudentsDialog keeps its textarea: React 19 resets
+  // the uncontrolled fields of a `<form action>` whenever the action finishes,
+  // failures included, which would throw away the login the teacher is about
+  // to correct. Only a success — the one result carrying `submission` —
+  // empties it, adjusted during render as React asks for state that follows
+  // something from outside.
+  const [login, setLogin] = useState('')
+  const [handled, setHandled] = useState<string | undefined>(undefined)
+  if (state.submission && state.submission !== handled) {
+    setHandled(state.submission)
+    setLogin('')
+  }
 
   return (
     <form action={action}>
@@ -27,12 +40,12 @@ export function AddTeachingAssistantForm({ classroomSlug }: { classroomSlug: str
         </div>
         {/* Stacked under 544px: side by side, the button pushes the page wider */}
         <div className="form-group-body d-flex flex-column flex-sm-row flex-sm-items-center">
-          {/* Keyed by the submission, so a successful add empties the field */}
           <input
-            key={state.submission}
             id="teaching-assistant-login"
             name="login"
             type="text"
+            value={login}
+            onChange={(event) => setLogin(event.target.value)}
             className="form-control input-monospace mr-sm-2 mb-2 mb-sm-0"
             placeholder="usuario"
             autoComplete="off"

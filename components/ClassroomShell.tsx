@@ -4,10 +4,7 @@ import type { Session } from 'next-auth'
 
 import { Breadcrumb } from '@/components/Breadcrumb'
 import { ClassroomNav, type ClassroomTab } from '@/components/ClassroomNav'
-import { countAssignments } from '@/lib/data/assignments'
-import type { ClassroomListItem } from '@/lib/data/organizations'
-import { rosterSummary } from '@/lib/data/rosters'
-import { countClassroomStaff } from '@/lib/data/teaching-assistants'
+import { type ClassroomListItem, classroomCounters } from '@/lib/data/organizations'
 
 /**
  * The frame around a classroom screen: breadcrumb, title band, tabs.
@@ -36,13 +33,9 @@ export async function ClassroomShell({
   tab: ClassroomTab
   children: React.ReactNode
 }) {
-  // All three are indexed counts, and `findClassroom` — the expensive part of the
-  // page, two GitHub calls — is already memoised per request
-  const [assignmentCount, roster, staffCount] = await Promise.all([
-    countAssignments(session, classroom.slug),
-    rosterSummary(session, classroom.slug),
-    countClassroomStaff(session, classroom.slug),
-  ])
+  // One authorization lookup and four indexed counts; `findClassroom` — the
+  // expensive part of the page, two GitHub calls — is memoised per request
+  const counters = await classroomCounters(session, classroom.slug)
 
   return (
     <>
@@ -91,9 +84,9 @@ export async function ClassroomShell({
               <ClassroomNav
                 slug={classroom.slug}
                 tab={tab}
-                assignmentCount={assignmentCount}
-                studentCount={roster?.count ?? null}
-                staffCount={staffCount}
+                assignmentCount={counters?.assignments ?? 0}
+                studentCount={counters?.students ?? null}
+                staffCount={counters?.staff ?? null}
               />
             </div>
           </div>

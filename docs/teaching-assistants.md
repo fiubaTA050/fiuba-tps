@@ -169,6 +169,14 @@ solo para profesores **sin tocarlo**. A los TAs se les abren, una por una,
   Primero mira `organizations_users`, porque el profesor gana: si alguien
   quedó en las dos tablas, es profesor. Las funciones de la tabla lo usan; las
   demás siguen con `findTeachingClassroom` tal cual.
+- **Un ayudante que se vuelve alumno pierde el rol.** Cargar a un alumno como
+  ayudante se rechaza, pero nada en los flujos del alumno (aceptar un TP,
+  vincularse a un padrón, entrar a un equipo) sabe que existen los ayudantes.
+  Por eso `findClassroomRole` tampoco da el rol a quien es alumno del
+  classroom. Las dos puntas usan la misma definición, `isStudentOf` en
+  `lib/data/classroom-students.ts`: padrón vinculado, invitación aceptada
+  (aunque el repo todavía no exista), repo de un TP individual o lugar en un
+  equipo.
 - **Cómo se filtran las filas.** El filtro va en la consulta (un `exists`
   sobre `teaching_assistant_allocations`), no después de traer todo. Así el
   `listRepositorySnapshots` del dashboard solo le pide a GitHub los
@@ -206,7 +214,7 @@ pestaña.
   - la cuenta no existe;
   - ya es ayudante de este classroom;
   - ya es profesor de este classroom;
-  - es alumno de este classroom (padrón vinculado o miembro de un equipo).
+  - es alumno de este classroom (`isStudentOf`, ver arriba).
 
 El contador del tab suma profesores y ayudantes, como "TAs and Admins 1".
 

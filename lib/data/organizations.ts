@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
@@ -8,8 +8,10 @@ import {
   groupAssignments,
   organizations,
   organizationsUsers,
+  rosterEntries,
   teachingAssistants,
 } from '@/db/schema'
+import { asFlag, isStudentOf } from '@/lib/data/classroom-students'
 import { isUniqueViolation } from '@/lib/data/postgres'
 import { organizationSlug } from '@/lib/data/slug'
 import { db } from '@/lib/db'
@@ -358,6 +360,84 @@ export async function findTeachingClassroom(
   return row ?? null
 }
 
+/** The counters of the classroom's tab bar */
+export type ClassroomCounters = {
+  /**
+   * Live assignments of both kinds: the tab lists both, so a counter that only
+   * saw the individual ones would contradict the page under it. The original
+   * never showed one; the counters come from the live site (ClassroomNav).
+   */
+  assignments: number
+  /** Roster entries; null while the classroom has no roster, and the tab shows no counter */
+  students: number | null
+  /** Distinct people among teachers and TAs: someone on both lists is one */
+  staff: number
+}
+
+/**
+ * Everything `ClassroomShell` counts, behind one authorization lookup. It used
+ * to take one per counter — `countAssignments`, `rosterSummary` and the staff
+ * count each re-resolving the classroom by slug and user on every page of
+ * every classroom. Null for anybody but a teacher of the classroom.
+ */
+export async function classroomCounters(
+  session: Session,
+  slug: string,
+): Promise<ClassroomCounters | null> {
+  const [classroom] = await db
+    .select({ id: organizations.id, rosterId: organizations.rosterId })
+    .from(organizations)
+    .innerJoin(organizationsUsers, eq(organizationsUsers.organizationId, organizations.id))
+    .where(
+      and(
+        eq(organizations.slug, slug),
+        eq(organizationsUsers.userId, Number(session.user.id)),
+        isNull(organizations.deletedAt),
+      ),
+    )
+  if (!classroom) return null
+
+  const [[individual], [group], students, [staff]] = await Promise.all([
+    db
+      .select({ n: count() })
+      .from(assignments)
+      .where(and(eq(assignments.organizationId, classroom.id), isNull(assignments.deletedAt))),
+    db
+      .select({ n: count() })
+      .from(groupAssignments)
+      .where(
+        and(eq(groupAssignments.organizationId, classroom.id), isNull(groupAssignments.deletedAt)),
+      ),
+    classroom.rosterId === null
+      ? Promise.resolve(null)
+      : db
+          .select({ n: count() })
+          .from(rosterEntries)
+          .where(eq(rosterEntries.rosterId, classroom.rosterId)),
+    db
+      .select({ n: count() })
+      .from(
+        db
+          .select({ userId: organizationsUsers.userId })
+          .from(organizationsUsers)
+          .where(eq(organizationsUsers.organizationId, classroom.id))
+          .union(
+            db
+              .select({ userId: teachingAssistants.userId })
+              .from(teachingAssistants)
+              .where(eq(teachingAssistants.organizationId, classroom.id)),
+          )
+          .as('staff'),
+      ),
+  ])
+
+  return {
+    assignments: individual.n + group.n,
+    students: students === null ? null : students[0].n,
+    staff: staff.n,
+  }
+}
+
 /** Who the caller is in one classroom: see `findClassroomRole` */
 export type ClassroomRole =
   | { role: 'teacher'; classroom: TeachingClassroom }
@@ -385,6 +465,11 @@ export type ClassroomRole =
  * which call these same functions — stay closed to TAs untouched. Asking for
  * the positive mark rather than the absence of 'api-key' keeps any session
  * built by hand elsewhere out by default.
+ *
+ * Nor does a TA who is also a student of the classroom (`isStudentOf`).
+ * Adding one is refused, but nothing in the student flows — accepting a TP,
+ * claiming a padrón, joining a team — knows TAs exist, so a TA can become a
+ * student afterwards; the role is what has to hold the line, not each flow.
  */
 export async function findClassroomRole(
   session: Session,
@@ -399,6 +484,7 @@ export async function findClassroomRole(
       archivedAt: organizations.archivedAt,
       teacherId: organizationsUsers.userId,
       teachingAssistantId: teachingAssistants.id,
+      student: asFlag(isStudentOf(organizations.id, userId)),
     })
     .from(organizations)
     .leftJoin(
@@ -427,7 +513,7 @@ export async function findClassroomRole(
   }
 
   if (row.teacherId !== null) return { role: 'teacher', classroom }
-  if (row.teachingAssistantId !== null && session.via === 'browser') {
+  if (row.teachingAssistantId !== null && session.via === 'browser' && !row.student) {
     return { role: 'assistant', classroom, teachingAssistantId: row.teachingAssistantId }
   }
 

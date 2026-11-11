@@ -136,6 +136,17 @@ export default async function StaffPage(
   )
 }
 
+/**
+ * The avatar by account id when `users` has it — every row this tab adds does
+ * — so a rename cannot put someone else's face on the row. By login only for
+ * a row that never stored one.
+ */
+function avatarSource(member: StaffMember): string {
+  const url = member.githubAvatarUrl
+  if (!url) return `https://github.com/${member.githubLogin}.png?size=64`
+  return `${url}${url.includes('?') ? '&' : '?'}s=64`
+}
+
 /** Avatar and login, the live row's `avatar circle` + bold link */
 function Member({ member }: { member: StaffMember }) {
   if (!member.githubLogin) return <span className="color-fg-muted">Cuenta sin login</span>
@@ -144,7 +155,7 @@ function Member({ member }: { member: StaffMember }) {
     <span className="d-inline-flex flex-items-center">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={`https://github.com/${member.githubLogin}.png?size=64`}
+        src={avatarSource(member)}
         className="avatar circle"
         height={32}
         width={32}
