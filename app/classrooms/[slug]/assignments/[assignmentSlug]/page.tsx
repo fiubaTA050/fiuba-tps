@@ -9,7 +9,6 @@ import { listAssignmentAcceptances } from '@/lib/data/invitations'
 import { currentInstallationId, findClassroomInstallation } from '@/lib/data/organizations'
 import { listUnlinkedEntries } from '@/lib/data/rosters'
 import { listAssignmentSubmissions } from '@/lib/data/submissions'
-import { listAllocations } from '@/lib/data/teaching-assistants'
 import { findRepositoryById, listRepositorySnapshots } from '@/lib/github/repositories'
 import { isUsableSession } from '@/lib/session'
 import { baseUrl, invitationUrl } from '@/lib/url'
@@ -42,9 +41,9 @@ export default async function AssignmentPage(
   // A teaching assistant reads this dashboard too, narrowed to the padrones
   // allocated to them: `allowAssistant` is the opt-in of every reader they may
   // reach (docs/teaching-assistants.md). The rest stay teacher-only and come
-  // back null for them — the dialogs to link an account, the allocations.
+  // back null for them — the dialogs to link an account.
   const access = { allowAssistant: true }
-  const [classroom, assignment, acceptances, unlinkedEntries, submissions, allocations] =
+  const [classroom, assignment, acceptances, unlinkedEntries, submissions] =
     await Promise.all([
     findClassroomInstallation(session, slug, access),
     findAssignment(session, slug, assignmentSlug, access),
@@ -58,8 +57,6 @@ export default async function AssignmentPage(
     // every row below reads correctly as "sin confirmar" without a special
     // case here.
     listAssignmentSubmissions(session, slug, assignmentSlug, 'individual', access),
-    // Who corrects each padrón: the menus on every row
-    listAllocations(session, slug, assignmentSlug, 'individual'),
   ])
 
   if (!classroom || !assignment || !acceptances || !submissions) notFound()
@@ -239,7 +236,12 @@ export default async function AssignmentPage(
           classroomSlug={classroom.slug}
           assignmentSlug={assignment.slug}
           unlinkedEntries={unlinkedEntries}
-          allocations={allocations}
+          // Allocating TAs is hidden on individual assignments for now: the
+          // cátedra only splits group TPs between them. The data layer and
+          // `AcceptanceList` still handle padrones, so showing it again is
+          // passing `listAllocations(…, 'individual')` here — see
+          // docs/teaching-assistants.md
+          allocations={null}
           archived={classroom.archivedAt !== null}
           teacher={classroom.role === 'teacher'}
         />

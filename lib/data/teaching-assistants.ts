@@ -288,7 +288,12 @@ export async function removeTeachingAssistant(
 }
 
 /** A TA as the dashboard's menus offer it */
-export type AllocatableAssistant = { id: number; githubLogin: string | null }
+export type AllocatableAssistant = {
+  id: number
+  githubLogin: string | null
+  /** Keyed by the account id, as on `StaffMember` */
+  githubAvatarUrl: string | null
+}
 
 /**
  * Who corrects what in one assignment, for the teacher's dashboard. A target
@@ -316,7 +321,11 @@ export async function listAllocations(
   if (!found?.assignment) return null
 
   const assistants = await db
-    .select({ id: teachingAssistants.id, githubLogin: users.githubLogin })
+    .select({
+      id: teachingAssistants.id,
+      githubLogin: users.githubLogin,
+      githubAvatarUrl: users.githubAvatarUrl,
+    })
     .from(teachingAssistants)
     .innerJoin(users, eq(users.id, teachingAssistants.userId))
     .where(eq(teachingAssistants.organizationId, found.classroom.id))

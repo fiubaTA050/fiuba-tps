@@ -26,7 +26,12 @@ import type { CheckpointSubmissions, SubmissionRow } from '@/lib/data/submission
 import type { AllocatableAssistant } from '@/lib/data/teaching-assistants'
 import { formatArgentina } from '@/lib/dates'
 
-import { type Allocation, AllocationBar, AssistantRowMenu, useAllocations } from './AllocationControls'
+import {
+  type Allocation,
+  AssistantRowMenu,
+  BulkAllocationMenu,
+  useAllocations,
+} from './AllocationControls'
 import { CheckboxMenu } from './CheckboxMenu'
 import { LinkToStudentDialog } from './LinkToStudentDialog'
 import { Pagination } from './Pagination'
@@ -167,9 +172,6 @@ export function AssignmentRepoList({
 
   const {
     allocated,
-    selected,
-    setSelected,
-    toggleSelected,
     error: allocationError,
     pending: allocating,
     apply: applyAllocation,
@@ -294,13 +296,10 @@ export function AssignmentRepoList({
 
   // Back to the first page whenever the list underneath changes — a filter, a
   // sort or a search. `filtered` is a memo, so its identity is that change.
-  // The selection goes too, here and on a page change: the bulk bar acts on
-  // the rows the teacher can see
   const [lastFiltered, setLastFiltered] = useState(filtered)
   if (lastFiltered !== filtered) {
     setLastFiltered(filtered)
     setPage(1)
-    setSelected(new Set())
   }
 
   const pageCount = Math.ceil(filtered.length / PER_PAGE)
@@ -308,21 +307,28 @@ export function AssignmentRepoList({
 
   function goToPage(next: number) {
     setPage(next)
-    setSelected(new Set())
     // The live site navigates, so the browser lands at the top of the new
     // page; here the rows are replaced under a paginator that sits below the
     // fold, and without this the teacher would be left staring at its end
     listTop.current?.scrollIntoView({ block: 'start' })
   }
 
-  const dirty =
+  /** Some filter or search leaves rows out: what the bulk allocation acts on */
+  const narrowed =
     query !== '' ||
     submission.size > 0 ||
     passing.size > 0 ||
     accepted.size > 0 ||
     unlinked.size > 0 ||
-    assistantFilter.size > 0 ||
-    sort !== 'az'
+    assistantFilter.size > 0
+  const dirty = narrowed || sort !== 'az'
+
+  // Every page of them, not only the visible one: "Sin asignar" over sixty
+  // teams is one action, not three
+  const bulkTargets =
+    allocation?.editable && narrowed
+      ? filtered.flatMap((row) => (row.allocationTarget === undefined ? [] : [row.allocationTarget]))
+      : []
 
   function clear() {
     setQuery('')
@@ -545,35 +551,20 @@ export function AssignmentRepoList({
 
       {allocationError && <div className="flash flash-error mt-3">{allocationError}</div>}
 
-      {allocation?.editable && selected.size > 0 && (
-        <AllocationBar
-          assistants={allocation.assistants}
-          selectedCount={selected.size}
-          pending={allocating}
-          // The selection is cleared once it went through, not before: a
-          // refused allocation leaves it there to retry
-          onApply={(id, allocate) => applyAllocation(id, [...selected], allocate, true)}
-          onClear={() => setSelected(new Set())}
-        />
-      )}
-
       {/* `<div class="mt-3">` around the list on the live site */}
       <div className="Box Box--condensed mt-3" ref={listTop}>
         <div className="Box-header">
           <div className="d-table col-12">
-            <div className="Box-title col-6 d-table-cell">
-              {allocation?.editable && (
-                <SelectVisible
-                  targets={visible.flatMap((row) =>
-                    row.allocationTarget === undefined ? [] : [row.allocationTarget],
-                  )}
-                  selected={selected}
-                  onChange={setSelected}
+            <div className="Box-title col-6 d-table-cell v-align-middle">{title}</div>
+            <div className="col-6 d-table-cell text-right color-fg-muted text-small v-align-middle">
+              {allocation && bulkTargets.length > 0 && (
+                <BulkAllocationMenu
+                  assistants={allocation.assistants}
+                  count={bulkTargets.length}
+                  pending={allocating}
+                  onApply={(id, allocate) => applyAllocation(id, bulkTargets, allocate)}
                 />
               )}
-              {title}
-            </div>
-            <div className="col-6 d-table-cell text-right color-fg-muted text-small">
               {filtered.length === resolvedRows.length
                 ? `${resolvedRows.length}`
                 : `${filtered.length} de ${resolvedRows.length}`}
@@ -599,16 +590,13 @@ export function AssignmentRepoList({
                   kind={kind}
                   linkToStudent={linkToStudent}
                   teacher={teacher}
-                  selectionGutter={allocation?.editable === true}
                   allocation={
                     allocation && row.allocationTarget !== undefined
                       ? {
                           assistants: allocation.assistants,
                           editable: allocation.editable,
                           assigned: allocated.get(row.allocationTarget) ?? [],
-                          selected: selected.has(row.allocationTarget),
                           pending: allocating,
-                          onSelect: (on) => toggleSelected(row.allocationTarget!, on),
                           onToggle: (id, allocate) =>
                             applyAllocation(id, [row.allocationTarget!], allocate),
                         }
@@ -671,41 +659,6 @@ function CheckpointTabs({
   )
 }
 
-/** The header's checkbox: ticks or unticks every allocatable row of the page */
-function SelectVisible({
-  targets,
-  selected,
-  onChange,
-}: {
-  targets: number[]
-  selected: Set<number>
-  onChange: (next: Set<number>) => void
-}) {
-  const ticked = targets.filter((target) => selected.has(target)).length
-  const all = targets.length > 0 && ticked === targets.length
-
-  return (
-    <input
-      type="checkbox"
-      className="mr-2 v-align-middle"
-      aria-label="Seleccionar las filas de esta página"
-      disabled={targets.length === 0}
-      checked={all}
-      ref={(input) => {
-        if (input) input.indeterminate = ticked > 0 && !all
-      }}
-      onChange={() => {
-        const next = new Set(selected)
-        for (const target of targets) {
-          if (all) next.delete(target)
-          else next.add(target)
-        }
-        onChange(next)
-      }}
-    />
-  )
-}
-
 function compareBy(sort: Sort): (a: RepoRow, b: RepoRow) => number {
   if (sort === 'az') return (a, b) => a.name.localeCompare(b.name, 'es')
   if (sort === 'za') return (a, b) => b.name.localeCompare(a.name, 'es')
@@ -741,7 +694,6 @@ function RepoListItem({
   kind,
   linkToStudent,
   teacher,
-  selectionGutter,
   allocation,
 }: {
   row: DisplayRow
@@ -755,16 +707,12 @@ function RepoListItem({
   kind: AssignmentKind
   linkToStudent?: LinkToStudent
   teacher: boolean
-  /** The list has selection checkboxes: a row without one keeps the gap */
-  selectionGutter: boolean
   /** Set only on a row a TA can be allocated to, for a teacher */
   allocation?: {
     assistants: AllocatableAssistant[]
     editable: boolean
     assigned: number[]
-    selected: boolean
     pending: boolean
-    onSelect: (selected: boolean) => void
     onToggle: (teachingAssistantId: number, allocate: boolean) => void
   }
 }) {
@@ -778,28 +726,6 @@ function RepoListItem({
     <div className="d-table col-12 assignment-repo-list-item">
       <div className="col-8 d-table-cell">
         <div className="d-flex width-full">
-          {allocation?.editable ? (
-            <input
-              type="checkbox"
-              className="mr-3 flex-self-center"
-              aria-label={`Seleccionar ${row.name}`}
-              checked={allocation.selected}
-              onChange={(event) => allocation.onSelect(event.target.checked)}
-            />
-          ) : (
-            // An account that skipped the roster cannot be allocated, but its
-            // avatar should still line up with the rows that can
-            selectionGutter && (
-              <input
-                type="checkbox"
-                className="mr-3 flex-self-center"
-                style={{ visibility: 'hidden' }}
-                aria-hidden
-                tabIndex={-1}
-                disabled
-              />
-            )
-          )}
           <Visual row={row} />
 
           <div className={`flex-column ${row.visual === 'none' ? '' : 'ml-3'}`}>
@@ -878,17 +804,6 @@ function RepoListItem({
                 />
               )}
 
-              {allocation && (
-                <AssistantRowMenu
-                  assistants={allocation.assistants}
-                  assigned={allocation.assigned}
-                  editable={allocation.editable}
-                  pending={allocation.pending}
-                  onToggle={allocation.onToggle}
-                  rowName={row.name}
-                />
-              )}
-
               {row.visual === 'none' && row.members?.length === 0 && (
                 <p className="color-fg-muted mr-3 text-small mb-0">Sin integrantes</p>
               )}
@@ -941,6 +856,19 @@ function RepoListItem({
               </a>
             )}
           </div>
+
+          {/* Who corrects it, between the repository and the actions menu:
+              away from the members' avatars, which it would read as more members */}
+          {allocation && (
+            <AssistantRowMenu
+              assistants={allocation.assistants}
+              assigned={allocation.assigned}
+              editable={allocation.editable}
+              pending={allocation.pending}
+              onToggle={allocation.onToggle}
+              rowName={row.name}
+            />
+          )}
 
           {/* Each item only where it means something: extending on a closed
               entrega (setSubmissionExemption refuses an open one), justifying

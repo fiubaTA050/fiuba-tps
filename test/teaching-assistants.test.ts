@@ -860,7 +860,9 @@ describe('setAllocation and listAllocations', () => {
     expect(await allocate([b, c], true)).toEqual({ success: true })
 
     let listed = await listAllocations(profe, 'sd-2026-1', 'tp0', 'individual')
-    expect(listed?.assistants).toEqual([{ id: taId, githubLogin: 'ayudante' }])
+    expect(listed?.assistants).toEqual([
+      { id: taId, githubLogin: 'ayudante', githubAvatarUrl: null },
+    ])
     expect(Object.fromEntries(listed!.byTarget)).toEqual({ [a]: [taId], [b]: [taId], [c]: [taId] })
 
     expect(await allocate([a, c], false)).toEqual({ success: true })

@@ -1270,3 +1270,16 @@
 .checkpoints-grid-cell {
   padding-block: var(--base-size-8, 8px);
 }
+
+/* The TAs of a dashboard row, on the button that opens their menu
+   (components/AllocationControls). No live equivalent: overlapped like
+   `.AvatarStack`, but inline, because it sits inside a `.btn` */
+.assistant-faces {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.assistant-faces .avatar + .avatar {
+  margin-left: -6px;
+  box-shadow: 0 0 0 2px var(--bgColor-default);
+}

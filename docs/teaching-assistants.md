@@ -80,8 +80,14 @@ organización.
   - Aunque dos TPs grupales compartan agrupamiento, cada uno se asigna por
     separado.
   - Una fila puede tener **varios TAs**.
-  - Se asigna desde el **dashboard del TP**, fila por fila o seleccionando
-    varias.
+  - Se asigna desde el **dashboard del TP**, fila por fila o sobre todas las
+    filas que dejó el filtro.
+  - **Por ahora solo en los TPs grupales** (decidido 2026-11-12): la cátedra
+    reparte equipos, no padrones. El TP individual no muestra los controles,
+    pero la capa de datos y `AcceptanceList` siguen manejando padrones, así
+    que volver a mostrarlo es pasarle `listAllocations(…, 'individual')` en
+    su `page.tsx`. Mientras tanto, un ayudante no ve filas en un TP
+    individual.
 - **El alumno no ve a su TA.** La devolución sigue firmada por la cátedra.
   Puede agregarse más adelante.
 
@@ -249,10 +255,17 @@ Cada fila sigue llevando al dashboard.
 
 ### Dashboard del TP, vista por un profesor
 
-- Una columna o etiqueta por fila con los ayudantes asignados, y un menú
-  (`details`/`SelectMenu`) para marcar o desmarcar ayudantes.
-- **Asignación en lote.** Casillas por fila y una barra "Asignar a…" que
-  agrega el ayudante elegido a todas las filas marcadas.
+- A la derecha de cada fila, entre "Repositorio" y el menú de acciones, un
+  botón con los avatares de sus ayudantes (o un ícono de agregar persona si
+  no tiene) que abre el menú para marcar o desmarcar ayudantes. Es un botón y
+  no avatares sueltos porque la fila de un equipo ya muestra los avatares de
+  sus integrantes al lado.
+- **Asignación en lote, sin casillas.** Con algún filtro o búsqueda activa, el
+  encabezado de la lista ofrece "Asignar estas N a…" (y "Quitar a"), que
+  actúa sobre todas las filas filtradas, de todas las páginas. Filtrar "Sin
+  asignar" y asignar es el caso típico. Hubo casillas por fila y una barra
+  que aparecía al marcar: empujaba la lista hacia abajo bajo el mouse y no
+  gustó (2026-11-12). Un botón "Repartir" que divide en tramos se descartó.
 - **Filtro nuevo** "Ayudante: todos / sin asignar / @x", en el browser como
   los demás filtros. Sirve para ver qué falta repartir.
 - **En un TP individual** se asignan solo las filas de padrones. Las cuentas

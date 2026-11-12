@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckIcon, PersonIcon, TriangleDownIcon } from '@primer/octicons-react'
+import { CheckIcon, PersonAddIcon, TriangleDownIcon } from '@primer/octicons-react'
 import { useState, useTransition } from 'react'
 
 import { setAllocationAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
@@ -13,6 +13,9 @@ import type { AllocatableAssistant } from '@/lib/data/teaching-assistants'
  * dashboard — no live equivalent, the live site has no TA role (see
  * docs/teaching-assistants.md). Built from the same `<details>` + ActionList
  * markup as CheckboxMenu, so the menus read like the filter bar above them.
+ *
+ * There are no selection checkboxes: the bulk action works on whatever the
+ * filters left, so "Sin asignar" plus a search is the selection.
  */
 
 /**
@@ -21,7 +24,7 @@ import type { AllocatableAssistant } from '@/lib/data/teaching-assistants'
  */
 export type Allocation = {
   assistants: AllocatableAssistant[]
-  /** False on an archived classroom: the names show, the menus do not */
+  /** False on an archived classroom: the avatars show, the menus do not */
   editable: boolean
 }
 
@@ -37,7 +40,7 @@ function allocationsOf(rows: RepoRow[]): Map<number, number[]> {
 }
 
 /**
- * The allocations of a dashboard's rows and the selection of the bulk bar.
+ * The allocations of a dashboard's rows.
  *
  * Kept on the client rather than re-read from the server: an allocation
  * answers with success and the list applies it itself, because revalidating
@@ -62,31 +65,11 @@ export function useAllocations({
     setAllocated(allocationsOf(rows))
   }
 
-  /** The `allocationTarget`s of the rows ticked for the bulk bar */
-  const [selected, setSelected] = useState<Set<number>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
 
-  function toggleSelected(target: number, on: boolean) {
-    setSelected((previous) => {
-      const next = new Set(previous)
-      if (on) next.add(target)
-      else next.delete(target)
-      return next
-    })
-  }
-
-  /**
-   * Allocates a TA to `targetIds`, or takes them off. `clearSelection` is the
-   * bulk bar's: the ticks go once the change went through, and stay for a
-   * retry when it did not.
-   */
-  function apply(
-    teachingAssistantId: number,
-    targetIds: number[],
-    allocate: boolean,
-    clearSelection = false,
-  ) {
+  /** Allocates a TA to `targetIds`, or takes them off */
+  function apply(teachingAssistantId: number, targetIds: number[], allocate: boolean) {
     setError(null)
     startTransition(async () => {
       let result: { error: string | null }
@@ -124,21 +107,40 @@ export function useAllocations({
         }
         return next
       })
-      if (clearSelection) setSelected(new Set())
     })
   }
 
-  return { allocated, selected, setSelected, toggleSelected, error, pending, apply }
+  return { allocated, error, pending, apply }
 }
 
-function loginOf(assistants: AllocatableAssistant[], id: number): string {
-  const login = assistants.find((assistant) => assistant.id === id)?.githubLogin
-  return login ? `@${login}` : 'Ayudante'
+function loginOf(assistant: AllocatableAssistant | undefined): string {
+  return assistant?.githubLogin ? `@${assistant.githubLogin}` : 'Ayudante'
+}
+
+function AssistantAvatar({ assistant, size }: { assistant: AllocatableAssistant; size: 16 | 20 }) {
+  const src =
+    assistant.githubAvatarUrl ??
+    (assistant.githubLogin ? `https://github.com/${assistant.githubLogin}.png?size=40` : null)
+
+  if (!src) return null
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      width={size}
+      height={size}
+      className={`avatar circle ${size === 16 ? 'avatar-small' : ''}`}
+    />
+  )
 }
 
 /**
- * The TAs of one row, as the summary of a menu that toggles each of them.
- * Read-only — just the names — when the classroom is archived.
+ * The TAs of one row: their avatars on a button that opens the menu, or a
+ * "person add" icon when there are none. A button and not bare avatars,
+ * because a team's row already carries its members' avatars right beside it.
+ * Read-only — the avatars alone — when the classroom is archived.
  */
 export function AssistantRowMenu({
   assistants,
@@ -156,32 +158,40 @@ export function AssistantRowMenu({
   onToggle: (teachingAssistantId: number, allocate: boolean) => void
   rowName: string
 }) {
-  const names = assigned.map((id) => loginOf(assistants, id)).join(', ')
-  const text = assigned.length === 0 ? 'Sin ayudante' : names
+  const mine = assistants.filter((assistant) => assigned.includes(assistant.id))
+  const names = mine.map(loginOf).join(', ')
+  const label = mine.length === 0 ? `${rowName}: sin ayudante` : `${rowName}: corrige ${names}`
+
+  const faces = (
+    <span className="assistant-faces">
+      {mine.map((assistant) => (
+        <AssistantAvatar key={assistant.id} assistant={assistant} size={20} />
+      ))}
+    </span>
+  )
 
   if (!editable) {
-    return (
-      <p className="color-fg-muted mr-3 text-small mb-0">
-        <PersonIcon className="v-align-bottom mr-1" />
-        {text}
-      </p>
+    return mine.length === 0 ? null : (
+      <span className="mr-2" title={`Corrige ${names}`} aria-label={label}>
+        {faces}
+      </span>
     )
   }
 
   return (
-    <details className="dropdown details-reset details-overlay d-inline-block mr-3">
+    <details className="dropdown details-reset details-overlay d-inline-block mr-2">
       <summary
-        className="Link--muted text-small"
+        className="btn btn-sm"
         role="button"
         aria-haspopup="menu"
-        aria-label={`Ayudantes de ${rowName}: ${text}`}
+        aria-label={`Ayudantes de ${label}`}
+        title={mine.length === 0 ? 'Asignar ayudante' : `Corrige ${names}`}
       >
-        <PersonIcon className="v-align-bottom mr-1" />
-        {text}
+        {mine.length === 0 ? <PersonAddIcon /> : faces}
         <TriangleDownIcon className="ml-1" />
       </summary>
 
-      <div className="ActionMenu-anchor">
+      <div className="ActionMenu-anchor ActionMenu-anchor--right">
         <div className="Overlay Overlay--size-auto">
           <div className="Overlay-body Overlay-body--paddingNone">
             <ul role="menu" className="ActionListWrap ActionListWrap--inset">
@@ -203,9 +213,10 @@ export function AssistantRowMenu({
                       <span className="ActionListItem-visual ActionListItem-action--leading">
                         <CheckIcon className="ActionListItem-singleSelectCheckmark" />
                       </span>
-                      <span className="ActionListItem-label">
-                        {loginOf(assistants, assistant.id)}
+                      <span className="ActionListItem-visual ActionListItem-visual--leading">
+                        <AssistantAvatar assistant={assistant} size={16} />
                       </span>
+                      <span className="ActionListItem-label">{loginOf(assistant)}</span>
                     </button>
                   </li>
                 )
@@ -219,86 +230,61 @@ export function AssistantRowMenu({
 }
 
 /**
- * Shown while rows are selected: allocates or takes off one TA over all of
- * them at once, which is how a cohort gets split between TAs.
+ * "Asignar estas N a…": allocates or takes off one TA over every row the
+ * filters left, on every page — how a teacher covers what is still
+ * "Sin asignar" without ticking rows one by one.
  */
-export function AllocationBar({
+export function BulkAllocationMenu({
   assistants,
-  selectedCount,
+  count,
   pending,
   onApply,
-  onClear,
 }: {
   assistants: AllocatableAssistant[]
-  selectedCount: number
+  count: number
   pending: boolean
   onApply: (teachingAssistantId: number, allocate: boolean) => void
-  onClear: () => void
 }) {
-  return (
-    <div className="d-flex flex-items-center flex-wrap color-bg-accent rounded-2 px-3 py-2 mt-3">
-      <span className="text-bold mr-3">
-        {selectedCount === 1 ? '1 fila seleccionada' : `${selectedCount} filas seleccionadas`}
-      </span>
-      <AssistantPicker
-        label="Asignar a"
-        assistants={assistants}
-        pending={pending}
-        onPick={(id) => onApply(id, true)}
-      />
-      <AssistantPicker
-        label="Quitar a"
-        assistants={assistants}
-        pending={pending}
-        onPick={(id) => onApply(id, false)}
-      />
-      <button type="button" className="btn-link Link--muted ml-auto" onClick={onClear}>
-        Deseleccionar
-      </button>
-    </div>
+  const section = (title: string, allocate: boolean) => (
+    <>
+      <li className="ActionList-sectionDivider" role="presentation">
+        <div className="ActionList-sectionDivider-title">{title}</div>
+      </li>
+      {assistants.map((assistant) => (
+        <li key={assistant.id} role="none" className="ActionListItem">
+          <button
+            type="button"
+            role="menuitem"
+            disabled={pending}
+            className="ActionListContent ActionListContent--visual16"
+            onClick={(event) => {
+              event.currentTarget.closest('details')?.removeAttribute('open')
+              onApply(assistant.id, allocate)
+            }}
+          >
+            <span className="ActionListItem-visual ActionListItem-visual--leading">
+              <AssistantAvatar assistant={assistant} size={16} />
+            </span>
+            <span className="ActionListItem-label">{loginOf(assistant)}</span>
+          </button>
+        </li>
+      ))}
+    </>
   )
-}
 
-function AssistantPicker({
-  label,
-  assistants,
-  pending,
-  onPick,
-}: {
-  label: string
-  assistants: AllocatableAssistant[]
-  pending: boolean
-  onPick: (teachingAssistantId: number) => void
-}) {
   return (
-    <details className="dropdown details-reset details-overlay d-inline-block mr-2">
+    <details className="dropdown details-reset details-overlay d-inline-block mr-3 text-left">
       <summary className="btn btn-sm" role="button" aria-haspopup="menu" aria-disabled={pending}>
-        {label}
+        {count === 1 ? 'Asignar esta fila a…' : `Asignar estas ${count} a…`}
         <TriangleDownIcon className="ml-1" />
       </summary>
 
-      <div className="ActionMenu-anchor">
+      <div className="ActionMenu-anchor ActionMenu-anchor--right">
         <div className="Overlay Overlay--size-auto">
           <div className="Overlay-body Overlay-body--paddingNone">
             <ul role="menu" className="ActionListWrap ActionListWrap--inset">
-              {assistants.map((assistant) => (
-                <li key={assistant.id} role="none" className="ActionListItem">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={pending}
-                    className="ActionListContent"
-                    onClick={(event) => {
-                      event.currentTarget.closest('details')?.removeAttribute('open')
-                      onPick(assistant.id)
-                    }}
-                  >
-                    <span className="ActionListItem-label">
-                      {loginOf(assistants, assistant.id)}
-                    </span>
-                  </button>
-                </li>
-              ))}
+              {section('Asignar a:', true)}
+              {section('Quitar a:', false)}
             </ul>
           </div>
         </div>
