@@ -31,10 +31,13 @@ import { db } from '@/lib/db'
  *  - a repository of one of them (an account the roster never knew);
  *  - a seat on one of its teams.
  *
- * `organizationId` is a value or a column, so the same expression serves a
- * lookup by id and a correlated subquery over `organizations`.
+ * Either argument is a value or a column, so the same expression serves a
+ * lookup by id and a correlated subquery over `organizations` or `users`.
  */
-export function isStudentOf(organizationId: number | SQLWrapper, userId: number): SQL<boolean> {
+export function isStudentOf(
+  organizationId: number | SQLWrapper,
+  userId: number | SQLWrapper,
+): SQL<boolean> {
   return or(
     exists(
       db

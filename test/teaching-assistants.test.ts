@@ -43,9 +43,11 @@ vi.mock('@/lib/github/organizations', () => ({
 }))
 
 const findGitHubUserByLogin = vi.fn()
+const searchGitHubUsers = vi.fn()
 
 vi.mock('@/lib/github/users', () => ({
   findGitHubUserByLogin: (...args: unknown[]) => findGitHubUserByLogin(...args),
+  searchGitHubUsers: (...args: unknown[]) => searchGitHubUsers(...args),
 }))
 
 const { classroomCounters, findClassroomRole, findTeachingClassroom } = await import(
@@ -57,6 +59,7 @@ const {
   listClassroomStaff,
   removeTeachingAssistant,
   setAllocation,
+  suggestTeachingAssistants,
 } = await import('@/lib/data/teaching-assistants')
 
 let nextUid = 1
@@ -171,6 +174,7 @@ beforeEach(async () => {
   ;({ db } = await createTestDatabase())
   nextUid = 1
   findGitHubUserByLogin.mockReset()
+  searchGitHubUsers.mockReset().mockResolvedValue([])
   profe = await user('profe')
   ta = await user('ayudante')
 })
@@ -978,5 +982,108 @@ describe('the fixes of the review of the allocation', () => {
         allocate: true,
       }),
     ).toEqual({ success: false, error: 'Algún equipo ya no existe. Recargá la página.' })
+  })
+})
+
+describe('suggestTeachingAssistants', () => {
+  const hit = (session: Session) => ({
+    id: session.user.uid,
+    login: session.user.githubLogin,
+    name: null,
+    avatarUrl: '',
+  })
+  const logins = (result: Awaited<ReturnType<typeof suggestTeachingAssistants>>) =>
+    result?.suggestions.map((suggestion) => suggestion.login)
+
+  it("puts the teacher's known accounts first, TAs before students, then GitHub's", async () => {
+    await classroom('sd-2026-1', profe)
+    const before = await classroom('sd-2025-2', profe)
+    const exAlumno = await user('juan-alumno')
+    const exAyudante = await user('juan-ayudante')
+    const extrano = await user('juan-extrano')
+    const tp0 = await assignment(before, profe, 'tp0-viejo')
+    await db
+      .insert(assignmentRepos)
+      .values({ githubRepoId: 1, assignmentId: tp0, userId: idOf(exAlumno) })
+    await assistant(before, exAyudante, profe)
+    // GitHub's own ranking, which knows nobody here
+    searchGitHubUsers.mockResolvedValue([hit(extrano), hit(exAlumno)])
+
+    const result = await suggestTeachingAssistants(profe, 'sd-2026-1', 'juan')
+
+    expect(logins(result)).toEqual(['juan-ayudante', 'juan-alumno', 'juan-extrano'])
+    expect(result?.suggestions.map((suggestion) => suggestion.known)).toEqual([true, true, false])
+    expect(result?.error).toBeNull()
+  })
+
+  it('matches the stored name, and leaves out classrooms the teacher does not teach', async () => {
+    await classroom('sd-2026-1', profe)
+    const otroProfe = await user('otro-profe')
+    const ajeno = await classroom('ajeno', otroProfe)
+    const before = await classroom('sd-2025-2', profe)
+    const conNombre = await user('mperez')
+    const deOtro = await user('perez-ajeno')
+    await db.update(users).set({ githubName: 'María Pérez' }).where(eq(users.id, idOf(conNombre)))
+    await assistant(before, conNombre, profe)
+    await assistant(ajeno, deOtro, otroProfe)
+
+    expect(logins(await suggestTeachingAssistants(profe, 'sd-2026-1', 'pérez'))).toEqual([
+      'mperez',
+    ])
+  })
+
+  it('takes LIKE wildcards literally', async () => {
+    await classroom('sd-2026-1', profe)
+    const before = await classroom('sd-2025-2', profe)
+    await assistant(before, ta, profe)
+
+    expect(logins(await suggestTeachingAssistants(profe, 'sd-2026-1', '%%'))).toEqual([])
+    expect(logins(await suggestTeachingAssistants(profe, 'sd-2026-1', 'ay_dante'))).toEqual([])
+  })
+
+  it('keeps who would be refused, with the reason', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+    const alumno = await user('alumno')
+    const tp0 = await assignment(org, profe, 'tp0')
+    await db
+      .insert(assignmentRepos)
+      .values({ githubRepoId: 1, assignmentId: tp0, userId: idOf(alumno) })
+    const nuevo = { id: 999, login: 'nuevo', name: 'Nadie', avatarUrl: '' }
+    searchGitHubUsers.mockResolvedValue([hit(profe), hit(ta), hit(alumno), nuevo])
+
+    const result = await suggestTeachingAssistants(profe, 'sd-2026-1', 'xx')
+
+    expect(result?.suggestions.map(({ login, refusal }) => [login, refusal])).toEqual([
+      ['profe', '@profe ya es profesor de este classroom.'],
+      ['ayudante', '@ayudante ya es ayudante de este classroom.'],
+      ['alumno', '@alumno es alumno de este classroom: no puede ser ayudante.'],
+      ['nuevo', null],
+    ])
+  })
+
+  it('answers a failed GitHub search with the known accounts and a message', async () => {
+    await classroom('sd-2026-1', profe)
+    const before = await classroom('sd-2025-2', profe)
+    await assistant(before, ta, profe)
+    searchGitHubUsers.mockRejectedValue(Object.assign(new Error('limit'), { status: 403 }))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(await suggestTeachingAssistants(profe, 'sd-2026-1', 'ayud')).toMatchObject({
+      suggestions: [{ login: 'ayudante', known: true }],
+      error: 'GitHub está limitando las búsquedas. Esperá unos segundos.',
+    })
+  })
+
+  it('does not search a query too short, nor for anybody but a teacher', async () => {
+    const org = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+
+    expect(await suggestTeachingAssistants(profe, 'sd-2026-1', ' @a ')).toEqual({
+      suggestions: [],
+      error: null,
+    })
+    expect(await suggestTeachingAssistants(ta, 'sd-2026-1', 'profe')).toBeNull()
+    expect(searchGitHubUsers).not.toHaveBeenCalled()
   })
 })

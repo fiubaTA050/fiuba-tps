@@ -64,3 +64,74 @@ export async function findGitHubLoginById(
     throw error
   }
 }
+
+/** One hit of `searchGitHubUsers`, enough to draw a suggestion */
+export type GitHubUserHit = {
+  id: number
+  login: string
+  name: string | null
+  avatarUrl: string
+}
+
+const USER_SEARCH_QUERY = /* GraphQL */ `
+  query ($q: String!, $first: Int!) {
+    search(query: $q, type: USER, first: $first) {
+      nodes {
+        ... on User {
+          databaseId
+          login
+          name
+          avatarUrl(size: 40)
+        }
+      }
+    }
+  }
+`
+
+type UserSearchNode = Partial<{
+  databaseId: number | null
+  login: string
+  name: string | null
+  avatarUrl: string
+}>
+
+/**
+ * People on GitHub matching what the teacher typed, for the "Agregar
+ * ayudante" suggestions. GitHub matches the login and the full name, and an
+ * exact login comes first — measured: "Linus Torvalds" and "torv" both rank
+ * `torvalds` at the top.
+ *
+ * GraphQL rather than `GET /search/users`: the REST hit carries no name, which
+ * is how a teacher recognizes a TA whose login they do not know, and the REST
+ * search bucket is the 30-a-minute one the starter code autocomplete already
+ * draws from. On the teacher's token, like `findGitHubUserByLogin`: nothing
+ * here is privileged, and the installation's budget is the one every
+ * dashboard shares.
+ *
+ * `type: USER` alone also returns organizations; the `type:user` qualifier
+ * drops them server-side (measured: "github" no longer lists @github), and a
+ * node without the `User` fields is skipped all the same.
+ */
+export async function searchGitHubUsers(
+  session: Session,
+  query: string,
+  first = 8,
+): Promise<GitHubUserHit[]> {
+  const data = await userClient(session).graphql<{ search: { nodes: UserSearchNode[] } }>(
+    USER_SEARCH_QUERY,
+    { q: `${query} type:user`, first },
+  )
+
+  return data.search.nodes.flatMap((node) =>
+    node.databaseId && node.login
+      ? [
+          {
+            id: node.databaseId,
+            login: node.login,
+            name: node.name || null,
+            avatarUrl: node.avatarUrl ?? '',
+          },
+        ]
+      : [],
+  )
+}

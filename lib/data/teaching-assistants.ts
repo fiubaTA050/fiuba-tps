@@ -1,11 +1,26 @@
 import 'server-only'
 
-import { and, asc, eq, exists, inArray } from 'drizzle-orm'
+import {
+  type SQLWrapper,
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+} from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
+  assignmentRepos,
+  assignments,
   groupAssignments,
   groups,
+  groupsUsers,
   organizations,
   organizationsUsers,
   rosterEntries,
@@ -20,7 +35,7 @@ import { asFlag, isStudentOf } from '@/lib/data/classroom-students'
 import { findTeachingClassroom } from '@/lib/data/organizations'
 import { isForeignKeyViolation, isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
-import { findGitHubUserByLogin } from '@/lib/github/users'
+import { type GitHubUserHit, findGitHubUserByLogin, searchGitHubUsers } from '@/lib/github/users'
 
 /**
  * The classroom's staff: its teachers and its teaching assistants, the
@@ -205,6 +220,193 @@ export async function addTeachingAssistant(
   return { success: true, login: account.login }
 }
 
+/** One suggestion of the "Agregar ayudante" field */
+export type AssistantSuggestion = {
+  /** GitHub's numeric account id */
+  id: number
+  login: string
+  name: string | null
+  avatarUrl: string | null
+  /** Already a TA or a student of another classroom of this teacher */
+  known: boolean
+  /** Why "Agregar" would be refused, shown greyed out instead of hidden */
+  refusal: string | null
+}
+
+export type AssistantSuggestions = { suggestions: AssistantSuggestion[]; error: string | null }
+
+/** Below this, a search returns half of GitHub and the field is barely started */
+export const SUGGESTION_MIN_QUERY = 2
+
+const KNOWN_LIMIT = 5
+const SUGGESTION_LIMIT = 10
+
+/**
+ * The suggestions of the "Agregar ayudante" field. No equivalent in the
+ * original, which had nobody to add; the field and its behaviour copy the
+ * starter code autocomplete (`components/StarterCodeField`).
+ *
+ * The same trick that one uses to fix GitHub's ranking: what this deployment
+ * already knows goes first. GitHub's own people picker favours the accounts
+ * you follow and your org's members through an internal endpoint; the public
+ * search ranks all of GitHub, so "juan" is mostly strangers. A TA is very
+ * often last term's TA or a former student, and both are in `users` already,
+ * tied to another classroom of the same teacher — those come first, at no
+ * request to GitHub.
+ *
+ * Accounts that `addTeachingAssistant` would refuse are kept, with the
+ * reason: a teacher looking for someone who is a student here is better told
+ * so than shown nothing, the same as `/classrooms/new` greys out the orgs it
+ * would refuse.
+ *
+ * Null when the session is not a teacher of the classroom.
+ */
+export async function suggestTeachingAssistants(
+  session: Session,
+  classroomSlug: string,
+  rawQuery: string,
+): Promise<AssistantSuggestions | null> {
+  const classroom = await findTeachingClassroom(session, classroomSlug)
+  if (!classroom) return null
+
+  const query = rawQuery.trim().replace(/^@/, '').slice(0, 100)
+  if (query.length < SUGGESTION_MIN_QUERY) return { suggestions: [], error: null }
+
+  const [known, remote] = await Promise.all([
+    knownAccounts(session, query),
+    searchGitHubUsers(session, query).then(
+      (hits) => ({ hits, error: null }),
+      (error: unknown) => {
+        console.error('suggestTeachingAssistants: GitHub search failed', error)
+        return { hits: [], error: searchErrorMessage(error) }
+      },
+    ),
+  ])
+
+  const knownIds = new Set(known.map((account) => account.id))
+  const merged = [
+    ...known.map((account) => ({ ...account, known: true })),
+    ...remote.hits
+      .filter((hit) => !knownIds.has(hit.id))
+      .map((hit) => ({ ...hit, known: false })),
+  ].slice(0, SUGGESTION_LIMIT)
+
+  if (merged.length === 0) return { suggestions: [], error: remote.error }
+
+  // One query for every candidate: only an account with a `users` row can
+  // already be anything in this classroom
+  const flagged = await db
+    .select({ uid: users.uid, ...refusalFlags(classroom.id, users.id) })
+    .from(users)
+    .where(
+      inArray(
+        users.uid,
+        merged.map((account) => account.id),
+      ),
+    )
+  const flags = new Map(flagged.map((row) => [row.uid, row]))
+
+  return {
+    suggestions: merged.map((account) => {
+      const row = flags.get(account.id)
+      return { ...account, refusal: row ? refusalMessage(row, account.login) : null }
+    }),
+    error: remote.error,
+  }
+}
+
+/**
+ * Accounts tied to any classroom this teacher teaches — as a TA, a linked
+ * padrón, a repository or a team seat — whose login or stored name matches.
+ * TAs first: they are the likeliest to be one again.
+ */
+async function knownAccounts(session: Session, query: string): Promise<GitHubUserHit[]> {
+  const pattern = `%${query.replace(/[\\%_]/g, (match) => `\\${match}`)}%`
+
+  const mine = db
+    .select({ id: organizationsUsers.organizationId })
+    .from(organizationsUsers)
+    .innerJoin(organizations, eq(organizations.id, organizationsUsers.organizationId))
+    .where(
+      and(eq(organizationsUsers.userId, Number(session.user.id)), isNull(organizations.deletedAt)),
+    )
+
+  const assistantElsewhere = exists(
+    db
+      .select({ one: teachingAssistants.id })
+      .from(teachingAssistants)
+      .where(
+        and(
+          eq(teachingAssistants.userId, users.id),
+          inArray(teachingAssistants.organizationId, mine),
+        ),
+      ),
+  )
+
+  const rows = await db
+    .select({
+      id: users.uid,
+      login: users.githubLogin,
+      name: users.githubName,
+      avatarUrl: users.githubAvatarUrl,
+    })
+    .from(users)
+    .where(
+      and(
+        isNotNull(users.githubLogin),
+        or(ilike(users.githubLogin, pattern), ilike(users.githubName, pattern)),
+        or(
+          assistantElsewhere,
+          exists(
+            db
+              .select({ one: rosterEntries.id })
+              .from(rosterEntries)
+              .innerJoin(organizations, eq(organizations.rosterId, rosterEntries.rosterId))
+              .where(and(eq(rosterEntries.userId, users.id), inArray(organizations.id, mine))),
+          ),
+          exists(
+            db
+              .select({ one: assignmentRepos.id })
+              .from(assignmentRepos)
+              .innerJoin(assignments, eq(assignments.id, assignmentRepos.assignmentId))
+              .where(
+                and(
+                  eq(assignmentRepos.userId, users.id),
+                  inArray(assignments.organizationId, mine),
+                ),
+              ),
+          ),
+          exists(
+            db
+              .select({ one: groupsUsers.userId })
+              .from(groupsUsers)
+              .innerJoin(groups, eq(groups.id, groupsUsers.groupId))
+              .where(and(eq(groupsUsers.userId, users.id), inArray(groups.organizationId, mine))),
+          ),
+        ),
+      ),
+    )
+    .orderBy(desc(assistantElsewhere), asc(users.githubLogin))
+    .limit(KNOWN_LIMIT)
+
+  return rows.map((row) => ({
+    id: row.id,
+    login: row.login ?? '',
+    name: row.name,
+    avatarUrl: row.avatarUrl ?? '',
+  }))
+}
+
+/** The search API is rate limited apart from the rest; saying so beats an empty list */
+function searchErrorMessage(error: unknown): string {
+  const status = (error as { status?: number }).status
+  const limited =
+    status === 403 || status === 429 || /rate limit/i.test(String((error as Error)?.message))
+  return limited
+    ? 'GitHub está limitando las búsquedas. Esperá unos segundos.'
+    : 'No pudimos buscar en GitHub. Escribí el usuario completo.'
+}
+
 /**
  * Why this account cannot be a TA of this classroom, or null if it can. A
  * student cannot: the role would let them read their classmates' entregas —
@@ -217,41 +419,53 @@ async function staffRefusal(
   login: string,
 ): Promise<string | null> {
   const [row] = await db
-    .select({
-      teacher: asFlag(
-        exists(
-          db
-            .select({ one: organizationsUsers.userId })
-            .from(organizationsUsers)
-            .where(
-              and(
-                eq(organizationsUsers.organizationId, organizationId),
-                eq(organizationsUsers.userId, userId),
-              ),
-            ),
-        ),
-      ),
-      assistant: asFlag(
-        exists(
-          db
-            .select({ one: teachingAssistants.id })
-            .from(teachingAssistants)
-            .where(
-              and(
-                eq(teachingAssistants.organizationId, organizationId),
-                eq(teachingAssistants.userId, userId),
-              ),
-            ),
-        ),
-      ),
-      student: asFlag(isStudentOf(organizationId, userId)),
-    })
+    .select(refusalFlags(organizationId, userId))
     .from(organizations)
     .where(eq(organizations.id, organizationId))
 
-  if (row.teacher) return `@${login} ya es profesor de este classroom.`
-  if (row.assistant) return `@${login} ya es ayudante de este classroom.`
-  if (row.student) return `@${login} es alumno de este classroom: no puede ser ayudante.`
+  return refusalMessage(row, login)
+}
+
+/** What `staffRefusal` checks, as columns over an id or a `users.id` column */
+function refusalFlags(organizationId: number, userId: number | SQLWrapper) {
+  return {
+    teacher: asFlag(
+      exists(
+        db
+          .select({ one: organizationsUsers.userId })
+          .from(organizationsUsers)
+          .where(
+            and(
+              eq(organizationsUsers.organizationId, organizationId),
+              eq(organizationsUsers.userId, userId),
+            ),
+          ),
+      ),
+    ),
+    assistant: asFlag(
+      exists(
+        db
+          .select({ one: teachingAssistants.id })
+          .from(teachingAssistants)
+          .where(
+            and(
+              eq(teachingAssistants.organizationId, organizationId),
+              eq(teachingAssistants.userId, userId),
+            ),
+          ),
+      ),
+    ),
+    student: asFlag(isStudentOf(organizationId, userId)),
+  }
+}
+
+function refusalMessage(
+  flags: { teacher: boolean; assistant: boolean; student: boolean },
+  login: string,
+): string | null {
+  if (flags.teacher) return `@${login} ya es profesor de este classroom.`
+  if (flags.assistant) return `@${login} ya es ayudante de este classroom.`
+  if (flags.student) return `@${login} es alumno de este classroom: no puede ser ayudante.`
   return null
 }
 
