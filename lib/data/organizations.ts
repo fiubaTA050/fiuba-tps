@@ -43,8 +43,8 @@ export type StaffRole = 'teacher' | 'assistant'
 /**
  * The opt-in a reader passes to let a teaching assistant through. Without it
  * every reader stays teacher-only: what the TA may reach is the short list in
- * docs/teaching-assistants.md, and every other screen, route and MCP tool
- * that shares these functions — editing, the CSVs — stays closed to TAs
+ * docs/teaching-assistants.md, and every other screen and route that
+ * shares these functions — editing, the CSVs — stays closed to TAs
  * without having to know they exist.
  */
 export type StaffAccess = { allowAssistant?: boolean }
@@ -561,12 +561,11 @@ export type ClassroomRole =
  * their stale TA row until somebody removes it.
  *
  * The TA role is only granted to a browser login (`via: 'browser'`, set by the
- * `session` callback of auth.ts). An API key session never gets it: anyone can
- * create a key, and a TA of one classroom can be a teacher of another, so
- * refusing the key would not do; refusing the role does, and the MCP tools —
- * which call these same functions — stay closed to TAs untouched. Asking for
- * the positive mark rather than the absence of 'api-key' keeps any session
- * built by hand elsewhere out by default.
+ * `session` callback of auth.ts). Asking for the positive mark keeps any other
+ * session out by default — one built by hand elsewhere, or one built from an
+ * API key if that ever exists: anyone can create a key, and a TA of one
+ * classroom can be a teacher of another, so refusing the key would not do;
+ * refusing the role does.
  *
  * Nor does a TA who is also a student of the classroom (`isStudentOf`).
  * Adding one is refused, but nothing in the student flows — accepting a TP,

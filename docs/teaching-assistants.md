@@ -68,7 +68,7 @@ organización.
   - escribir devoluciones sobre esas entregas.
 
   Nada más. No publica notas, no justifica ni extiende entregas, no vincula ni
-  mueve alumnos, no descarga CSV, no usa MCP, no edita trabajos prácticos y no
+  mueve alumnos, no descarga CSV, no edita trabajos prácticos y no
   ve la pestaña Alumnos. **Un TA sin asignaciones no ve ninguna entrega.**
 - **Asignación por trabajo práctico.**
   - En un TP grupal se asignan **equipos**.
@@ -187,15 +187,14 @@ solo para profesores **sin tocarlo**. A los TAs se les abren, una por una,
   sobre `teaching_assistant_allocations`), no después de traer todo. Así el
   `listRepositorySnapshots` del dashboard solo le pide a GitHub los
   repositorios del TA.
-- **Sesiones de API key.** Cualquier usuario puede crear una API key en
-  `/settings/api-keys`, y un TA también puede ser profesor en otro classroom,
-  así que no alcanza con impedirle crearla. El callback `session` de
-  `auth.ts` marca cada login del navegador con `via: 'browser'`, y
-  `findClassroomRole` solo devuelve `assistant` para una sesión con esa marca.
-  `sessionFromApiKey` pone `via: 'api-key'`, y una sesión armada a mano en
-  otro lado no tiene ninguna: las dos quedan afuera por defecto. Las
-  herramientas MCP llaman a las mismas funciones, de modo que quedan cerradas
-  para los TAs sin tocarlas.
+- **Solo el login del navegador.** El callback `session` de `auth.ts` marca
+  cada login del navegador con `via: 'browser'`, y `findClassroomRole` solo
+  devuelve `assistant` para una sesión con esa marca. Una sesión armada a mano
+  en otro lado no la tiene y queda afuera por defecto. Hoy las API keys no
+  arman sesiones (el worker de corrección solo recibe el id del dueño), pero
+  si alguna vez lo hacen — el servidor MCP del PR #5, cerrado sin mergear, lo
+  hacía — tampoco darán el rol: cualquiera puede crear una key, y un TA
+  también puede ser profesor en otro classroom.
 - **Worker de corrección.** `leaseSubmissionForGrading` solo mira
   `organizations_users`. No cambia.
 
@@ -314,7 +313,7 @@ Hechos los pasos 1 a 6. Lo que la implementación agregó a la spec:
 - **Cómo se abre un lector.** No con `findClassroomRole` directo: cada función
   que el ayudante puede alcanzar recibe `{ allowAssistant: true }`
   (`StaffAccess`), y sin esa opción sigue siendo solo de profesores. Así la
-  edición, los CSV y MCP, que comparten esas funciones, quedan cerrados sin
+  edición y los CSV, que comparten esas funciones, quedan cerrados sin
   tocarlos. Las filas se filtran con `visibleRepo` y `allocatedTargets`, en
   `lib/data/staff.ts`.
 - **La devolución de un ayudante la aprueba un profesor.** La revisión

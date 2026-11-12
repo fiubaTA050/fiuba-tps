@@ -58,7 +58,6 @@ const {
   removeTeachingAssistant,
   setAllocation,
 } = await import('@/lib/data/teaching-assistants')
-const { createApiKey, sessionFromApiKey } = await import('@/lib/data/api-keys')
 
 let nextUid = 1
 
@@ -450,20 +449,6 @@ describe('findClassroomRole', () => {
     const unmarked = { ...ta, via: undefined }
 
     expect(await findClassroomRole(unmarked, 'sd-2026-1')).toBeNull()
-  })
-
-  it('never grants the TA role through an API key, and still grants teacher', async () => {
-    const org = await classroom('sd-2026-1', profe)
-    await assistant(org, ta, profe)
-    const taKey = await createApiKey(ta, 'mia', ['classroom:read'])
-    const profeKey = await createApiKey(profe, 'mia', ['classroom:read'])
-
-    const taSession = (await sessionFromApiKey(taKey.rawKey))!.session
-    const profeSession = (await sessionFromApiKey(profeKey.rawKey))!.session
-
-    expect(taSession.via).toBe('api-key')
-    expect(await findClassroomRole(taSession, 'sd-2026-1')).toBeNull()
-    expect(await findClassroomRole(profeSession, 'sd-2026-1')).toMatchObject({ role: 'teacher' })
   })
 })
 

@@ -17,13 +17,12 @@ declare module 'next-auth' {
     error?: SessionError
     /**
      * Where the session came from: 'browser' is set by the `session` callback
-     * of auth.ts, 'api-key' by `sessionFromApiKey`. A teaching assistant's
-     * role is only granted to 'browser', so an unmarked session — one built
-     * by hand somewhere else — gets nothing, and an API key only ever reaches
-     * what its owner can do as a teacher. See `findClassroomRole` and
+     * of auth.ts. A teaching assistant's role is only granted to 'browser',
+     * so any other session — one built by hand somewhere else, or a future
+     * one from an API key — gets nothing. See `findClassroomRole` and
      * docs/teaching-assistants.md.
      */
-    via?: 'browser' | 'api-key'
+    via?: 'browser'
     user: {
       /** PK en la tabla `users` */
       id: string

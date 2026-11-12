@@ -66,7 +66,6 @@ const {
   listAssignmentSubmissions,
   saveSubmissionFeedback,
 } = await import('@/lib/data/submissions')
-const { createApiKey, sessionFromApiKey } = await import('@/lib/data/api-keys')
 
 const OPEN = { allowAssistant: true }
 const SLUG = 'sd-2026-1'
@@ -458,15 +457,6 @@ describe('with the opt-in, a TA reads their own rows', () => {
     expect(cards).toEqual([
       expect.objectContaining({ slug: SLUG, role: 'assistant', organization: null }),
     ])
-  })
-
-  it('gives an API key session of the TA nothing, opt-in or not', async () => {
-    const { rawKey } = await createApiKey(w.ta, 'mia', ['classroom:read'])
-    const keySession = (await sessionFromApiKey(rawKey))!.session
-
-    expect(await findClassroom(keySession, SLUG, OPEN)).toBeNull()
-    expect(await listAssignmentAcceptances(keySession, SLUG, 'tp0', OPEN)).toBeNull()
-    expect(await listClassrooms(keySession)).toEqual([])
   })
 })
 
