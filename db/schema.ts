@@ -1278,3 +1278,42 @@ export const submissionFeedbackApprovals = pgTable(
 )
 
 export type SubmissionFeedbackApproval = typeof submissionFeedbackApprovals.$inferSelect
+
+/**
+ * A repository a teaching assistant was made a read-only collaborator of, on
+ * GitHub, because one of their allocations reaches it. No equivalent in the
+ * original, where TAs were owners of the org and read every repository.
+ *
+ * The record of what was done on GitHub, not of what should be: the
+ * allocation says what should be, and `lib/data/assistant-repo-access.ts`
+ * reconciles the two — granting what is missing when the TA opens the
+ * dashboard (the accept needs their token) and revoking what no allocation
+ * covers any more. Without it, every visit would re-send the invitation, and
+ * removing a TA would not know which repositories to take back.
+ *
+ * Group repositories only, for now: allocation only has controls on group
+ * assignments. An individual one would be a second foreign key, the shape of
+ * `checkpoints`.
+ */
+export const teachingAssistantRepoAccesses = pgTable(
+  'teaching_assistant_repo_accesses',
+  {
+    id: serial('id').primaryKey(),
+    teachingAssistantId: integer('teaching_assistant_id')
+      .notNull()
+      .references(() => teachingAssistants.id, { onDelete: 'cascade' }),
+    groupAssignmentRepoId: integer('group_assignment_repo_id')
+      .notNull()
+      .references(() => groupAssignmentRepos.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('index_ta_repo_accesses_on_ta_and_group_repo').on(
+      table.teachingAssistantId,
+      table.groupAssignmentRepoId,
+    ),
+    index('index_ta_repo_accesses_on_group_assignment_repo_id').on(table.groupAssignmentRepoId),
+  ],
+)
+
+export type TeachingAssistantRepoAccess = typeof teachingAssistantRepoAccesses.$inferSelect

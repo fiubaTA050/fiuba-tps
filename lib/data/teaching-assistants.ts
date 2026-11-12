@@ -10,10 +10,12 @@ import {
   organizationsUsers,
   rosterEntries,
   teachingAssistantAllocations,
+  teachingAssistantRepoAccesses,
   teachingAssistants,
   users,
 } from '@/db/schema'
 import { type AssignmentKind, findTeachingAssignment } from '@/lib/data/assignment-kind'
+import { revokeAssistantRepoAccess } from '@/lib/data/assistant-repo-access'
 import { asFlag, isStudentOf } from '@/lib/data/classroom-students'
 import { findTeachingClassroom } from '@/lib/data/organizations'
 import { isForeignKeyViolation, isUniqueViolation } from '@/lib/data/postgres'
@@ -258,6 +260,11 @@ async function staffRefusal(
  * allocations go with it (the foreign key cascades). Its devoluciones stay,
  * attributed to it: `submission_feedbacks` points at `users`.
  *
+ * Its access to the teams' repositories on GitHub goes first: the rows that
+ * record it cascade with the TA, so once it is deleted nothing would know
+ * which repositories to take back. If GitHub fails on any, the TA stays and
+ * the teacher is told to retry.
+ *
  * Allowed on an archived classroom, unlike every other writer: archiving
  * freezes the coursework, and taking someone's access away is not coursework.
  */
@@ -269,22 +276,70 @@ export async function removeTeachingAssistant(
   const classroom = await findTeachingClassroom(session, classroomSlug)
   if (!classroom) return { success: false, error: 'No se encontró el classroom.' }
 
-  const removed = await db
-    .delete(teachingAssistants)
+  const [assistant] = await db
+    .select({ id: teachingAssistants.id })
+    .from(teachingAssistants)
     .where(
       and(
         eq(teachingAssistants.id, teachingAssistantId),
         eq(teachingAssistants.organizationId, classroom.id),
       ),
     )
-    .returning({ id: teachingAssistants.id })
+  if (!assistant) return { success: false, error: 'Ese ayudante ya no está en el classroom.' }
 
-  // Somebody else removed it first, or the id was never of this classroom
-  if (removed.length === 0) {
-    return { success: false, error: 'Ese ayudante ya no está en el classroom.' }
+  const githubFailed = {
+    success: false as const,
+    error: 'No pudimos sacarle el acceso a los repositorios en GitHub. Probá de nuevo en un rato.',
   }
 
-  return { success: true }
+  // A grant from the TA's own dashboard can land between the revoke and the
+  // delete, and would cascade away with the TA, access and all. So the delete
+  // runs with the TA's row locked and only if no access is left: an insert
+  // that came first is seen and revoked on the next round, and one that comes
+  // after waits on the lock (the foreign key) and then fails, which makes
+  // `grant` take its own access back.
+  for (let round = 0; round < 3; round++) {
+    let failed: number
+    try {
+      failed = await revokeAssistantRepoAccess(session, classroom.id, assistant.id, null)
+    } catch (error) {
+      // The lookup of the account by id failed: a rate limit or an outage
+      console.error('removeTeachingAssistant: revoke failed', error)
+      failed = 1
+    }
+    if (failed > 0) return githubFailed
+
+    const outcome = await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ id: teachingAssistants.id })
+        .from(teachingAssistants)
+        .where(
+          and(
+            eq(teachingAssistants.id, assistant.id),
+            eq(teachingAssistants.organizationId, classroom.id),
+          ),
+        )
+        .for('update')
+      // Somebody else removed it first
+      if (!locked) return 'gone'
+
+      const [left] = await tx
+        .select({ id: teachingAssistantRepoAccesses.id })
+        .from(teachingAssistantRepoAccesses)
+        .where(eq(teachingAssistantRepoAccesses.teachingAssistantId, locked.id))
+        .limit(1)
+      if (left) return 'again'
+
+      await tx.delete(teachingAssistants).where(eq(teachingAssistants.id, locked.id))
+      return 'removed'
+    })
+
+    if (outcome === 'removed') return { success: true }
+    if (outcome === 'gone') return { success: false, error: 'Ese ayudante ya no está en el classroom.' }
+  }
+
+  // Granted again on every round: they keep reloading the dashboard
+  return githubFailed
 }
 
 /** A TA as the dashboard's menus offer it */
@@ -450,6 +505,17 @@ export async function setAllocation(
               ),
         ),
       )
+
+    // Their access on GitHub to those teams' repositories goes with it.
+    // Best effort: the allocation is gone either way, and what fails keeps
+    // its row, so the TA's next visit or the teacher's next change retries it
+    if (!individual) {
+      try {
+        await revokeAssistantRepoAccess(session, found.classroom.id, assistant.id, assignmentId)
+      } catch (error) {
+        console.error('setAllocation: revoke failed', error)
+      }
+    }
     return { success: true }
   }
 

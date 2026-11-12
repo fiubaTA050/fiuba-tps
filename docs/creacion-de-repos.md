@@ -174,7 +174,9 @@ GitHub lo agrega directo con 204 y nunca crea invitación.
 
 - repo generado desde el template, privado, con su commit inicial;
 - **0 invitaciones pendientes**: `acceptRepositoryInvitation` corrió y la aceptó
-  con el token del alumno, así que no le llega ningún mail que clickear;
+  con el token del alumno, así que no le llega ningún mail que clickear.
+  Sí le llega el aviso: la documentación de GitHub dice que el invitado
+  recibe una notificación, y se manda aunque la invitación ya esté aceptada;
 - permiso `push`, respetando `students_are_repo_admins: false`;
 - la cuenta quedó como **outside collaborator** de la organización y sigue sin
   ser miembro, que es exactamente el estado esperado y la huella de que la

@@ -43,3 +43,24 @@ export async function findGitHubUserByLogin(
     throw error
   }
 }
+
+/**
+ * The current login of an account, by its numeric id — `GET /user/{id}`, the
+ * documented lookup that survives a rename. The collaborator endpoints only
+ * take a login, and the one in `users` is only as fresh as the account's
+ * last sign-in. Null when the account no longer exists.
+ */
+export async function findGitHubLoginById(
+  session: Session,
+  accountId: number,
+): Promise<string | null> {
+  try {
+    const { data } = await userClient(session).request('GET /user/{account_id}', {
+      account_id: accountId,
+    })
+    return data.login
+  } catch (error) {
+    if (isNotFound(error)) return null
+    throw error
+  }
+}

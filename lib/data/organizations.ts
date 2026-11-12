@@ -383,7 +383,7 @@ export async function findClassroomInstallation(
  */
 export async function currentInstallationId(
   session: Session,
-  classroom: ClassroomInstallation,
+  classroom: Pick<ClassroomInstallation, 'id' | 'githubId' | 'installationId'>,
 ): Promise<number | null> {
   if (await findInstallationAccount(classroom.installationId)) return classroom.installationId
 

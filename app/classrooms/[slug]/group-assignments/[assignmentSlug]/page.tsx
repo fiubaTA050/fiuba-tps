@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import { after } from 'next/server'
 
 import { auth } from '@/auth'
 import { AssignmentHeader } from '@/components/AssignmentHeader'
@@ -7,6 +8,7 @@ import { AssignmentRepoList } from '@/components/AssignmentRepoList'
 import { Breadcrumb } from '@/components/Breadcrumb'
 import { StatTiles } from '@/components/StatTiles'
 import { submissionLabel, type RepoRow, type SubmissionLabel } from '@/lib/assignment-rows'
+import { syncAssistantRepoAccess } from '@/lib/data/assistant-repo-access'
 import { findGroupAssignment } from '@/lib/data/group-assignments'
 import { listGroupAssignmentAcceptances, type TeamAcceptance } from '@/lib/data/groups'
 import { currentInstallationId, findClassroomInstallation } from '@/lib/data/organizations'
@@ -64,6 +66,17 @@ export default async function GroupAssignmentPage(
   if (!classroom || !assignment || !acceptances || !submissions) notFound()
 
   const teacher = classroom.role === 'teacher'
+
+  // A TA reads their teams' repositories on GitHub as a collaborator, and the
+  // invitation is accepted with their token — so it is granted here, when they
+  // come, after the page is sent (docs/teaching-assistants.md)
+  if (!teacher) {
+    after(() =>
+      syncAssistantRepoAccess(session, slug, assignmentSlug).catch((error) =>
+        console.error('syncAssistantRepoAccess failed', error),
+      ),
+    )
+  }
 
   const searchParams = await props.searchParams
   const justCreated = searchParams.created === '1'

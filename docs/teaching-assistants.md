@@ -2,9 +2,8 @@
 
 Spec escrita el 11/11/2026, con las decisiones tomadas en la misma
 conversación. Cubre cargar TAs en un classroom y asignarles, en cada trabajo
-práctico, los alumnos o equipos que corrigen. **No** cubre darles acceso a los
-repositorios en GitHub: eso es el trabajo siguiente y se apoya en lo que esta
-spec deja en la base.
+práctico, los alumnos o equipos que corrigen. El acceso a los repositorios
+en GitHub vino después (12/11/2026), en "Acceso a los repositorios en GitHub".
 
 ## Qué hacía el original
 
@@ -288,6 +287,76 @@ profesores por los datos personales que puede tener
 (`late_submission_justifications.reason`), ni los botones de justificar,
 extender o publicar.
 
+## Acceso a los repositorios en GitHub
+
+Decidido el 12/11/2026. El ayudante lee los repositorios de *sus* equipos
+como **outside collaborator con permiso `pull`**: el mismo mecanismo que usa
+un alumno, con `push` (`docs/creacion-de-repos.md`). No se lo hace miembro de
+la organización: sería otra invitación para aceptar, y no le daría nada que no
+tenga como colaborador. El código no lo distingue: a un miembro GitHub lo
+agrega directo con 204, sin invitación.
+
+Solo en los TP grupales por ahora, porque solo ahí hay controles para
+asignar. `teaching_assistant_repo_accesses` tiene una sola clave, a
+`group_assignment_repos`; el individual sería una segunda, como en
+`checkpoints`.
+
+- **La asignación dice qué debería tener; la tabla, qué se hizo.**
+  `teaching_assistant_repo_accesses` es una fila por repo al que se lo agregó.
+  Sin ella cada visita volvería a mandar la invitación, y al sacar un
+  ayudante no habría forma de saber qué repos devolver.
+- **Se da cuando el ayudante abre el dashboard del TP.** Aceptar la invitación
+  necesita el token del propio ayudante, igual que con un alumno, así que no
+  se puede hacer cuando el profesor asigna. Corre en `after()`, después de
+  mandar la página: `addCollaborator` con `pull` y
+  `acceptRepositoryInvitation` con su token, en tandas de 5 y hasta 20 repos
+  por visita (cada uno son dos requests que crean contenido, y el límite es
+  80 por minuto). Un repo que el equipo crea después de la asignación entra
+  en la próxima visita. En un classroom archivado no se da nada. Se invita al
+  login que la cuenta tiene **ahora**, buscado por id: el de la sesión es el
+  del día que entró, y tras un rename lo puede tener otra persona. La fila se
+  guarda apenas existe la invitación, antes de aceptarla: si aceptar falla, la
+  invitación queda en su mail y no se le vuelve a mandar en cada visita.
+- **Se saca cuando el profesor desasigna o saca al ayudante.** Eso solo
+  necesita la instalación. El login se busca por id (`GET /user/{id}`) porque
+  el de `users` puede estar viejo, y GitHub contestaría 404 a un login
+  renombrado, que se leería como "ya no estaba".
+  - Al desasignar es de mejor esfuerzo: la asignación se borra igual, y lo
+    que falla deja su fila para el próximo intento.
+  - Al sacar al ayudante, los repos se devuelven **antes** de borrarlo,
+    porque las filas caen en cascada con él. Si GitHub falla en alguno, el
+    ayudante queda y el profesor ve "Probá de nuevo". El borrado bloquea la
+    fila del ayudante y solo procede si no le quedó ningún acceso: un acceso
+    que el dashboard le dio en el medio se devuelve en otra vuelta, y uno
+    posterior espera el lock, choca con la clave foránea y se devuelve solo.
+  - **Solo un 404 cuenta como "el repo ya no está".** Un error de GitHub deja
+    la fila y cuenta como falla; leerlo como borrado dejaba al ayudante
+    adentro sin registro (lo encontró el code review). Por lo mismo, la
+    instalación se re-resuelve antes (`currentInstallationId`): con una
+    vieja, hasta el token da 404.
+- **Lo que se escapa lo arregla la pasada siguiente.** La visita del ayudante
+  también saca, en ese TP, lo que ya no tiene asignado. Si el profesor lo saca
+  mientras se le está dando acceso, el insert choca con la clave foránea y se
+  le saca en el momento.
+- **GitHub manda el mail igual.** Su documentación dice que el invitado
+  recibe una notificación, y llega aunque la invitación ya esté aceptada. Es
+  un mail por repo, sin nada que clickear.
+
+Verificado contra GitHub real el 12/11/2026, en la base local, con
+`@eespina-hu` (no es miembro de la org, así que pasa por la invitación de
+verdad) sobre el repo descartable `zzz-seed-espinaemmanuel`: al abrir el
+dashboard quedó como outside collaborator `read` con 0 invitaciones
+pendientes, y al desasignarlo desde el dashboard del profesor se fue del repo
+y de la tabla. La desasignación tardó ~1,8 s, por las tres llamadas a GitHub.
+Después de los arreglos del code review se repitió el alta, y "Sacar
+ayudante" en la pestaña Docentes lo sacó del repo antes de borrarlo.
+
+Lo que no cubre: si un ayudante pasa a ser alumno del classroom,
+`findClassroomRole` le niega el rol pero el acceso en GitHub queda hasta que
+el profesor lo saca. Si se borra un equipo, su fila en
+`group_assignment_repos` se va en cascada y el repo sigue en GitHub con el
+ayudante adentro.
+
 ## Tests
 
 - **Sobre PGlite:**
@@ -327,7 +396,8 @@ Hechos los pasos 1 a 6. Lo que la implementación agregó a la spec:
   profesor no necesita aprobación, y lo escrito antes de esto tampoco: por
   eso es una columna con default y no hubo que rellenar nada.
 - **Lo que no se hizo:** la vinculación de owners por URL directa (sigue
-  siendo desde el índice) y el acceso a los repositorios en GitHub.
+  siendo desde el índice). El acceso a los repositorios en GitHub se hizo el
+  12/11/2026, en su propia sección.
 
 ## Orden de trabajo
 

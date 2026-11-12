@@ -116,6 +116,29 @@ export async function findRepositoryById(
 }
 
 /**
+ * The full name of a repository by id, for a write that must not mistake an
+ * outage for a deletion: null only when GitHub answers 404, and every other
+ * failure — a 5xx, a rate limit — is thrown. `findRepositoryById` reads all of
+ * them as null, which is right for rendering and wrong for deciding that a
+ * collaborator is already gone. The installation must be known to be alive
+ * (`currentInstallationId`): a token minted for a dead one also 404s.
+ */
+export async function findRepositoryFullNameById(
+  installationId: number,
+  repositoryId: number,
+): Promise<string | null> {
+  try {
+    const { data } = await installationClient(installationId).request('GET /repositories/{id}', {
+      id: repositoryId,
+    })
+    return data.full_name
+  } catch (error) {
+    if (isNotFound(error)) return null
+    throw error
+  }
+}
+
+/**
  * Port of CreateGitHubRepoService#create_github_repository_from_template!
  *
  * The `owner` of the body is the destination org; the template goes in the
@@ -198,12 +221,15 @@ export async function deleteRepository(
  * user already had access and no invitation was created. That happens for a
  * teacher testing their own assignment, since an org owner already reaches
  * every repository.
+ *
+ * `pull` is for a teaching assistant, who reads their teams' repositories
+ * and pushes nothing (docs/teaching-assistants.md).
  */
 export async function addCollaborator(
   installationId: number,
   fullName: string,
   username: string,
-  permission: 'push' | 'admin',
+  permission: 'pull' | 'push' | 'admin',
 ): Promise<number | null> {
   const [owner, repo] = fullName.split('/')
 

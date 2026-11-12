@@ -279,7 +279,10 @@ reference code without mental translation. The confusing one:
   export or see the roster, and never through an API key. Every reader they
   reach opts in with `{ allowAssistant: true }`; everything else stays
   teacher-only without knowing TAs exist. See `docs/teaching-assistants.md`.
-  Giving them access to the repositories on GitHub is the next step, not done.
+  On GitHub a TA reads their teams' repositories as an outside collaborator
+  with `pull`, granted when they open the group dashboard — the accept needs
+  their token — and revoked when a teacher deallocates or removes them
+  (`lib/data/assistant-repo-access.ts`).
 - **Editing propagates nothing to the repositories already created**, not even
   the visibility. `Assignment::Editor#update_attribute_for_all_assignment_repos`
   has a single `when "public_repo"` that enqueues
