@@ -1,6 +1,6 @@
 'use client'
 
-import { XIcon } from '@primer/octicons-react'
+import { CheckIcon, SearchIcon, XIcon } from '@primer/octicons-react'
 import { useActionState, useEffect, useRef, useState } from 'react'
 
 import { EMPTY_STATE } from '@/app/classrooms/[slug]/roster/state'
@@ -24,10 +24,10 @@ const MIN_QUERY = 2
  * delay is 300 ms rather than 500, as this search does not draw from the REST
  * search bucket of 30 a minute (see `searchGitHubUsers`).
  *
- * Picking a suggestion replaces the field with the chosen account — avatar,
- * login, name and an X to pick again — and the button names who it adds,
- * the way github.com's "Add people" leaves no doubt about who was picked: a
- * login merely copied into the field reads the same as one typed by hand.
+ * The list is the ActionList of github.com's "Add people" SelectPanel —
+ * markup and rules (app/globals.css) copied from it. Picking a suggestion
+ * replaces the field with that item, check showing, and an X to pick again:
+ * a login merely copied into the field reads the same as one typed by hand.
  * The login is still what is posted and resolved on the server, so typing
  * one and submitting without picking keeps working, for when the search is
  * rate limited.
@@ -169,6 +169,7 @@ export function AddTeachingAssistantForm({ classroomSlug }: { classroomSlug: str
   }
 
   const listId = 'teaching-assistant-suggestions'
+  const optionId = (index: number) => `${listId}-${index}`
   const showList = open && searchable && (suggestions.length > 0 || error || searching || answered)
 
   return (
@@ -183,11 +184,18 @@ export function AddTeachingAssistantForm({ classroomSlug }: { classroomSlug: str
           <label htmlFor="teaching-assistant-login">Usuario de GitHub</label>
         </div>
         {/* Stacked under 544px: side by side, the button pushes the page wider */}
-        <div className="form-group-body d-flex flex-column flex-sm-row flex-sm-items-center">
+        <div className="form-group-body d-flex flex-column flex-sm-row flex-sm-items-start">
           {selected ? (
             <SelectedAccount account={selected} onClear={unselect} />
           ) : (
             <div className="position-relative flex-auto mr-sm-2 mb-2 mb-sm-0" ref={container}>
+              {/* The search field of the SelectPanel: a leading magnifier */}
+              <span
+                className="position-absolute color-fg-muted d-flex"
+                style={{ left: 10, top: '50%', transform: 'translateY(-50%)' }}
+              >
+                <SearchIcon />
+              </span>
               <input
                 autoFocus={refocus}
                 id="teaching-assistant-login"
@@ -201,7 +209,8 @@ export function AddTeachingAssistantForm({ classroomSlug }: { classroomSlug: str
                 }}
                 onFocus={() => setOpen(true)}
                 onKeyDown={onKeyDown}
-                className="form-control input-block input-monospace"
+                className="form-control input-block"
+                style={{ paddingLeft: 32 }}
                 placeholder="Buscá por usuario o nombre"
                 autoComplete="off"
                 spellCheck={false}
@@ -210,85 +219,59 @@ export function AddTeachingAssistantForm({ classroomSlug }: { classroomSlug: str
                 aria-expanded={Boolean(showList)}
                 aria-controls={listId}
                 aria-autocomplete="list"
+                aria-activedescendant={
+                  showList && highlighted >= 0 ? optionId(highlighted) : undefined
+                }
                 required
               />
 
               {showList && (
                 <div
-                  id={listId}
-                  role="listbox"
-                  className="position-absolute width-full border rounded-2 color-bg-default box-shadow-medium mt-1"
-                  style={{ zIndex: 10, maxHeight: 320, overflowY: 'auto' }}
+                  className="Overlay position-absolute width-full mt-1"
+                  style={{ zIndex: 10, maxHeight: 360, overflowY: 'auto' }}
                 >
-                  {suggestions.length > 0 && (
-                    <ul className="list-style-none">
-                      {suggestions.map((suggestion, index) => (
-                        <li
-                          key={suggestion.id}
+                  <ul
+                    id={listId}
+                    role="listbox"
+                    aria-label="Cuentas sugeridas"
+                    className="ActionListWrap ActionListWrap--inset"
+                  >
+                    {suggestions.map((suggestion, index) => (
+                      <li
+                        key={suggestion.id}
+                        role="none"
+                        className={`ActionListItem ${suggestion.refusal ? 'ActionListItem--disabled' : ''} ${
+                          index === highlighted ? 'is-highlighted' : ''
+                        }`}
+                      >
+                        <button
+                          id={optionId(index)}
+                          type="button"
                           role="option"
                           aria-selected={index === highlighted}
                           aria-disabled={suggestion.refusal ? true : undefined}
+                          tabIndex={-1}
+                          // Not onClick: blur would close the list before it fires
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            choose(suggestion)
+                          }}
+                          onMouseEnter={() => setHighlighted(index)}
+                          className="ActionListContent ActionListContent--sizeLarge ActionListContent--blockDescription"
                         >
-                          <button
-                            type="button"
-                            // Not onClick: blur would close the list before it fires
-                            onMouseDown={(event) => {
-                              event.preventDefault()
-                              choose(suggestion)
-                            }}
-                            onMouseEnter={() => setHighlighted(index)}
-                            title={suggestion.refusal ?? undefined}
-                            className={`btn-link d-flex flex-items-center width-full text-left p-2 color-fg-default no-underline ${
-                              index === highlighted ? 'color-bg-accent-subtle' : ''
-                            }`}
-                            style={
-                              suggestion.refusal
-                                ? { opacity: 0.55, cursor: 'not-allowed' }
-                                : undefined
-                            }
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={
-                                suggestion.avatarUrl ||
-                                `https://github.com/${suggestion.login}.png?size=40`
-                              }
-                              className="avatar circle flex-shrink-0 mr-2"
-                              height={20}
-                              width={20}
-                              alt=""
-                            />
-                            <span className="d-flex flex-column min-width-0">
-                              <span className="css-truncate css-truncate-overflow">
-                                <span className="text-bold text-mono">{suggestion.login}</span>
-                                {suggestion.name && (
-                                  <span className="color-fg-muted ml-2">{suggestion.name}</span>
-                                )}
-                              </span>
-                              {suggestion.refusal && (
-                                <span className="f6 color-fg-muted">{suggestion.refusal}</span>
-                              )}
-                            </span>
-                            {suggestion.known && !suggestion.refusal && (
-                              <span
-                                className="Label Label--gray ml-auto flex-shrink-0"
-                                title="Fue ayudante o alumno en otro de tus classrooms"
-                              >
-                                De tus classrooms
-                              </span>
-                            )}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                          <AccountRow account={suggestion} checked={false} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                   {error ? (
-                    <p className="note color-fg-attention p-2 mb-0">{error}</p>
+                    <p className="note color-fg-attention mx-3 mt-0 mb-3">{error}</p>
                   ) : (
                     suggestions.length === 0 && (
-                      <p className="note p-2 mb-0">
-                        {searching ? 'Buscando…' : 'No hay cuentas que coincidan'}
-                      </p>
+                      // The SelectPanel's "No matching GitHub account found"
+                      <h2 className="f5 m-3 mt-0">
+                        {searching ? 'Buscando…' : 'No hay cuentas de GitHub que coincidan'}
+                      </h2>
                     )
                   )}
                 </div>
@@ -301,11 +284,7 @@ export function AddTeachingAssistantForm({ classroomSlug }: { classroomSlug: str
             className="btn btn-primary flex-shrink-0"
             disabled={pending}
           >
-            {pending
-              ? 'Agregando…'
-              : selected
-                ? `Agregar a ${selected.login} como ayudante`
-                : 'Agregar ayudante'}
+            {pending ? 'Agregando…' : 'Agregar ayudante'}
           </button>
         </div>
         <p className="note">
@@ -318,8 +297,51 @@ export function AddTeachingAssistantForm({ classroomSlug }: { classroomSlug: str
 }
 
 /**
- * The picked account in place of the field: what github.com's "Add people"
- * shows once a suggestion is chosen. Posts the login in a hidden field, so
+ * The inside of one ActionList item, as github.com's "Add people" draws it: a
+ * slot for the single-select check, a 16px avatar, the login in bold and a
+ * description under it. GitHub's says "•Invite outside collaborator"; this
+ * one carries the name and why the account is known, or why it would be
+ * refused.
+ */
+function AccountRow({ account, checked }: { account: AssistantSuggestion; checked: boolean }) {
+  const description = [
+    account.name,
+    account.refusal ?? (account.known ? 'Ayudante o alumno en otro de tus classrooms' : null),
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <>
+      {/* The check keeps its column either way, so nothing shifts when it shows */}
+      <span
+        className="ActionListItem-visual ActionListItem-action--leading"
+        style={{ visibility: checked ? 'visible' : 'hidden' }}
+      >
+        <CheckIcon />
+      </span>
+      <span className="ActionListItem-visual ActionListItem-visual--leading">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={account.avatarUrl || `https://github.com/${account.login}.png?size=40`}
+          className="avatar circle"
+          height={16}
+          width={16}
+          alt=""
+        />
+      </span>
+      <span className="ActionListItem-descriptionWrap">
+        <span className="ActionListItem-label">{account.login}</span>
+        {description && <span className="ActionListItem-description">{description}</span>}
+      </span>
+    </>
+  )
+}
+
+/**
+ * The picked account in place of the field, drawn as the list item it was
+ * with its check showing — what "selected" looks like in the SelectPanel —
+ * and an X to go back to the search. Posts the login in a hidden field, so
  * the form does not care which of the two is showing.
  */
 function SelectedAccount({
@@ -330,31 +352,17 @@ function SelectedAccount({
   onClear: () => void
 }) {
   return (
-    <div className="d-flex flex-items-center flex-auto border rounded-2 px-2 py-1 mr-sm-2 mb-2 mb-sm-0 min-width-0">
+    <div className="d-flex flex-items-center flex-auto border rounded-2 mr-sm-2 mb-2 mb-sm-0 min-width-0">
       <input type="hidden" name="login" value={account.login} />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={account.avatarUrl || `https://github.com/${account.login}.png?size=40`}
-        className="avatar circle flex-shrink-0 mr-2"
-        height={24}
-        width={24}
-        alt=""
-      />
-      <span className="css-truncate css-truncate-overflow flex-auto">
-        <span className="text-bold text-mono">{account.login}</span>
-        {account.name && <span className="color-fg-muted ml-2">{account.name}</span>}
-      </span>
-      {account.known && (
-        <span
-          className="Label Label--gray ml-2 flex-shrink-0"
-          title="Fue ayudante o alumno en otro de tus classrooms"
-        >
-          De tus classrooms
-        </span>
-      )}
+      <div
+        className="ActionListContent ActionListContent--sizeLarge ActionListContent--blockDescription flex-auto"
+        style={{ cursor: 'default' }}
+      >
+        <AccountRow account={account} checked />
+      </div>
       <button
         type="button"
-        className="btn-octicon ml-1 flex-shrink-0"
+        className="btn-octicon mr-2 flex-shrink-0"
         aria-label={`Quitar a ${account.login} y elegir otra cuenta`}
         title="Elegir otra cuenta"
         onClick={onClear}

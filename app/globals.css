@@ -953,9 +953,11 @@
  * original's own primer-dropdown, a 160px panel with a caret; the live site
  * has neither, and the difference is very visible next to the reference.
  *
- * Three tokens v22 does not define, resolved to the values the live CSS gives
+ * Four tokens v22 does not define, resolved to the values the live CSS gives
  * them: --borderRadius-large 0.75rem, --control-medium-lineBoxHeight 1.25rem,
- * and --actionListContent-paddingBlock, which is --control-medium-paddingBlock.
+ * --actionListContent-paddingBlock, which is --control-medium-paddingBlock,
+ * and --borderRadius-medium 0.375rem — a fallback, so the rounded hover the
+ * live items have does not fall back to square corners.
  */
 
 /*
@@ -1038,7 +1040,7 @@
   position: relative;
   list-style: none;
   background-color: var(--control-transparent-bgColor-rest);
-  border-radius: var(--borderRadius-medium);
+  border-radius: var(--borderRadius-medium, 0.375rem);
 }
 
 .ActionListItem:hover {
@@ -1059,7 +1061,7 @@
   text-align: left;
   background-color: initial;
   border: none;
-  border-radius: var(--borderRadius-medium);
+  border-radius: var(--borderRadius-medium, 0.375rem);
 }
 
 .ActionListContent > :not(:last-child) {
@@ -1124,6 +1126,40 @@
 
 .ActionListContent[aria-checked='false'] .ActionListItem-singleSelectCheckmark {
   visibility: hidden;
+}
+
+/*
+ * What the "Add people" SelectPanel of a repository's Manage access adds on
+ * top — the list the "Agregar ayudante" suggestions copy. From the same
+ * stylesheet, saved from that page: the large size (its items are
+ * `ActionListContent--sizeLarge`) and the semibold label over a description.
+ */
+.ActionListContent--sizeLarge {
+  padding-block: var(--control-large-paddingBlock);
+}
+
+.ActionListItem-descriptionWrap .ActionListItem-label {
+  font-weight: var(--base-text-weight-semibold);
+}
+
+/* Not in the live CSS: there the arrow keys move the focus into the list and
+   `:hover` paints the item under the mouse. A combobox keeps the focus in its
+   field, so the item the arrows reach takes the hover look instead. */
+.ActionListItem.is-highlighted {
+  background-color: var(--control-transparent-bgColor-hover);
+}
+
+.ActionListItem--disabled .ActionListItem-label,
+.ActionListItem--disabled .ActionListItem-description {
+  color: var(--control-fgColor-disabled);
+}
+
+/* After `.is-highlighted`, which the mouse also sets, so a refused account
+   never lights up */
+.ActionListItem--disabled:hover,
+.ActionListItem--disabled.is-highlighted {
+  cursor: not-allowed;
+  background-color: initial;
 }
 
 .ActionList-sectionDivider:empty {
