@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
@@ -483,8 +483,11 @@ export async function listAssignmentAcceptances(
     'individual',
   )
   if (allowed) {
-    const all = classroom.rosterId === null ? null : await listAcceptances(classroom, invitation)
-    const entries = (all?.entries ?? []).filter((entry) => allowed.has(entry.entryId))
+    const rows =
+      classroom.rosterId === null || allowed.size === 0
+        ? []
+        : await rosterAcceptanceRows(classroom.rosterId, invitation, [...allowed])
+    const entries = rows.map(toAcceptanceRow)
     return {
       identifierName: classroom.identifierName,
       entries,
@@ -537,7 +540,31 @@ async function listAcceptances(
     }
   }
 
-  const entries = await db
+  const entries = await rosterAcceptanceRows(classroom.rosterId, invitation, null)
+
+  // Keyed on the user id, not the login: a student who renames their GitHub
+  // account keeps the id, and DA-2 says never to key anything on a name.
+  const onRoster = new Set(entries.map((entry) => entry.userId))
+
+  return {
+    identifierName: classroom.identifierName,
+    entries: entries.map(toAcceptanceRow),
+    unlinkedAccounts: accepted.filter((account) => !onRoster.has(account.userId)),
+    acceptedCount: accepted.length,
+  }
+}
+
+/**
+ * The roster's entries with what each one did about this assignment, in
+ * `RosterEntry.order_for_view`. `only` narrows it to some entries — a TA's
+ * padrones — in the query rather than after it.
+ */
+function rosterAcceptanceRows(
+  rosterId: number,
+  invitation: { id: number; assignmentId: number },
+  only: number[] | null,
+) {
+  return db
     .select({
       entryId: rosterEntries.id,
       identifier: rosterEntries.identifier,
@@ -566,7 +593,12 @@ async function listAcceptances(
         sql`${inviteStatuses.status} <> 'unaccepted'`,
       ),
     )
-    .where(eq(rosterEntries.rosterId, classroom.rosterId))
+    .where(
+      and(
+        eq(rosterEntries.rosterId, rosterId),
+        only === null ? sql`true` : inArray(rosterEntries.id, only),
+      ),
+    )
     // RosterEntry.order_for_view: accepted, then linked but not accepted, then
     // unlinked. Identifier breaks the tie, where the original used the id —
     // a roster of padrones reads better in padrón order.
@@ -578,22 +610,15 @@ async function listAcceptances(
       end`,
       asc(rosterEntries.identifier),
     )
+}
 
-  // Keyed on the user id, not the login: a student who renames their GitHub
-  // account keeps the id, and DA-2 says never to key anything on a name.
-  const onRoster = new Set(entries.map((entry) => entry.userId))
-
+function toAcceptanceRow(entry: Awaited<ReturnType<typeof rosterAcceptanceRows>>[number]): AcceptanceRow {
   return {
-    identifierName: classroom.identifierName,
-    entries: entries.map((entry) => ({
-      entryId: entry.entryId,
-      identifier: entry.identifier,
-      githubLogin: entry.githubLogin,
-      state: acceptanceState(entry.userId, entry.statusId),
-      repoId: entry.repoId,
-    })),
-    unlinkedAccounts: accepted.filter((account) => !onRoster.has(account.userId)),
-    acceptedCount: accepted.length,
+    entryId: entry.entryId,
+    identifier: entry.identifier,
+    githubLogin: entry.githubLogin,
+    state: acceptanceState(entry.userId, entry.statusId),
+    repoId: entry.repoId,
   }
 }
 

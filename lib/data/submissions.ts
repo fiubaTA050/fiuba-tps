@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { type SQL, and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { type SQL, and, desc, eq, exists, inArray, isNull, not, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import type { Session } from 'next-auth'
 
@@ -18,6 +18,7 @@ import {
   lateSubmissionJustifications,
   organizations,
   submissionExemptions,
+  submissionFeedbackApprovals,
   submissionFeedbacks,
   submissions,
   users,
@@ -100,6 +101,13 @@ export type FeedbackVersion = {
   /** Login of the teacher who saved it; null if the account is gone from GitHub */
   createdBy: string | null
   createdAt: Date
+  /**
+   * A teaching assistant saved it and no teacher approved it yet: the student
+   * keeps reading the version before it. See `submissionFeedbackApprovals`.
+   */
+  pendingApproval: boolean
+  /** Who approved a TA's version, once someone did */
+  approvedBy: string | null
 }
 
 /** The devolución as the student reads it — see `submissionFeedbacks` in db/schema.ts */
@@ -195,6 +203,8 @@ export type CurrentSubmission = {
   passed: boolean | null
   /** It has a devolución, published or not — the ⋯ says "Ver" instead of "Escribir" */
   hasFeedback: boolean
+  /** Its current devolución is a TA's waiting for a teacher's approval */
+  feedbackPending: boolean
 }
 
 export type CheckpointSubmissions = {
@@ -355,7 +365,8 @@ export async function listAssignmentSubmissions(
       // submission that is no longer late; it justifies nothing then
       justification: late ? forRole(justificationBySubmission.get(row.id) ?? null) : null,
       passed: passedBySubmission.get(row.id) ?? null,
-      hasFeedback: withFeedback.has(row.id),
+      hasFeedback: withFeedback.present.has(row.id),
+      feedbackPending: withFeedback.pending.has(row.id),
     })
   }
 
@@ -370,6 +381,9 @@ export async function listAssignmentSubmissions(
       and(
         inArray(submissionExemptions.checkpointId, checkpointIds),
         isNull(submissionExemptions.revokedAt),
+        // Like the submissions above: a TA's rows only, or the ids of every
+        // extended repository would reach their browser
+        visibleRepo(found, kind),
       ),
     )
 
@@ -680,17 +694,33 @@ export async function findSubmissionDetail(
     .where(eq(lateSubmissionJustifications.submissionId, row.id))
     .orderBy(desc(lateSubmissionJustifications.id))
 
-  const feedback = await db
-    .select({
-      id: submissionFeedbacks.id,
-      body: submissionFeedbacks.body,
-      createdBy: users.githubLogin,
-      createdAt: submissionFeedbacks.createdAt,
-    })
-    .from(submissionFeedbacks)
-    .leftJoin(users, eq(users.id, submissionFeedbacks.createdByUserId))
-    .where(eq(submissionFeedbacks.submissionId, row.id))
-    .orderBy(desc(submissionFeedbacks.id))
+  const approver = alias(users, 'approver')
+  const feedback = (
+    await db
+      .select({
+        id: submissionFeedbacks.id,
+        body: submissionFeedbacks.body,
+        createdBy: users.githubLogin,
+        createdAt: submissionFeedbacks.createdAt,
+        needsApproval: submissionFeedbacks.needsApproval,
+        approvalId: submissionFeedbackApprovals.id,
+        approvedBy: approver.githubLogin,
+      })
+      .from(submissionFeedbacks)
+      .leftJoin(users, eq(users.id, submissionFeedbacks.createdByUserId))
+      .leftJoin(
+        submissionFeedbackApprovals,
+        eq(submissionFeedbackApprovals.feedbackId, submissionFeedbacks.id),
+      )
+      .leftJoin(approver, eq(approver.id, submissionFeedbackApprovals.approvedByUserId))
+      .where(eq(submissionFeedbacks.submissionId, row.id))
+      .orderBy(desc(submissionFeedbacks.id))
+  ).map(
+    ({ needsApproval, approvalId, ...version }): FeedbackVersion => ({
+      ...version,
+      pendingApproval: needsApproval && approvalId === null,
+    }),
+  )
 
   // Append-only: the current submission is the last row by id
   const [latest] = await db
@@ -959,6 +989,8 @@ export async function saveSubmissionFeedback(
       body: next,
       replacesId: basedOnId,
       createdByUserId: Number(session.user.id),
+      // A TA's devolución reaches the student only once a teacher approves it
+      needsApproval: found.role === 'assistant',
     })
   } catch (error) {
     if (isUniqueViolation(error)) return { success: false, error: FEEDBACK_CONFLICT }
@@ -968,20 +1000,99 @@ export async function saveSubmissionFeedback(
   return { success: true }
 }
 
-/** Of these submissions, the ones whose devolución is there now — not removed */
-async function submissionsWithFeedback(submissionIds: number[]): Promise<Set<number>> {
-  if (submissionIds.length === 0) return new Set()
+export type FeedbackApprovalResult = { success: true } | { success: false; error: string }
+
+/**
+ * "Aprobar": a teacher lets the student read the devolución version a
+ * teaching assistant saved — see `submissionFeedbackApprovals`. Teacher-only:
+ * no `StaffAccess` opt-in, so a TA cannot approve their own.
+ *
+ * Only the current version: approving one that was replaced since would
+ * approve text the teacher is no longer looking at, so it is refused the way
+ * a save over somebody else's is. Approving twice is a no-op.
+ */
+export async function approveSubmissionFeedback(
+  session: Session,
+  classroomSlug: string,
+  assignmentSlug: string,
+  githubRepoId: number,
+  submissionId: number,
+  feedbackId: number,
+  kind: AssignmentKind = 'individual',
+): Promise<FeedbackApprovalResult | null> {
+  const found = await findStaffAssignment(session, classroomSlug, assignmentSlug, kind)
+  if (!found) return null
+
+  if (found.classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
+
+  const row = found.assignment
+    ? await findTeacherSubmission(found.assignment.id, githubRepoId, submissionId, kind)
+    : null
+  if (!row) return { success: false, error: 'No encontramos esa entrega.' }
+
+  const [latest] = await db
+    .select({ id: submissionFeedbacks.id, needsApproval: submissionFeedbacks.needsApproval })
+    .from(submissionFeedbacks)
+    .where(eq(submissionFeedbacks.submissionId, row.id))
+    .orderBy(desc(submissionFeedbacks.id))
+    .limit(1)
+
+  if (latest?.id !== feedbackId) {
+    return {
+      success: false,
+      error: 'La devolución cambió mientras la leías. Revisá la versión nueva antes de aprobarla.',
+    }
+  }
+  if (!latest.needsApproval) return { success: true }
+
+  await db
+    .insert(submissionFeedbackApprovals)
+    .values({ feedbackId, approvedByUserId: Number(session.user.id) })
+    .onConflictDoNothing()
+
+  return { success: true }
+}
+
+/**
+ * Of these submissions, the ones whose devolución is there now — not removed —
+ * and the ones whose latest version is a TA's waiting for approval.
+ */
+async function submissionsWithFeedback(
+  submissionIds: number[],
+): Promise<{ present: Set<number>; pending: Set<number> }> {
+  if (submissionIds.length === 0) return { present: new Set(), pending: new Set() }
 
   const rows = await db
     .selectDistinctOn([submissionFeedbacks.submissionId], {
       submissionId: submissionFeedbacks.submissionId,
       body: submissionFeedbacks.body,
+      pending: sql<boolean>`(${not(feedbackApproved())})`,
     })
     .from(submissionFeedbacks)
     .where(inArray(submissionFeedbacks.submissionId, submissionIds))
     .orderBy(submissionFeedbacks.submissionId, desc(submissionFeedbacks.id))
 
-  return new Set(rows.filter((row) => row.body !== null).map((row) => row.submissionId))
+  return {
+    present: new Set(rows.filter((row) => row.body !== null).map((row) => row.submissionId)),
+    pending: new Set(rows.filter((row) => row.pending).map((row) => row.submissionId)),
+  }
+}
+
+/**
+ * Whether the `submission_feedbacks` row of the current query is one a
+ * student may read: a teacher's, or a TA's a teacher approved. Publishing is
+ * the other half, checked by the caller.
+ */
+function feedbackApproved(): SQL {
+  return or(
+    not(submissionFeedbacks.needsApproval),
+    exists(
+      db
+        .select({ one: submissionFeedbackApprovals.id })
+        .from(submissionFeedbackApprovals)
+        .where(eq(submissionFeedbackApprovals.feedbackId, submissionFeedbacks.id)),
+    ),
+  )!
 }
 
 /**
@@ -1003,9 +1114,14 @@ async function findStudentFeedback(history: SubmissionRow[]): Promise<StudentFee
     .from(submissionFeedbacks)
     .leftJoin(users, eq(users.id, submissionFeedbacks.createdByUserId))
     .where(
-      inArray(
-        submissionFeedbacks.submissionId,
-        history.map((row) => row.id),
+      and(
+        inArray(
+          submissionFeedbacks.submissionId,
+          history.map((row) => row.id),
+        ),
+        // A TA's version waits for a teacher: until then the student reads
+        // the version before it, which is the newest one that qualifies
+        feedbackApproved(),
       ),
     )
     .orderBy(submissionFeedbacks.submissionId, desc(submissionFeedbacks.id))

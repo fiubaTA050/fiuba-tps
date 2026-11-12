@@ -1,7 +1,8 @@
 import 'server-only'
 
-import { and, count, desc, eq, exists, inArray, isNull, or } from 'drizzle-orm'
+import { and, count, desc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { Session } from 'next-auth'
+import { cache } from 'react'
 
 import {
   assignments,
@@ -576,7 +577,22 @@ export async function findClassroomRole(
   session: Session,
   slug: string,
 ): Promise<ClassroomRole | null> {
-  const userId = Number(session.user.id)
+  return classroomRoleOf(Number(session.user.id), session.via ?? null, slug)
+}
+
+/**
+ * `findClassroomRole` memoised per request: a dashboard reaches it through
+ * four or five readers, each opting in on its own. The arguments are
+ * primitives, which is what makes React's cache hit — `auth()` returns a
+ * fresh session object every time, the same reason as
+ * `findOrganizationByInstallation`. Outside a server render it does not
+ * memoise, so tests and route handlers read fresh every time.
+ */
+const classroomRoleOf = cache(async function classroomRoleOf(
+  userId: number,
+  via: Session['via'] | null,
+  slug: string,
+): Promise<ClassroomRole | null> {
   const [row] = await db
     .select({
       id: organizations.id,
@@ -587,7 +603,10 @@ export async function findClassroomRole(
       archivedAt: organizations.archivedAt,
       teacherId: organizationsUsers.userId,
       teachingAssistantId: teachingAssistants.id,
-      student: asFlag(isStudentOf(organizations.id, userId)),
+      // Only read for a TA: a teacher wins before it matters, and the four
+      // EXISTS behind it are not worth running on every teacher's page
+      student: sql<boolean>`case when ${organizationsUsers.userId} is not null then false
+        else (${isStudentOf(organizations.id, userId)}) end`,
     })
     .from(organizations)
     .leftJoin(
@@ -618,12 +637,12 @@ export async function findClassroomRole(
   }
 
   if (row.teacherId !== null) return { role: 'teacher', classroom }
-  if (row.teachingAssistantId !== null && session.via === 'browser' && !row.student) {
+  if (row.teachingAssistantId !== null && via === 'browser' && !row.student) {
     return { role: 'assistant', classroom, teachingAssistantId: row.teachingAssistantId }
   }
 
   return null
-}
+})
 
 /** A classroom the caller may read, and in which role */
 export type StaffClassroom = StaffClassroomRow & {

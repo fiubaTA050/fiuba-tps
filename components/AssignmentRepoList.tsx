@@ -126,7 +126,7 @@ export function AssignmentRepoList({
   kind = 'individual',
   linkToStudent,
   allocation: allocationOption,
-  teacher = true,
+  teacher,
 }: {
   title: string
   rows: RepoRow[]
@@ -151,9 +151,9 @@ export function AssignmentRepoList({
   /**
    * False for a teaching assistant: the rows are already theirs alone, and
    * the menu keeps only the devolución — extending and justifying are a
-   * teacher's.
+   * teacher's. Required, with no default, for the reason AssignmentHeader's is
    */
-  teacher?: boolean
+  teacher: boolean
 }) {
   // Only where some row can take a TA: on a classroom with no roster every
   // row is an account that skipped it, and the controls could do nothing
@@ -835,6 +835,14 @@ function RepoListItem({
                   title={justificationTooltip(row.submission.justification)}
                 >
                   Tarde · justificada
+                </span>
+              )}
+
+              {/* A TA's devolución no teacher approved yet: the student does
+                  not read it, and this is how the teacher finds the ones to read */}
+              {row.submission?.feedbackPending && (
+                <span className="IssueLabel IssueLabel--big mr-2 color-bg-attention">
+                  Devolución sin aprobar
                 </span>
               )}
 

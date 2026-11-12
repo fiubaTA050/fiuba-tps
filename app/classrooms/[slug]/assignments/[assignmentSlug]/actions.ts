@@ -7,6 +7,7 @@ import { auth } from '@/auth'
 import { assignmentPath, parseAssignmentKind } from '@/lib/assignment-paths'
 import { linkAccountToEntry } from '@/lib/data/rosters'
 import {
+  approveSubmissionFeedback,
   justifyLateSubmission,
   revokeLateSubmissionJustification,
   saveSubmissionFeedback,
@@ -238,4 +239,45 @@ export async function setAllocationAction(input: {
   )
 
   return { error: result.success ? null : result.error }
+}
+
+/**
+ * "Aprobar" on a devolución a teaching assistant saved: from then on the
+ * student reads it, once the entrega is published. Teacher-only.
+ */
+export async function approveSubmissionFeedbackAction(
+  _previous: RosterActionState,
+  formData: FormData,
+): Promise<RosterActionState> {
+  const session = await auth()
+  if (!isUsableSession(session)) redirect('/')
+
+  const classroomSlug = String(formData.get('classroom_slug') ?? '')
+  const assignmentSlug = String(formData.get('assignment_slug') ?? '')
+  const kind = parseAssignmentKind(formData.get('kind'))
+  const githubRepoId = positiveInteger(formData.get('github_repo_id'))
+  const submissionId = positiveInteger(formData.get('submission_id'))
+  const feedbackId = positiveInteger(formData.get('feedback_id'))
+
+  if (githubRepoId === null || submissionId === null || feedbackId === null) {
+    return { error: 'No encontramos esa devolución.', notice: null }
+  }
+
+  const result = await approveSubmissionFeedback(
+    session,
+    classroomSlug,
+    assignmentSlug,
+    githubRepoId,
+    submissionId,
+    feedbackId,
+    kind,
+  )
+
+  if (!result) return { error: 'No encontramos ese classroom.', notice: null }
+  if (!result.success) return { error: result.error, notice: null }
+
+  const base = assignmentPath(classroomSlug, kind, assignmentSlug)
+  revalidatePath(`${base}/submissions/${githubRepoId}/${submissionId}`)
+  revalidatePath(base)
+  return EMPTY_STATE
 }

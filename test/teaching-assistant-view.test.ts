@@ -1,4 +1,5 @@
 import type { Session } from 'next-auth'
+import { eq } from 'drizzle-orm'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -18,6 +19,7 @@ import {
   organizationsUsers,
   rosterEntries,
   rosters,
+  submissionExemptions,
   submissionFeedbacks,
   submissions,
   teachingAssistantAllocations,
@@ -57,8 +59,10 @@ const { listAssignmentAcceptances } = await import('@/lib/data/invitations')
 const { classroomCounters, findClassroom, findClassroomInstallation, listClassrooms } =
   await import('@/lib/data/organizations')
 const {
+  approveSubmissionFeedback,
   findSubmissionDetail,
   findSubmissionHistory,
+  findSubmissionPanels,
   listAssignmentSubmissions,
   saveSubmissionFeedback,
 } = await import('@/lib/data/submissions')
@@ -88,6 +92,10 @@ const idOf = (session: Session) => Number(session.user.id)
 type World = {
   profe: Session
   ta: Session
+  /** The student of the TA's padrón, and the other one */
+  uno: Session
+  dos: Session
+  repoIds: { mine: number; theirs: number }
   /** Ids of what the TA is allocated, and of what they are not */
   mine: { repo: number; teamRepo: number; submission: number; teamSubmission: number }
   theirs: { repo: number; teamRepo: number; submission: number; teamSubmission: number }
@@ -239,6 +247,9 @@ async function world(): Promise<World> {
   return {
     profe,
     ta,
+    uno,
+    dos,
+    repoIds: { mine: r1.id, theirs: r2.id },
     mine: { repo: 1001, teamRepo: 2001, submission: s1.id, teamSubmission: gs1.id },
     theirs: { repo: 1002, teamRepo: 2002, submission: s2.id, teamSubmission: gs2.id },
     checkpoint: checkpoint.id,
@@ -266,12 +277,8 @@ describe('without the opt-in, every reader stays teacher-only', () => {
     expect(await listAssignmentAcceptances(ta, SLUG, 'tp0')).toBeNull()
     expect(await listGroupAssignmentAcceptances(ta, SLUG, 'tp1')).toBeNull()
     expect(await listAssignmentSubmissions(ta, SLUG, 'tp0')).toBeNull()
-    expect(
-      await findSubmissionDetail(ta, SLUG, 'tp0', w.mine.repo, w.mine.submission),
-    ).toBeNull()
-    expect(
-      await findSubmissionHistory(ta, SLUG, 'tp0', w.mine.repo, w.checkpoint),
-    ).toBeNull()
+    expect(await findSubmissionDetail(ta, SLUG, 'tp0', w.mine.repo, w.mine.submission)).toBeNull()
+    expect(await findSubmissionHistory(ta, SLUG, 'tp0', w.mine.repo, w.checkpoint)).toBeNull()
     expect(
       await saveSubmissionFeedback(ta, SLUG, 'tp0', w.mine.repo, w.mine.submission, 'Bien', null),
     ).toBeNull()
@@ -349,13 +356,37 @@ describe('with the opt-in, a TA reads their own rows', () => {
 
   it('cannot open, or read the history of, anybody else’s', async () => {
     expect(
-      await findSubmissionDetail(w.ta, SLUG, 'tp0', w.theirs.repo, w.theirs.submission, 'individual', OPEN),
+      await findSubmissionDetail(
+        w.ta,
+        SLUG,
+        'tp0',
+        w.theirs.repo,
+        w.theirs.submission,
+        'individual',
+        OPEN,
+      ),
     ).toBeNull()
     expect(
-      await findSubmissionDetail(w.ta, SLUG, 'tp1', w.theirs.teamRepo, w.theirs.teamSubmission, 'group', OPEN),
+      await findSubmissionDetail(
+        w.ta,
+        SLUG,
+        'tp1',
+        w.theirs.teamRepo,
+        w.theirs.teamSubmission,
+        'group',
+        OPEN,
+      ),
     ).toBeNull()
     expect(
-      await findSubmissionHistory(w.ta, SLUG, 'tp0', w.theirs.repo, w.checkpoint, 'individual', OPEN),
+      await findSubmissionHistory(
+        w.ta,
+        SLUG,
+        'tp0',
+        w.theirs.repo,
+        w.checkpoint,
+        'individual',
+        OPEN,
+      ),
     ).toEqual([])
     expect(
       await findSubmissionHistory(w.ta, SLUG, 'tp0', w.mine.repo, w.checkpoint, 'individual', OPEN),
@@ -400,10 +431,15 @@ describe('with the opt-in, a TA reads their own rows', () => {
     await db.delete(teachingAssistantAllocations)
 
     expect((await listAssignmentAcceptances(w.ta, SLUG, 'tp0', OPEN))?.entries).toEqual([])
-    expect(
-      [...(await listAssignmentSubmissions(w.ta, SLUG, 'tp0', 'individual', OPEN))!.checkpoints[0]
-        .byRepoId.keys()],
-    ).toEqual([])
+    expect([
+      ...(await listAssignmentSubmissions(
+        w.ta,
+        SLUG,
+        'tp0',
+        'individual',
+        OPEN,
+      ))!.checkpoints[0].byRepoId.keys(),
+    ]).toEqual([])
   })
 
   it('counts only the assignments for the tab bar', async () => {
@@ -434,3 +470,147 @@ describe('with the opt-in, a TA reads their own rows', () => {
   })
 })
 
+describe('the fixes of the review of the TA view', () => {
+  /** The student's own screen: what `findStudentFeedback` lets through */
+  async function studentReads(): Promise<string | null> {
+    const panels = await findSubmissionPanels(w.uno, 'k-tp0')
+    return panels?.[0].feedback?.body ?? null
+  }
+
+  async function publish() {
+    await db.update(checkpoints).set({ resultsPublishedAt: new Date() })
+  }
+
+  const save = (session: Session, body: string, basedOn: number | null) =>
+    saveSubmissionFeedback(
+      session,
+      SLUG,
+      'tp0',
+      w.mine.repo,
+      w.mine.submission,
+      body,
+      basedOn,
+      'individual',
+      OPEN,
+    )
+
+  const latestId = async () =>
+    (await db.select({ id: submissionFeedbacks.id }).from(submissionFeedbacks)).at(-1)!.id
+
+  it('keeps a TA’s devolución from the student until a teacher approves it', async () => {
+    await publish()
+    expect(await save(w.ta, 'Bien hecho', null)).toEqual({ success: true })
+    expect(await studentReads()).toBeNull()
+
+    const pending = await listAssignmentSubmissions(w.profe, SLUG, 'tp0')
+    expect(pending!.checkpoints[0].byRepoId.get(w.mine.repo)).toMatchObject({
+      hasFeedback: true,
+      feedbackPending: true,
+    })
+
+    expect(
+      await approveSubmissionFeedback(
+        w.profe,
+        SLUG,
+        'tp0',
+        w.mine.repo,
+        w.mine.submission,
+        await latestId(),
+      ),
+    ).toEqual({ success: true })
+    expect(await studentReads()).toBe('Bien hecho')
+
+    const detail = await findSubmissionDetail(w.profe, SLUG, 'tp0', w.mine.repo, w.mine.submission)
+    expect(detail?.feedback[0]).toMatchObject({ pendingApproval: false, approvedBy: 'profe' })
+  })
+
+  it('shows the student the approved version while a TA’s edit waits', async () => {
+    await publish()
+    await save(w.profe, 'Versión del profe', null)
+    expect(await studentReads()).toBe('Versión del profe')
+
+    await save(w.ta, 'Versión del ayudante', await latestId())
+    expect(await studentReads()).toBe('Versión del profe')
+
+    // A TA removing it waits too
+    await save(w.ta, '', await latestId())
+    expect(await studentReads()).toBe('Versión del profe')
+  })
+
+  it('needs no approval for a teacher’s own devolución', async () => {
+    await publish()
+    await save(w.profe, 'Directo', null)
+
+    expect(await studentReads()).toBe('Directo')
+    const detail = await findSubmissionDetail(w.profe, SLUG, 'tp0', w.mine.repo, w.mine.submission)
+    expect(detail?.feedback[0]).toMatchObject({ pendingApproval: false, approvedBy: null })
+  })
+
+  it('lets nobody but a teacher approve, and only the current version', async () => {
+    await publish()
+    await save(w.ta, 'Primera', null)
+    const first = await latestId()
+    await save(w.ta, 'Segunda', first)
+
+    expect(
+      await approveSubmissionFeedback(
+        w.ta,
+        SLUG,
+        'tp0',
+        w.mine.repo,
+        w.mine.submission,
+        await latestId(),
+      ),
+    ).toBeNull()
+    expect(
+      await approveSubmissionFeedback(w.profe, SLUG, 'tp0', w.mine.repo, w.mine.submission, first),
+    ).toMatchObject({ success: false })
+    expect(await studentReads()).toBeNull()
+  })
+
+  it('sends a TA no exemption of anybody else’s repository', async () => {
+    await db.update(checkpoints).set({ closedAt: new Date() })
+    await db.insert(submissionExemptions).values([
+      {
+        checkpointId: w.checkpoint,
+        assignmentRepoId: w.repoIds.mine,
+        createdByUserId: idOf(w.profe),
+      },
+      {
+        checkpointId: w.checkpoint,
+        assignmentRepoId: w.repoIds.theirs,
+        createdByUserId: idOf(w.profe),
+      },
+    ])
+
+    const forTa = await listAssignmentSubmissions(w.ta, SLUG, 'tp0', 'individual', OPEN)
+    const forProfe = await listAssignmentSubmissions(w.profe, SLUG, 'tp0')
+
+    expect([...forTa!.checkpoints[0].exemptRepoIds]).toEqual([w.mine.repo])
+    expect([...forProfe!.checkpoints[0].exemptRepoIds].sort()).toEqual([w.mine.repo, w.theirs.repo])
+  })
+
+  it('leaves off the index a classroom where the TA is also a student, or that was deleted', async () => {
+    const [org] = await db.select({ id: organizations.id }).from(organizations)
+
+    // Also a teacher: one card, the teacher's
+    await db.insert(organizationsUsers).values({ organizationId: org.id, userId: idOf(w.ta) })
+    expect((await listClassrooms(w.ta)).map((card) => card.role)).toEqual(['teacher'])
+    await db.delete(organizationsUsers).where(eq(organizationsUsers.userId, idOf(w.ta)))
+
+    // A student of it: their padrón is linked
+    await db
+      .update(rosterEntries)
+      .set({ userId: idOf(w.ta) })
+      .where(eq(rosterEntries.identifier, '100002'))
+    expect(await listClassrooms(w.ta)).toEqual([])
+    await db
+      .update(rosterEntries)
+      .set({ userId: idOf(w.dos) })
+      .where(eq(rosterEntries.identifier, '100002'))
+    expect(await listClassrooms(w.ta)).toHaveLength(1)
+
+    await db.update(organizations).set({ deletedAt: new Date() })
+    expect(await listClassrooms(w.ta)).toEqual([])
+  })
+})

@@ -24,7 +24,7 @@ export function ClassroomNav({
   assignmentCount,
   studentCount,
   staffCount,
-  showStudents = true,
+  showStudents,
 }: {
   slug: string
   tab: ClassroomTab
@@ -33,8 +33,11 @@ export function ClassroomNav({
   studentCount: number | null
   /** null when the caller is not a teacher of the classroom: the tab is not drawn */
   staffCount: number | null
-  /** False for a teaching assistant, who does not see the roster */
-  showStudents?: boolean
+  /**
+   * False for a teaching assistant, who does not see the roster. Required,
+   * like AssignmentHeader's `teacher`
+   */
+  showStudents: boolean
 }) {
   const base = `/classrooms/${slug}`
 

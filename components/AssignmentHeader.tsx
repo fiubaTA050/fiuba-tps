@@ -35,7 +35,7 @@ export function AssignmentHeader({
   invitationsEnabled,
   disabledReason,
   downloadHref,
-  teacher = true,
+  teacher,
 }: {
   title: string
   group: boolean
@@ -51,8 +51,12 @@ export function AssignmentHeader({
   disabledReason: string | null
   /** The CSV export, when the assignment has one */
   downloadHref?: string
-  /** False for a teaching assistant: no link to hand out, no export, no editing */
-  teacher?: boolean
+  /**
+   * False for a teaching assistant: no link to hand out, no export, no
+   * editing. Required, with no default: a screen that forgot it would show a
+   * TA the teacher's controls
+   */
+  teacher: boolean
 }) {
   return (
     <div className="border-bottom py-3 pt-md-4 mb-3">

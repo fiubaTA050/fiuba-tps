@@ -274,7 +274,8 @@ reference code without mental translation. The confusing one:
   "Docentes" tab (`settings/invitations`). TAs are loaded by GitHub account —
   no link — into `teaching_assistants`, allocated per assignment to padrones
   or teams, and read only those rows: the dashboards, the entrega detail and
-  the devolución. They do not justify, extend, publish, link accounts, edit,
+  the devolución — which a teacher has to approve before the student reads
+  it, published entrega or not. They do not justify, extend, publish, link accounts, edit,
   export or see the roster, and never through an API key. Every reader they
   reach opts in with `{ allowAssistant: true }`; everything else stays
   teacher-only without knowing TAs exist. See `docs/teaching-assistants.md`.

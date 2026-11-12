@@ -423,5 +423,13 @@ acepta links: un permalink a `blob/<sha>/archivo#L88-L102` se puede clickear.
   `replaces_id` sostienen eso también para dos guardados simultáneos. Guardar
   lo mismo que ya está es un no-op, que es lo que cubre el doble click.
 - Texto plano con saltos de línea, hasta 10.000 caracteres. Sin Markdown.
+- **La de un ayudante espera la aprobación de un profesor** (agregado
+  2026-11-11). Lo que guarda un ayudante queda con `needs_approval`, y el
+  alumno no la lee hasta que un profesor la aprueba
+  (`submission_feedback_approvals`), aunque la entrega ya esté publicada.
+  Mientras tanto lee la versión anterior, si había. Publicar sigue siendo por
+  entrega y del profesor: la del ayudante se ve cuando se cumplen las dos. El
+  dashboard marca la fila con "Devolución sin aprobar". Ver
+  `docs/teaching-assistants.md`.
 - Se puede escribir con la entrega abierta o cerrada y con el trabajo práctico
   Inactive. Solo un classroom archivado lo rechaza.

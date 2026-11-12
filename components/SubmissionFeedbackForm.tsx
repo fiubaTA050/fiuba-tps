@@ -4,7 +4,10 @@ import { EyeIcon } from '@primer/octicons-react'
 import Link from 'next/link'
 import { useActionState, useState } from 'react'
 
-import { saveSubmissionFeedbackAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
+import {
+  approveSubmissionFeedbackAction,
+  saveSubmissionFeedbackAction,
+} from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
 import { EMPTY_STATE, type RosterActionState } from '@/app/classrooms/[slug]/roster/state'
 import type { AssignmentKind } from '@/lib/assignment-paths'
 import type { FeedbackVersion } from '@/lib/data/submissions'
@@ -29,6 +32,7 @@ export function SubmissionFeedbackForm({
   entrega,
   published,
   publishHref,
+  role,
 }: {
   target: {
     classroomSlug: string
@@ -45,6 +49,11 @@ export function SubmissionFeedbackForm({
   published: boolean
   /** The edit screen, where "Publicar" lives. Null for a TA, who cannot publish */
   publishHref: string | null
+  /**
+   * A TA's save waits for a teacher's approval before the student reads it,
+   * and only a teacher sees "Aprobar" — see `submissionFeedbackApprovals`
+   */
+  role: 'teacher' | 'assistant'
 }) {
   const latest = versions[0] ?? null
   const current = latest?.body != null ? latest : null
@@ -114,6 +123,18 @@ export function SubmissionFeedbackForm({
           </div>
         )}
 
+        {/* A TA took it away: that waits for approval too, and until then the
+            student keeps reading the version before */}
+        {showForm && !editing && latest?.body === null && latest.pendingApproval && (
+          <div className="color-bg-subtle p-2 mb-3 rounded-2">
+            <p className="f6 color-fg-muted mb-1">
+              {latest.createdBy ? `@${latest.createdBy}` : 'Un ayudante'} la quitó el{' '}
+              {formatArgentina(latest.createdAt)}.
+            </p>
+            <PendingApproval target={target} version={latest} role={role} />
+          </div>
+        )}
+
         {showForm ? (
           <form action={formAction}>
             <input type="hidden" name="classroom_slug" value={target.classroomSlug} />
@@ -138,7 +159,15 @@ export function SubmissionFeedbackForm({
               {current && ' Guardarla vacía la quita.'}
             </p>
 
-            {published ? (
+            {role === 'assistant' ? (
+              <p className="d-flex color-fg-muted f6 mb-0">
+                <EyeIcon className="mr-2 flex-shrink-0" />
+                <span>
+                  El alumno no la ve hasta que un profesor la apruebe
+                  {published ? '.' : `, y se publiquen los resultados de ${entrega}.`}
+                </span>
+              </p>
+            ) : published ? (
               <div className="flash flash-warn mt-2">
                 Los resultados de {entrega} ya están publicados: el alumno la ve apenas la guardes.
               </div>
@@ -170,8 +199,13 @@ export function SubmissionFeedbackForm({
             <p className="color-fg-muted f6 mb-2">
               {current.createdBy ? `@${current.createdBy}` : 'Un docente'} el{' '}
               {formatArgentina(current.createdAt)}
+              {current.approvedBy && ` · aprobada por @${current.approvedBy}`}
             </p>
-            <Visibility published={published} entrega={entrega} publishHref={publishHref} />
+            {current.pendingApproval ? (
+              <PendingApproval target={target} version={current} role={role} />
+            ) : (
+              <Visibility published={published} entrega={entrega} publishHref={publishHref} />
+            )}
           </>
         )}
 
@@ -192,11 +226,65 @@ export function SubmissionFeedbackForm({
                     {version.body === null ? 'Quitada' : 'Guardada'}
                     {version.createdBy && ` por @${version.createdBy}`} el{' '}
                     {formatArgentina(version.createdAt)}
+                    {version.approvedBy && ` · aprobada por @${version.approvedBy}`}
+                    {version.pendingApproval && ' · nunca se aprobó'}
                   </p>
                 </li>
               ))}
             </ul>
           </details>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A TA's version that no teacher approved yet. The teacher gets "Aprobar";
+ * the TA, why the student does not see it.
+ */
+function PendingApproval({
+  target,
+  version,
+  role,
+}: {
+  target: {
+    classroomSlug: string
+    assignmentSlug: string
+    kind: AssignmentKind
+    githubRepoId: number
+    submissionId: number
+  }
+  version: FeedbackVersion
+  role: 'teacher' | 'assistant'
+}) {
+  const [state, action, pending] = useActionState(approveSubmissionFeedbackAction, EMPTY_STATE)
+
+  return (
+    <div>
+      {state.error && <div className="flash flash-error mb-2">{state.error}</div>}
+      <div className="d-flex flex-items-center flex-justify-between flex-wrap">
+        <p className="d-flex color-fg-muted f6 mb-0">
+          <EyeIcon className="mr-2 flex-shrink-0" />
+          <span>
+            <span className="Label Label--attention mr-1">Pendiente de aprobación</span>
+            {role === 'teacher'
+              ? 'La escribió un ayudante: el alumno no la ve hasta que la apruebes.'
+              : 'El alumno no la ve hasta que un profesor la apruebe.'}
+          </span>
+        </p>
+        {role === 'teacher' && (
+          <form action={action}>
+            <input type="hidden" name="classroom_slug" value={target.classroomSlug} />
+            <input type="hidden" name="assignment_slug" value={target.assignmentSlug} />
+            <input type="hidden" name="kind" value={target.kind} />
+            <input type="hidden" name="github_repo_id" value={target.githubRepoId} />
+            <input type="hidden" name="submission_id" value={target.submissionId} />
+            <input type="hidden" name="feedback_id" value={version.id} />
+            <button type="submit" className="btn btn-sm btn-primary" disabled={pending}>
+              {pending ? 'Aprobando…' : version.body === null ? 'Aprobar que se quite' : 'Aprobar'}
+            </button>
+          </form>
         )}
       </div>
     </div>

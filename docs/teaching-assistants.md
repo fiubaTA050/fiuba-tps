@@ -304,6 +304,16 @@ Hechos los pasos 1 a 6. Lo que la implementación agregó a la spec:
   edición, los CSV y MCP, que comparten esas funciones, quedan cerrados sin
   tocarlos. Las filas se filtran con `visibleRepo` y `allocatedTargets`, en
   `lib/data/staff.ts`.
+- **La devolución de un ayudante la aprueba un profesor.** La revisión
+  encontró que publicar es por entrega: una vez publicada, cualquier
+  devolución nueva le llegaba al alumno en el momento, y eso hacía publicar
+  al ayudante de hecho. Ahora lo que guarda un ayudante queda pendiente
+  (`submission_feedbacks.needs_approval`) hasta que un profesor aprieta
+  "Aprobar" (`submission_feedback_approvals`, una fila por versión, porque
+  las versiones no se modifican). El alumno lee la versión más nueva que no
+  la necesita o ya la tiene. Solo se aprueba la versión vigente. Lo del
+  profesor no necesita aprobación, y lo escrito antes de esto tampoco: por
+  eso es una columna con default y no hubo que rellenar nada.
 - **Lo que no se hizo:** la vinculación de owners por URL directa (sigue
   siendo desde el índice) y el acceso a los repositorios en GitHub.
 

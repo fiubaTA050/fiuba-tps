@@ -221,6 +221,7 @@ export async function SubmissionDetail({
           entrega={detail.entrega.title ?? 'esta entrega'}
           published={detail.entrega.resultsPublished}
           publishHref={detail.role === 'teacher' ? `${assignmentPath}/edit#entregas` : null}
+          role={detail.role}
         />
       </div>
     </>

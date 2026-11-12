@@ -990,7 +990,9 @@ export const lateSubmissionJustifications = pgTable(
  * it read, and only one row may replace it.
  *
  * The student sees it only once `checkpoints.results_published_at` is set,
- * the same "Publicar" that releases the automated grading.
+ * the same "Publicar" that releases the automated grading — and, of a version
+ * a teaching assistant saved, only once a teacher approved it
+ * (`submission_feedback_approvals`).
  */
 export const submissionFeedbacks = pgTable(
   'submission_feedbacks',
@@ -1007,6 +1009,13 @@ export const submissionFeedbacks = pgTable(
       .notNull()
       .references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Saved by a teaching assistant: the student does not read it until a
+     * teacher approves it, and reads the version before it meanwhile. A
+     * teacher's own save never needs it, which is also every row written
+     * before TAs existed — so the default needed no backfill.
+     */
+    needsApproval: boolean('needs_approval').notNull().default(false),
   },
   (table) => [
     index('index_submission_feedbacks_on_submission_id').on(table.submissionId, desc(table.id)),
@@ -1243,3 +1252,29 @@ export type GradingRun = typeof gradingRuns.$inferSelect
 export type SubmissionFeedback = typeof submissionFeedbacks.$inferSelect
 export type TeachingAssistant = typeof teachingAssistants.$inferSelect
 export type TeachingAssistantAllocation = typeof teachingAssistantAllocations.$inferSelect
+
+/**
+ * A teacher's approval of a devolución version a teaching assistant saved
+ * (`submission_feedbacks.needs_approval`). Its own table rather than a column,
+ * because `submission_feedbacks` is append-only — approving adds a fact, it
+ * does not change the version. One approval per version.
+ *
+ * Publishing stays per entrega, the teacher's "Publicar": a TA's version is
+ * read by the student only when both hold. See docs/teaching-assistants.md.
+ */
+export const submissionFeedbackApprovals = pgTable(
+  'submission_feedback_approvals',
+  {
+    id: serial('id').primaryKey(),
+    feedbackId: integer('feedback_id')
+      .notNull()
+      .references(() => submissionFeedbacks.id, { onDelete: 'cascade' }),
+    approvedByUserId: integer('approved_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    approvedAt: timestamp('approved_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('index_submission_feedback_approvals_on_feedback_id').on(table.feedbackId)],
+)
+
+export type SubmissionFeedbackApproval = typeof submissionFeedbackApprovals.$inferSelect

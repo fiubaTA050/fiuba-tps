@@ -26,6 +26,8 @@ export type RepoSubmission = {
   passed?: boolean | null
   /** It has a devolución — see `CurrentSubmission` */
   hasFeedback?: boolean
+  /** Its devolución is a TA's waiting for a teacher's approval — see `CurrentSubmission` */
+  feedbackPending?: boolean
 }
 
 /** One student or one team, with everything the filters need to decide on it */
