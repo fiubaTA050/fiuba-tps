@@ -54,6 +54,7 @@ const MAX_GRANTS_PER_VISIT = 20
 const BATCH_SIZE = 5
 
 type RepoRef = { groupAssignmentRepoId: number; githubRepoId: number }
+type Allocated = RepoRef & { groupId: number }
 type Granted = RepoRef & { accessId: number }
 
 /**
@@ -110,7 +111,9 @@ export async function syncAssistantRepoAccess(
     const results = await Promise.allSettled(
       missing
         .slice(i, i + BATCH_SIZE)
-        .map((repo) => grant(session, installationId, login, teachingAssistantId, repo)),
+        .map((repo) =>
+          grant(session, installationId, login, teachingAssistantId, groupAssignmentId, repo),
+        ),
     )
 
     let slowDown = false
@@ -131,13 +134,17 @@ export async function syncAssistantRepoAccess(
  * something to revoke, and `removeCollaborator` takes a pending invitation
  * back too. An accept that fails leaves the invitation in their email —
  * waiting for the next visit instead would send it again every time.
+ *
+ * Whatever is not recorded is taken back on the spot: a row is the only thing
+ * a later revoke reads, so access without one would outlive every revoke.
  */
 async function grant(
   session: Session,
   installationId: number,
   login: string,
   teachingAssistantId: number,
-  repo: RepoRef,
+  groupAssignmentId: number,
+  repo: Allocated,
 ): Promise<void> {
   const fullName = await findRepositoryFullNameById(installationId, repo.githubRepoId)
   // Gone on GitHub: nothing to grant (NullGitHubRepository)
@@ -146,15 +153,16 @@ async function grant(
   // Null when GitHub answers 204: an org member, reached without an invitation
   const invitationId = await addCollaborator(installationId, fullName, login, 'pull')
 
+  let recorded: boolean
   try {
-    await db
-      .insert(teachingAssistantRepoAccesses)
-      .values({ teachingAssistantId, groupAssignmentRepoId: repo.groupAssignmentRepoId })
-      .onConflictDoNothing()
+    recorded = await record(teachingAssistantId, groupAssignmentId, repo)
   } catch (error) {
-    // The TA was removed, or the team's repository row deleted, while this
-    // ran: the access just granted has nothing left to answer for it
-    if (!isForeignKeyViolation(error)) throw error
+    await removeCollaborator(installationId, fullName, login).catch((undoError) =>
+      console.error('syncAssistantRepoAccess: could not undo an unrecorded grant', undoError),
+    )
+    throw error
+  }
+  if (!recorded) {
     await removeCollaborator(installationId, fullName, login)
     return
   }
@@ -166,6 +174,69 @@ async function grant(
     console.error('syncAssistantRepoAccess: accept failed, left to the email', error)
   }
 }
+
+/**
+ * Records a grant, but only while the TA and the allocation behind it still
+ * exist — and holds both until it commits. A teacher taking either away
+ * while the invitation was in flight has already revoked, before this row
+ * existed: here the delete waits, and its revoke then finds the row, or it
+ * came first and nothing is recorded. The TA is locked before the
+ * allocation, the order `removeTeachingAssistant` takes them in (the TA row,
+ * then its allocations by cascade), so the two cannot deadlock.
+ */
+async function record(
+  teachingAssistantId: number,
+  groupAssignmentId: number,
+  repo: Allocated,
+): Promise<boolean> {
+  try {
+    return await db.transaction(async (tx) => {
+      const [assistant] = await tx
+        .select({ id: teachingAssistants.id })
+        .from(teachingAssistants)
+        .where(eq(teachingAssistants.id, teachingAssistantId))
+        .for('key share')
+      if (!assistant) return false
+
+      const [allocation] = await tx
+        .select({ id: teachingAssistantAllocations.id })
+        .from(teachingAssistantAllocations)
+        .where(
+          and(
+            eq(teachingAssistantAllocations.teachingAssistantId, teachingAssistantId),
+            eq(teachingAssistantAllocations.groupAssignmentId, groupAssignmentId),
+            eq(teachingAssistantAllocations.groupId, repo.groupId),
+          ),
+        )
+        .for('share')
+      if (!allocation) return false
+
+      await tx
+        .insert(teachingAssistantRepoAccesses)
+        .values({ teachingAssistantId, groupAssignmentRepoId: repo.groupAssignmentRepoId })
+        .onConflictDoNothing()
+      return true
+    })
+  } catch (error) {
+    // The team's repository row was deleted meanwhile
+    if (isForeignKeyViolation(error)) return false
+    throw error
+  }
+}
+
+/**
+ * Who to revoke from, and through which installation. Resolved once per
+ * removal: its retry rounds would otherwise ask GitHub again each time.
+ */
+type RevokeTarget =
+  // The installation is dead, or the TA is gone: nothing can be revoked
+  | { kind: 'unreachable' }
+  // The account no longer exists, and its collaborator access with it
+  | { kind: 'deleted' }
+  | { kind: 'live'; installationId: number; login: string }
+
+/** Holds the target across calls; a fresh one per removal or allocation change */
+export type RevokeMemo = { target?: Promise<RevokeTarget> }
 
 /**
  * Takes back a TA's access, for a teacher: in one assignment, what no
@@ -182,6 +253,7 @@ export async function revokeAssistantRepoAccess(
   classroomId: number,
   teachingAssistantId: number,
   groupAssignmentId: number | null,
+  memo: RevokeMemo = {},
 ): Promise<number> {
   const [granted, allocated] = await Promise.all([
     grantedRepos(teachingAssistantId, groupAssignmentId),
@@ -192,22 +264,11 @@ export async function revokeAssistantRepoAccess(
   const stale = granted.filter((repo) => !wanted.has(repo.groupAssignmentRepoId))
   if (stale.length === 0) return 0
 
-  const [installationId, account] = await Promise.all([
-    liveInstallationId(session, classroomId),
-    db
-      .select({ uid: users.uid })
-      .from(teachingAssistants)
-      .innerJoin(users, eq(users.id, teachingAssistants.userId))
-      .where(eq(teachingAssistants.id, teachingAssistantId)),
-  ])
-  if (installationId === null || account.length === 0) return stale.length
+  memo.target ??= revokeTarget(session, classroomId, teachingAssistantId)
+  const target = await memo.target
 
-  // By id, not the stored login: that one is only as fresh as the TA's last
-  // sign-in, and a revoke against a renamed login answers 404 — which reads as
-  // done and would leave the access in place
-  const login = await findGitHubLoginById(session, account[0].uid)
-  if (login === null) {
-    // The account is gone, and its collaborator access with it
+  if (target.kind === 'unreachable') return stale.length
+  if (target.kind === 'deleted') {
     await db.delete(teachingAssistantRepoAccesses).where(
       inArray(
         teachingAssistantRepoAccesses.id,
@@ -217,7 +278,31 @@ export async function revokeAssistantRepoAccess(
     return 0
   }
 
-  return revoke(installationId, login, stale)
+  return revoke(target.installationId, target.login, stale)
+}
+
+async function revokeTarget(
+  session: Session,
+  classroomId: number,
+  teachingAssistantId: number,
+): Promise<RevokeTarget> {
+  const [installationId, account] = await Promise.all([
+    liveInstallationId(session, classroomId),
+    db
+      .select({ uid: users.uid })
+      .from(teachingAssistants)
+      .innerJoin(users, eq(users.id, teachingAssistants.userId))
+      .where(eq(teachingAssistants.id, teachingAssistantId)),
+  ])
+  if (installationId === null || account.length === 0) return { kind: 'unreachable' }
+
+  // By id, not the stored login: that one is only as fresh as the TA's last
+  // sign-in, and a revoke against a renamed login answers 404 — which reads as
+  // done and would leave the access in place
+  const login = await findGitHubLoginById(session, account[0].uid)
+  if (login === null) return { kind: 'deleted' }
+
+  return { kind: 'live', installationId, login }
 }
 
 /** Removes the collaborator and its row, repository by repository */
@@ -248,11 +333,15 @@ async function revoke(installationId: number, login: string, repos: Granted[]): 
 }
 
 /** The repositories of the teams allocated to the TA in this assignment */
-function allocatedRepos(teachingAssistantId: number, groupAssignmentId: number): Promise<RepoRef[]> {
+function allocatedRepos(
+  teachingAssistantId: number,
+  groupAssignmentId: number,
+): Promise<Allocated[]> {
   return db
     .select({
       groupAssignmentRepoId: groupAssignmentRepos.id,
       githubRepoId: groupAssignmentRepos.githubRepoId,
+      groupId: groupAssignmentRepos.groupId,
     })
     .from(teachingAssistantAllocations)
     .innerJoin(

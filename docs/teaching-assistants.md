@@ -328,16 +328,30 @@ asignar. `teaching_assistant_repo_accesses` tiene una sola clave, a
     ayudante queda y el profesor ve "Probá de nuevo". El borrado bloquea la
     fila del ayudante y solo procede si no le quedó ningún acceso: un acceso
     que el dashboard le dio en el medio se devuelve en otra vuelta, y uno
-    posterior espera el lock, choca con la clave foránea y se devuelve solo.
+    posterior espera el lock, no encuentra al ayudante y se devuelve solo.
+    La instalación y el login se buscan una vez, no en cada vuelta.
+  - **Devolver incluye la invitación pendiente.** `removeCollaborator` la
+    cancela antes de sacar al colaborador: medido el 12/11/2026, el `DELETE`
+    de colaborador deja viva una invitación *al* usuario (la documentación
+    solo promete cancelar las que él mandó), y aceptarla del mail después lo
+    metía en un repo sin fila. Lo encontró el segundo code review; arregla
+    también al alumno que el profesor cambia de equipo (`moveMember`).
   - **Solo un 404 cuenta como "el repo ya no está".** Un error de GitHub deja
     la fila y cuenta como falla; leerlo como borrado dejaba al ayudante
     adentro sin registro (lo encontró el code review). Por lo mismo, la
     instalación se re-resuelve antes (`currentInstallationId`): con una
     vieja, hasta el token da 404.
 - **Lo que se escapa lo arregla la pasada siguiente.** La visita del ayudante
-  también saca, en ese TP, lo que ya no tiene asignado. Si el profesor lo saca
-  mientras se le está dando acceso, el insert choca con la clave foránea y se
-  le saca en el momento.
+  también saca, en ese TP, lo que ya no tiene asignado.
+- **Una carrera con el profesor no deja acceso sin fila.** La fila se guarda
+  en una transacción que bloquea al ayudante (`for key share`) y su
+  asignación (`for share`), y solo si las dos siguen existiendo; si no, el
+  acceso recién dado se devuelve en el momento. Si el profesor desasigna o
+  saca al ayudante mientras la invitación estaba en vuelo, su borrado espera a
+  esa transacción y su revocación encuentra la fila. El orden de los locks
+  (ayudante, después asignación) es el mismo que toma el borrado del
+  ayudante, así que no hay deadlock. Si guardar la fila falla por otra cosa,
+  también se devuelve el acceso antes de seguir.
 - **GitHub manda el mail igual.** Su documentación dice que el invitado
   recibe una notificación, y llega aunque la invitación ya esté aceptada. Es
   un mail por repo, sin nada que clickear.
@@ -350,12 +364,20 @@ pendientes, y al desasignarlo desde el dashboard del profesor se fue del repo
 y de la tabla. La desasignación tardó ~1,8 s, por las tres llamadas a GitHub.
 Después de los arreglos del code review se repitió el alta, y "Sacar
 ayudante" en la pestaña Docentes lo sacó del repo antes de borrarlo.
+Después del segundo code review se repitió el alta con la transacción que
+bloquea ayudante y asignación (`read`, 0 invitaciones, una fila), y se midió
+`removeCollaborator` contra una invitación sin aceptar: la cancela, sin
+importar las mayúsculas del login, y no toca al alumno colaborador.
 
 Lo que no cubre: si un ayudante pasa a ser alumno del classroom,
 `findClassroomRole` le niega el rol pero el acceso en GitHub queda hasta que
 el profesor lo saca. Si se borra un equipo, su fila en
 `group_assignment_repos` se va en cascada y el repo sigue en GitHub con el
-ayudante adentro.
+ayudante adentro. Un repo que se transfiere a otra organización, o que la
+App deja de ver porque la instalación pasa a "repositorios seleccionados",
+también contesta 404, se lee como borrado y su fila se descarta con el
+ayudante adentro: con el token de la instalación no hay forma de distinguirlo
+de un repo borrado.
 
 ## Tests
 

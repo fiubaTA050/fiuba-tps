@@ -252,9 +252,12 @@ export async function addCollaborator(
  * (`Group#remove_from_github_team`). With collaborators the access is per
  * repository and has to be taken back the same way.
  *
- * Also revokes a collaborator invitation that was never accepted, which
- * `removeCollaborator` does on its own — otherwise a student could accept an
- * email invitation to a repository they were already moved off.
+ * Also cancels an invitation to them that was never accepted — otherwise a
+ * student could accept an emailed invitation to a repository they were
+ * already moved off. The DELETE does not do it on its own: measured
+ * 2026-11-12, an invitation to the user survives it (the docs only promise
+ * to cancel the ones they *sent*). The invitation goes first, so one accepted
+ * in between is still a collaborator for the DELETE to remove.
  */
 export async function removeCollaborator(
   installationId: number,
@@ -262,13 +265,33 @@ export async function removeCollaborator(
   username: string,
 ): Promise<void> {
   const [owner, repo] = fullName.split('/')
+  const octokit = installationClient(installationId)
 
+  let invitations
   try {
-    await installationClient(installationId).rest.repos.removeCollaborator({
+    invitations = await octokit.paginate(octokit.rest.repos.listInvitations, {
       owner,
       repo,
-      username,
+      per_page: 100,
     })
+  } catch (error) {
+    // The repository is gone, and every access to it with it
+    if (isNotFound(error)) return
+    throw error
+  }
+
+  for (const invitation of invitations) {
+    if (invitation.invitee?.login.toLowerCase() !== username.toLowerCase()) continue
+    try {
+      await octokit.rest.repos.deleteInvitation({ owner, repo, invitation_id: invitation.id })
+    } catch (error) {
+      // Accepted or cancelled since the list: the DELETE below covers the first
+      if (!isNotFound(error)) throw error
+    }
+  }
+
+  try {
+    await octokit.rest.repos.removeCollaborator({ owner, repo, username })
   } catch (error) {
     // The repository is gone, or they were never a collaborator. Both are the
     // state we were after.

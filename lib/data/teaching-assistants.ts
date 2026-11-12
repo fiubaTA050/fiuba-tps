@@ -15,7 +15,7 @@ import {
   users,
 } from '@/db/schema'
 import { type AssignmentKind, findTeachingAssignment } from '@/lib/data/assignment-kind'
-import { revokeAssistantRepoAccess } from '@/lib/data/assistant-repo-access'
+import { type RevokeMemo, revokeAssistantRepoAccess } from '@/lib/data/assistant-repo-access'
 import { asFlag, isStudentOf } from '@/lib/data/classroom-students'
 import { findTeachingClassroom } from '@/lib/data/organizations'
 import { isForeignKeyViolation, isUniqueViolation } from '@/lib/data/postgres'
@@ -294,14 +294,14 @@ export async function removeTeachingAssistant(
 
   // A grant from the TA's own dashboard can land between the revoke and the
   // delete, and would cascade away with the TA, access and all. So the delete
-  // runs with the TA's row locked and only if no access is left: an insert
-  // that came first is seen and revoked on the next round, and one that comes
-  // after waits on the lock (the foreign key) and then fails, which makes
-  // `grant` take its own access back.
+  // runs with the TA's row locked and only if no access is left: a grant
+  // recorded first is seen and revoked on the next round, and one that comes
+  // after waits on the lock, then finds no TA and takes its own access back.
+  const memo: RevokeMemo = {}
   for (let round = 0; round < 3; round++) {
     let failed: number
     try {
-      failed = await revokeAssistantRepoAccess(session, classroom.id, assistant.id, null)
+      failed = await revokeAssistantRepoAccess(session, classroom.id, assistant.id, null, memo)
     } catch (error) {
       // The lookup of the account by id failed: a rate limit or an outage
       console.error('removeTeachingAssistant: revoke failed', error)

@@ -1,5 +1,5 @@
 import type { Session } from 'next-auth'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -357,6 +357,41 @@ describe('syncAssistantRepoAccess', () => {
     expect(removeCollaborator).toHaveBeenCalledWith(99, 'org/repo-2001', 'ayudante')
     expect(await accessRows()).toEqual([])
   })
+
+  it('takes the access back when the team is deallocated while it is being granted', async () => {
+    const w = await world()
+    // The teacher's revoke runs here and finds no row yet
+    addCollaborator.mockImplementation(async () => {
+      await setAllocation(w.profe, SLUG, 'tp1', 'group', {
+        teachingAssistantId: w.taId,
+        targetIds: [w.teams.mine],
+        allocate: false,
+      })
+      return 555
+    })
+
+    await syncAssistantRepoAccess(w.ta, SLUG, 'tp1')
+
+    expect(removeCollaborator).toHaveBeenCalledWith(99, 'org/repo-2001', 'ayudante')
+    expect(acceptRepositoryInvitation).not.toHaveBeenCalled()
+    expect(await accessRows()).toEqual([])
+  })
+
+  it('takes the invitation back when it cannot be recorded', async () => {
+    const w = await world()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    addCollaborator.mockImplementation(async () => {
+      await db.execute(sql`alter table teaching_assistant_repo_accesses rename to broken`)
+      return 555
+    })
+
+    await syncAssistantRepoAccess(w.ta, SLUG, 'tp1')
+    await db.execute(sql`alter table broken rename to teaching_assistant_repo_accesses`)
+
+    expect(removeCollaborator).toHaveBeenCalledWith(99, 'org/repo-2001', 'ayudante')
+    expect(acceptRepositoryInvitation).not.toHaveBeenCalled()
+    expect(await accessRows()).toEqual([])
+  })
 })
 
 describe('setAllocation, taking a team off', () => {
@@ -452,6 +487,8 @@ describe('removeTeachingAssistant', () => {
     expect(result).toEqual({ success: true })
     expect(removeCollaborator).toHaveBeenCalledWith(99, 'org/repo-2002', 'ayudante')
     expect(await db.select().from(teachingAssistants)).toEqual([])
+    // The second round reuses the installation and login of the first
+    expect(findGitHubLoginById.mock.calls.filter(([s]) => s === w.profe)).toHaveLength(1)
   })
 
   it('revokes every repository first, then removes the TA', async () => {
