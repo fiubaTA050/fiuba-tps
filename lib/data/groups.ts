@@ -17,8 +17,9 @@ import {
   users,
   type InviteStatusValue,
 } from '@/db/schema'
-import { findTeachingClassroom } from '@/lib/data/organizations'
+import { type StaffAccess, findStaffClassroom, findTeachingClassroom } from '@/lib/data/organizations'
 import { parameterize } from '@/lib/data/slug'
+import { allocatedTargets } from '@/lib/data/staff'
 import { db } from '@/lib/db'
 import {
   addCollaborator,
@@ -164,8 +165,9 @@ export async function listGroupAssignmentAcceptances(
   session: Session,
   classroomSlug: string,
   assignmentSlug: string,
+  access?: StaffAccess,
 ): Promise<GroupAssignmentAcceptances | null> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
+  const classroom = await findStaffClassroom(session, classroomSlug, access)
   if (!classroom) return null
 
   const [assignment] = await db
@@ -198,7 +200,20 @@ export async function listGroupAssignmentAcceptances(
     .innerJoin(rosters, eq(rosters.id, organizations.rosterId))
     .where(eq(organizations.id, classroom.id))
 
-  const teams = await teamsOf(assignment.groupingId)
+  // A TA reads the teams allocated to them, and nothing else: not who is left
+  // without a team, and not the padrones of anybody outside their teams
+  const allowed = await allocatedTargets(
+    {
+      role: classroom.role,
+      classroom: { id: classroom.id, archivedAt: classroom.archivedAt },
+      assignment: { id: assignment.id, title: '', slug: assignmentSlug },
+      teachingAssistantId: classroom.teachingAssistantId,
+    },
+    'group',
+  )
+  const teams = (await teamsOf(assignment.groupingId)).filter(
+    (team) => !allowed || allowed.has(team.id),
+  )
 
   const statuses = await db
     .select({ groupId: groupInviteStatuses.groupId, status: groupInviteStatuses.status })
@@ -214,6 +229,8 @@ export async function listGroupAssignmentAcceptances(
 
   const repoByTeam = new Map(repos.map((row) => [row.groupId, row.repoId]))
 
+  const members = new Set(teams.flatMap((team) => team.members.map((member) => member.userId)))
+
   const linked = roster
     ? await db
         .select({ userId: rosterEntries.userId, identifier: rosterEntries.identifier })
@@ -228,8 +245,13 @@ export async function listGroupAssignmentAcceptances(
       repoId: repoByTeam.get(team.id) ?? null,
     })),
     identifierName: roster?.identifierName ?? null,
-    studentsNotOnTeam: roster ? await studentsNotOnTeam(roster.id, assignment.groupingId) : [],
-    identifiers: new Map(linked.map((row) => [row.userId!, row.identifier])),
+    studentsNotOnTeam:
+      roster && !allowed ? await studentsNotOnTeam(roster.id, assignment.groupingId) : [],
+    identifiers: new Map(
+      linked
+        .filter((row) => !allowed || members.has(row.userId!))
+        .map((row) => [row.userId!, row.identifier]),
+    ),
   }
 }
 

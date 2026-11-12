@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, count, desc, eq, inArray, isNull, or } from 'drizzle-orm'
+import { and, count, desc, eq, exists, inArray, isNull, or } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
@@ -36,6 +36,18 @@ export type CreatorResult =
   | { success: true; slug: string }
   | { success: false; error: string }
 
+/** What the caller is in a classroom: see `findClassroomRole` */
+export type StaffRole = 'teacher' | 'assistant'
+
+/**
+ * The opt-in a reader passes to let a teaching assistant through. Without it
+ * every reader stays teacher-only: what the TA may reach is the short list in
+ * docs/teaching-assistants.md, and every other screen, route and MCP tool
+ * that shares these functions — editing, the CSVs — stays closed to TAs
+ * without having to know they exist.
+ */
+export type StaffAccess = { allowAssistant?: boolean }
+
 /** A classroom with its org data resolved against GitHub (DA-2) */
 export type ClassroomListItem = {
   id: number
@@ -44,6 +56,8 @@ export type ClassroomListItem = {
   archivedAt: Date | null
   /** null when the org is no longer reachable: installation removed, or access lost */
   organization: GitHubOrganization | null
+  /** What the caller is in it: a TA's screens leave out what only a teacher can do */
+  role: StaffRole
 }
 
 /** One line of the assignment list a classroom card shows */
@@ -96,17 +110,94 @@ export async function listClassrooms(session: Session): Promise<ClassroomCard[]>
     )
     .orderBy(desc(organizations.createdAt))
 
-  const byGithubId = new Map(githubOrganizations.map((org) => [org.githubId, org]))
-  const cardAssignments = await listCardAssignments(rows.map((row) => row.id))
+  const assisted = await listAssistedClassrooms(session)
 
-  return rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    slug: row.slug,
-    archivedAt: row.archivedAt,
-    organization: byGithubId.get(row.githubId) ?? null,
-    assignments: cardAssignments.get(row.id) ?? [],
-  }))
+  const byGithubId = new Map(githubOrganizations.map((org) => [org.githubId, org]))
+  const cardAssignments = await listCardAssignments(
+    [...rows, ...assisted.rows].map((row) => row.id),
+  )
+
+  const teaching = rows.map(
+    (row): ClassroomCard => ({
+      id: row.id,
+      title: row.title,
+      slug: row.slug,
+      archivedAt: row.archivedAt,
+      organization: byGithubId.get(row.githubId) ?? null,
+      role: 'teacher',
+      assignments: cardAssignments.get(row.id) ?? [],
+    }),
+  )
+
+  const assisting = assisted.rows.map(
+    (row): ClassroomCard => ({
+      id: row.id,
+      title: row.title,
+      slug: row.slug,
+      archivedAt: row.archivedAt,
+      organization: assisted.organizations.get(row.installationId) ?? null,
+      role: 'assistant',
+      assignments: cardAssignments.get(row.id) ?? [],
+    }),
+  )
+
+  return [...teaching, ...assisting]
+}
+
+/**
+ * The classrooms the caller is a teaching assistant of, for the index, with
+ * their organizations. Under the same rules as `findClassroomRole`: a browser
+ * login only, not where the caller is also a teacher (that card is already
+ * there) or a student.
+ *
+ * Not from `GET /user/installations` like the teacher's cards: a TA is not a
+ * member of the org, so the App installation is not theirs to list. Each org
+ * is read through its installation instead, once per installation.
+ */
+async function listAssistedClassrooms(session: Session) {
+  const empty = { rows: [], organizations: new Map<number, GitHubOrganization | null>() }
+  if (session.via !== 'browser') return empty
+
+  const userId = Number(session.user.id)
+  const rows = await db
+    .select({
+      id: organizations.id,
+      title: organizations.title,
+      slug: organizations.slug,
+      archivedAt: organizations.archivedAt,
+      installationId: organizations.installationId,
+      teacher: asFlag(
+        exists(
+          db
+            .select({ one: organizationsUsers.userId })
+            .from(organizationsUsers)
+            .where(
+              and(
+                eq(organizationsUsers.organizationId, organizations.id),
+                eq(organizationsUsers.userId, userId),
+              ),
+            ),
+        ),
+      ),
+      student: asFlag(isStudentOf(organizations.id, userId)),
+    })
+    .from(teachingAssistants)
+    .innerJoin(organizations, eq(organizations.id, teachingAssistants.organizationId))
+    .where(and(eq(teachingAssistants.userId, userId), isNull(organizations.deletedAt)))
+    .orderBy(desc(organizations.createdAt))
+
+  const visible = rows.filter((row) => !row.teacher && !row.student)
+  if (visible.length === 0) return empty
+
+  const installations = [...new Set(visible.map((row) => row.installationId))]
+  const resolved = await Promise.all(
+    installations.map((id) => findOrganizationByInstallation(id, session.user.githubLogin)),
+  )
+
+  return {
+    rows: visible,
+    organizations: new Map(installations.map((id, index) => [id, resolved[index]])),
+  }
 }
 
 /**
@@ -216,34 +307,19 @@ async function linkUserToExistingClassrooms(session: Session, admin: GitHubOrgan
 export async function findClassroom(
   session: Session,
   slug: string,
+  access?: StaffAccess,
 ): Promise<ClassroomListItem | null> {
-  const [row] = await db
-    .select({
-      id: organizations.id,
-      title: organizations.title,
-      slug: organizations.slug,
-      githubId: organizations.githubId,
-      installationId: organizations.installationId,
-      archivedAt: organizations.archivedAt,
-    })
-    .from(organizations)
-    .innerJoin(organizationsUsers, eq(organizationsUsers.organizationId, organizations.id))
-    .where(
-      and(
-        eq(organizations.slug, slug),
-        eq(organizationsUsers.userId, Number(session.user.id)),
-        isNull(organizations.deletedAt),
-      ),
-    )
-
+  const row = await findStaffClassroom(session, slug, access)
   if (!row) return null
 
   // DA-2: the org data is read from GitHub, not the database. Resolving by
   // installation_id avoids walking every installation of the teacher just to
-  // filter down to the one we already had.
+  // filter down to the one we already had. A TA cannot re-resolve a stale one
+  // (it walks the caller's own installations, and the org's is not theirs):
+  // they see the org as unreachable until a teacher opens the classroom.
   const organization =
     (await findOrganizationByInstallation(row.installationId, session.user.githubLogin)) ??
-    (await reresolveInstallation(session, row.id, row.githubId))
+    (row.role === 'teacher' ? await reresolveInstallation(session, row.id, row.githubId) : null)
 
   return {
     id: row.id,
@@ -251,6 +327,7 @@ export async function findClassroom(
     slug: row.slug,
     archivedAt: row.archivedAt,
     organization,
+    role: row.role,
   }
 }
 
@@ -271,32 +348,26 @@ export type ClassroomInstallation = {
   githubId: number
   /** Stored, and possibly stale — see `currentInstallationId` */
   installationId: number
+  role: StaffRole
 }
 
 export async function findClassroomInstallation(
   session: Session,
   slug: string,
+  access?: StaffAccess,
 ): Promise<ClassroomInstallation | null> {
-  const [row] = await db
-    .select({
-      id: organizations.id,
-      title: organizations.title,
-      slug: organizations.slug,
-      archivedAt: organizations.archivedAt,
-      githubId: organizations.githubId,
-      installationId: organizations.installationId,
-    })
-    .from(organizations)
-    .innerJoin(organizationsUsers, eq(organizationsUsers.organizationId, organizations.id))
-    .where(
-      and(
-        eq(organizations.slug, slug),
-        eq(organizationsUsers.userId, Number(session.user.id)),
-        isNull(organizations.deletedAt),
-      ),
-    )
+  const row = await findStaffClassroom(session, slug, access)
+  if (!row) return null
 
-  return row ?? null
+  return {
+    id: row.id,
+    title: row.title,
+    slug: row.slug,
+    archivedAt: row.archivedAt,
+    githubId: row.githubId,
+    installationId: row.installationId,
+    role: row.role,
+  }
 }
 
 /**
@@ -370,8 +441,10 @@ export type ClassroomCounters = {
   assignments: number
   /** Roster entries; null while the classroom has no roster, and the tab shows no counter */
   students: number | null
-  /** Distinct people among teachers and TAs: someone on both lists is one */
-  staff: number
+  /** Distinct people among teachers and TAs: someone on both lists is one. Null for a TA */
+  staff: number | null
+  /** A TA's tab bar has only the assignments: the roster and the staff are a teacher's */
+  role: StaffRole
 }
 
 /**
@@ -395,7 +468,7 @@ export async function classroomCounters(
         isNull(organizations.deletedAt),
       ),
     )
-  if (!classroom) return null
+  if (!classroom) return assistantCounters(session, slug)
 
   const [[individual], [group], students, [staff]] = await Promise.all([
     db
@@ -435,15 +508,43 @@ export async function classroomCounters(
     assignments: individual.n + group.n,
     students: students === null ? null : students[0].n,
     staff: staff.n,
+    role: 'teacher',
   }
 }
 
+/** `classroomCounters` for a TA: the assignments, and nothing they cannot open */
+async function assistantCounters(session: Session, slug: string): Promise<ClassroomCounters | null> {
+  const found = await findClassroomRole(session, slug)
+  if (found?.role !== 'assistant') return null
+
+  const [[individual], [group]] = await Promise.all([
+    db
+      .select({ n: count() })
+      .from(assignments)
+      .where(and(eq(assignments.organizationId, found.classroom.id), isNull(assignments.deletedAt))),
+    db
+      .select({ n: count() })
+      .from(groupAssignments)
+      .where(
+        and(
+          eq(groupAssignments.organizationId, found.classroom.id),
+          isNull(groupAssignments.deletedAt),
+        ),
+      ),
+  ])
+
+  return { assignments: individual.n + group.n, students: null, staff: null, role: 'assistant' }
+}
+
+/** A classroom row as the staff lookups return it */
+export type StaffClassroomRow = TeachingClassroom & { title: string; slug: string }
+
 /** Who the caller is in one classroom: see `findClassroomRole` */
 export type ClassroomRole =
-  | { role: 'teacher'; classroom: TeachingClassroom }
+  | { role: 'teacher'; classroom: StaffClassroomRow }
   | {
       role: 'assistant'
-      classroom: TeachingClassroom
+      classroom: StaffClassroomRow
       /** `teaching_assistants.id`, what the allocations of the TA hang off */
       teachingAssistantId: number
     }
@@ -479,6 +580,8 @@ export async function findClassroomRole(
   const [row] = await db
     .select({
       id: organizations.id,
+      title: organizations.title,
+      slug: organizations.slug,
       githubId: organizations.githubId,
       installationId: organizations.installationId,
       archivedAt: organizations.archivedAt,
@@ -505,8 +608,10 @@ export async function findClassroomRole(
 
   if (!row) return null
 
-  const classroom: TeachingClassroom = {
+  const classroom: StaffClassroomRow = {
     id: row.id,
+    title: row.title,
+    slug: row.slug,
     githubId: row.githubId,
     installationId: row.installationId,
     archivedAt: row.archivedAt,
@@ -518,6 +623,55 @@ export async function findClassroomRole(
   }
 
   return null
+}
+
+/** A classroom the caller may read, and in which role */
+export type StaffClassroom = StaffClassroomRow & {
+  role: StaffRole
+  /** `teaching_assistants.id` for a TA, null for a teacher */
+  teachingAssistantId: number | null
+}
+
+/**
+ * The gate of every reader a teaching assistant may reach. Teacher-only
+ * unless the caller opts in with `allowAssistant` — see `StaffAccess` — and
+ * then `findClassroomRole`, with every rule it applies to a TA.
+ */
+export async function findStaffClassroom(
+  session: Session,
+  slug: string,
+  access?: StaffAccess,
+): Promise<StaffClassroom | null> {
+  if (access?.allowAssistant) {
+    const found = await findClassroomRole(session, slug)
+    if (!found) return null
+    return {
+      ...found.classroom,
+      role: found.role,
+      teachingAssistantId: found.role === 'assistant' ? found.teachingAssistantId : null,
+    }
+  }
+
+  const [row] = await db
+    .select({
+      id: organizations.id,
+      title: organizations.title,
+      slug: organizations.slug,
+      githubId: organizations.githubId,
+      installationId: organizations.installationId,
+      archivedAt: organizations.archivedAt,
+    })
+    .from(organizations)
+    .innerJoin(organizationsUsers, eq(organizationsUsers.organizationId, organizations.id))
+    .where(
+      and(
+        eq(organizations.slug, slug),
+        eq(organizationsUsers.userId, Number(session.user.id)),
+        isNull(organizations.deletedAt),
+      ),
+    )
+
+  return row ? { ...row, role: 'teacher', teachingAssistantId: null } : null
 }
 
 /**

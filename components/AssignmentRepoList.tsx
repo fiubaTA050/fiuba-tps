@@ -126,6 +126,7 @@ export function AssignmentRepoList({
   kind = 'individual',
   linkToStudent,
   allocation: allocationOption,
+  teacher = true,
 }: {
   title: string
   rows: RepoRow[]
@@ -147,6 +148,12 @@ export function AssignmentRepoList({
   kind?: AssignmentKind
   linkToStudent?: LinkToStudent
   allocation?: Allocation
+  /**
+   * False for a teaching assistant: the rows are already theirs alone, and
+   * the menu keeps only the devolución — extending and justifying are a
+   * teacher's.
+   */
+  teacher?: boolean
 }) {
   // Only where some row can take a TA: on a classroom with no roster every
   // row is an account that skipped it, and the controls could do nothing
@@ -591,6 +598,7 @@ export function AssignmentRepoList({
                   assignmentSlug={assignmentSlug}
                   kind={kind}
                   linkToStudent={linkToStudent}
+                  teacher={teacher}
                   selectionGutter={allocation?.editable === true}
                   allocation={
                     allocation && row.allocationTarget !== undefined
@@ -732,6 +740,7 @@ function RepoListItem({
   assignmentSlug,
   kind,
   linkToStudent,
+  teacher,
   selectionGutter,
   allocation,
 }: {
@@ -745,6 +754,7 @@ function RepoListItem({
   assignmentSlug: string
   kind: AssignmentKind
   linkToStudent?: LinkToStudent
+  teacher: boolean
   /** The list has selection checkboxes: a row without one keeps the gap */
   selectionGutter: boolean
   /** Set only on a row a TA can be allocated to, for a teacher */
@@ -760,7 +770,8 @@ function RepoListItem({
 }) {
   const { snapshot } = row
   const extended = row.repoId !== null && checkpoint?.exemptRepoIds.has(row.repoId) === true
-  const justifiable = row.submission?.late === true && row.submission.id !== undefined
+  const justifiable = teacher && row.submission?.late === true && row.submission.id !== undefined
+  const extendable = teacher && checkpoint?.closed === true
   const submissionId = row.submission?.id
 
   return (
@@ -928,11 +939,11 @@ function RepoListItem({
               on a late current submission, a devolución on any current
               submission. With none of them there is no menu */}
           {row.repoId !== null &&
-            (checkpoint?.closed || justifiable || submissionId !== undefined) && (
+            (extendable || justifiable || submissionId !== undefined) && (
             <SubmissionActionsMenu
               name={row.name}
               extension={
-                checkpoint?.closed
+                extendable && checkpoint
                   ? {
                       entrega: checkpoint.title ?? 'la entrega',
                       extended,
@@ -1198,7 +1209,9 @@ function justificationTooltip(justification: {
   createdAt: Date
 }): string {
   const by = justification.createdBy ? ` por @${justification.createdBy}` : ''
-  return `Justificada${by} el ${formatArgentina(justification.createdAt)}: ${justification.reason}`
+  const when = `Justificada${by} el ${formatArgentina(justification.createdAt)}`
+  // A TA gets no reason: it can carry the student's personal circumstances
+  return justification.reason ? `${when}: ${justification.reason}` : when
 }
 
 /**

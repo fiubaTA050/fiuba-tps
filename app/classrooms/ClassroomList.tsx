@@ -180,52 +180,59 @@ function ClassroomCardArticle({ classroom }: { classroom: ClassroomCard }) {
           />
         </div>
 
-        <details className="dropdown details-reset details-overlay d-inline-block float-right position-relative m-1">
-          <summary
-            className="btn-octicon m-0"
-            aria-haspopup="menu"
-            aria-label={`Opciones de ${classroom.title}`}
-          >
-            <KebabHorizontalIcon />
-          </summary>
+        {/* A TA's card has no menu: archiving and creating are a teacher's */}
+        {classroom.role === 'assistant' ? (
+          <span className="Label float-right m-2" title="Sos ayudante en este classroom">
+            Ayudante
+          </span>
+        ) : (
+          <details className="dropdown details-reset details-overlay d-inline-block float-right position-relative m-1">
+            <summary
+              className="btn-octicon m-0"
+              aria-haspopup="menu"
+              aria-label={`Opciones de ${classroom.title}`}
+            >
+              <KebabHorizontalIcon />
+            </summary>
 
-          {/* Anchored right, unlike the two menus of the filter bar: the kebab
+            {/* Anchored right, unlike the two menus of the filter bar: the kebab
               sits on the right edge of the card, which is where the original
               put its `dropdown-menu-sw` too */}
-          <div className="ActionMenu-anchor ActionMenu-anchor--right">
-            <div className="Overlay Overlay--size-auto">
-              <div className="Overlay-body Overlay-body--paddingNone">
-                <ul role="menu" className="ActionListWrap ActionListWrap--inset">
-                  {/* The original hides it on an archived classroom instead of
+            <div className="ActionMenu-anchor ActionMenu-anchor--right">
+              <div className="Overlay Overlay--size-auto">
+                <div className="Overlay-body Overlay-body--paddingNone">
+                  <ul role="menu" className="ActionListWrap ActionListWrap--inset">
+                    {/* The original hides it on an archived classroom instead of
                       disabling it, because the screen behind it refuses anyway */}
-                  {!archived && (
-                    <li role="none" className="ActionListItem">
-                      <Link
-                        href={`${path}/new-assignment`}
-                        role="menuitem"
-                        className="ActionListContent"
-                      >
-                        <span className="ActionListItem-label">Nuevo trabajo práctico</span>
-                      </Link>
-                    </li>
-                  )}
+                    {!archived && (
+                      <li role="none" className="ActionListItem">
+                        <Link
+                          href={`${path}/new-assignment`}
+                          role="menuitem"
+                          className="ActionListContent"
+                        >
+                          <span className="ActionListItem-label">Nuevo trabajo práctico</span>
+                        </Link>
+                      </li>
+                    )}
 
-                  <li role="none" className="ActionListItem">
-                    <form action={setArchivedAction}>
-                      <input type="hidden" name="slug" value={classroom.slug} />
-                      <input type="hidden" name="archived" value={archived ? 'false' : 'true'} />
-                      <button type="submit" role="menuitem" className="ActionListContent">
-                        <span className="ActionListItem-label">
-                          {archived ? 'Desarchivar classroom' : 'Archivar classroom'}
-                        </span>
-                      </button>
-                    </form>
-                  </li>
-                </ul>
+                    <li role="none" className="ActionListItem">
+                      <form action={setArchivedAction}>
+                        <input type="hidden" name="slug" value={classroom.slug} />
+                        <input type="hidden" name="archived" value={archived ? 'false' : 'true'} />
+                        <button type="submit" role="menuitem" className="ActionListContent">
+                          <span className="ActionListItem-label">
+                            {archived ? 'Desarchivar classroom' : 'Archivar classroom'}
+                          </span>
+                        </button>
+                      </form>
+                    </li>
+                  </ul>
+                </div>
               </div>
             </div>
-          </div>
-        </details>
+          </details>
+        )}
 
         <Link href={path} className="d-block px-4 pt-2">
           <h2 className="h4 overflow-hidden no-wrap pt-1" style={{ textOverflow: 'ellipsis' }}>
@@ -277,7 +284,7 @@ function ClassroomCardArticle({ classroom }: { classroom: ClassroomCard }) {
             // The live site leaves this empty; the original's button stays,
             // because an empty classroom is one the teacher is still setting up
             <div className="py-4 border-top">
-              {!archived && (
+              {!archived && classroom.role === 'teacher' && (
                 <Link href={`${path}/new-assignment`} className="btn" role="button">
                   Crear el primer trabajo práctico
                 </Link>

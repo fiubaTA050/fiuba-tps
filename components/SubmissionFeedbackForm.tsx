@@ -43,8 +43,8 @@ export function SubmissionFeedbackForm({
   entrega: string
   /** "Publicar" is set on the entrega: saving is what the student reads */
   published: boolean
-  /** The edit screen, where "Publicar" lives */
-  publishHref: string
+  /** The edit screen, where "Publicar" lives. Null for a TA, who cannot publish */
+  publishHref: string | null
 }) {
   const latest = versions[0] ?? null
   const current = latest?.body != null ? latest : null
@@ -210,17 +210,22 @@ function Visibility({
 }: {
   published: boolean
   entrega: string
-  publishHref: string
+  publishHref: string | null
 }) {
   return (
     <p className="d-flex color-fg-muted f6 mb-0">
       <EyeIcon className="mr-2 flex-shrink-0" />
       {published ? (
         <span>Publicada: el alumno la ve en su pantalla de entrega.</span>
-      ) : (
+      ) : publishHref ? (
         <span>
           El alumno todavía no la ve: se muestra cuando publiques los resultados de {entrega} en{' '}
           <Link href={publishHref}>la edición del trabajo práctico</Link>.
+        </span>
+      ) : (
+        <span>
+          El alumno todavía no la ve: se muestra cuando un profesor publique los resultados de{' '}
+          {entrega}.
         </span>
       )}
     </p>

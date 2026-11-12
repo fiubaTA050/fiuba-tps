@@ -51,6 +51,9 @@ const { confirmGroupSubmissionAction } = await import(
 
 const EMPTY = { error: null, notice: null }
 
+/** The opt-in of the readers a TA reaches: the devolución and the history are two */
+const OPEN = { allowAssistant: true }
+
 function form(fields: Record<string, string>): FormData {
   const formData = new FormData()
   for (const [name, value] of Object.entries(fields)) formData.set(name, value)
@@ -91,7 +94,7 @@ describe('the dashboard actions', () => {
   it('save a devolución on the group path', async () => {
     await saveSubmissionFeedbackAction(EMPTY, form({ ...target, body: 'Bien', based_on: '', kind: 'group' }))
 
-    expect(data.saveSubmissionFeedback).toHaveBeenCalledWith(session, 'tps', 'tp2', 77, 5, 'Bien', null, 'group')
+    expect(data.saveSubmissionFeedback).toHaveBeenCalledWith(session, 'tps', 'tp2', 77, 5, 'Bien', null, 'group', OPEN)
   })
 
   it('stay on the individual path when the form posts no kind', async () => {
@@ -106,6 +109,7 @@ describe('the dashboard actions', () => {
       'Bien',
       null,
       'individual',
+      OPEN,
     )
     expect(revalidatePath).toHaveBeenCalledWith('/classrooms/tps/assignments/tp2')
   })
@@ -122,13 +126,13 @@ describe('the submission history route', () => {
     const response = await get('checkpointId=3&kind=group')
 
     expect(response.status).toBe(200)
-    expect(data.findSubmissionHistory).toHaveBeenCalledWith(session, 'tps', 'tp2', 77, 3, 'group')
+    expect(data.findSubmissionHistory).toHaveBeenCalledWith(session, 'tps', 'tp2', 77, 3, 'group', OPEN)
   })
 
   it('reads a student\'s history without it', async () => {
     await get('checkpointId=3')
 
-    expect(data.findSubmissionHistory).toHaveBeenCalledWith(session, 'tps', 'tp2', 77, 3, 'individual')
+    expect(data.findSubmissionHistory).toHaveBeenCalledWith(session, 'tps', 'tp2', 77, 3, 'individual', OPEN)
   })
 })
 

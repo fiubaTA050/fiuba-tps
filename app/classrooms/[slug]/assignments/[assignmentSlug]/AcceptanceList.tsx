@@ -32,6 +32,7 @@ export function AcceptanceList({
   unlinkedEntries,
   allocations,
   archived,
+  teacher,
 }: {
   acceptances: AssignmentAcceptances
   assignmentTitle: string
@@ -46,8 +47,21 @@ export function AcceptanceList({
   /** Who corrects each padrón; null for anybody but a teacher */
   allocations: AssignmentAllocations | null
   archived: boolean
+  /** False for a teaching assistant: no linking accounts, no extending or justifying */
+  teacher: boolean
 }) {
   const { identifierName, entries, unlinkedAccounts, acceptedCount } = acceptances
+
+  // A TA's rows are the padrones allocated to them; with none, there is no
+  // link for them to share either
+  if (!teacher && entries.length === 0) {
+    return (
+      <div className="blankslate blankslate-spacious">
+        <h3 className="mb-2">Todavía no tenés alumnos asignados en este trabajo práctico</h3>
+        <p className="color-fg-muted mb-0">Los asigna un profesor desde este mismo tablero.</p>
+      </div>
+    )
+  }
 
   // The blankslate of the original: `No students have accepted "<title>"`
   if (acceptedCount === 0 && entries.length === 0) {
@@ -123,8 +137,9 @@ export function AcceptanceList({
         assignmentSlug={assignmentSlug}
         // No roster, nothing to link to — `set_unlinked_users` returns early on
         // the same condition
+        teacher={teacher}
         linkToStudent={
-          identifierName === null
+          identifierName === null || !teacher
             ? undefined
             : {
                 classroomSlug,

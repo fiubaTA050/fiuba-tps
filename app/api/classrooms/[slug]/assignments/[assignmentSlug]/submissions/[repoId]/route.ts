@@ -41,7 +41,16 @@ export async function GET(
     return NextResponse.json({ history: null }, { status: 400 })
   }
 
-  const history = await findSubmissionHistory(session, slug, assignmentSlug, id, checkpointId, kind)
+  // A TA expands the rows of their own dashboard: the data layer narrows it
+  const history = await findSubmissionHistory(
+    session,
+    slug,
+    assignmentSlug,
+    id,
+    checkpointId,
+    kind,
+    { allowAssistant: true },
+  )
   if (history === null) {
     return NextResponse.json({ history: null }, { status: 404 })
   }

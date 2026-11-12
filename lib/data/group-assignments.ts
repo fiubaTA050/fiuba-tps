@@ -18,7 +18,7 @@ import {
   validateTitleAndSlug,
   type AssignmentField,
 } from '@/lib/data/assignment-fields'
-import { findTeachingClassroom } from '@/lib/data/organizations'
+import { type StaffAccess, findStaffClassroom, findTeachingClassroom } from '@/lib/data/organizations'
 import { isUniqueViolation } from '@/lib/data/postgres'
 import { parameterize } from '@/lib/data/slug'
 import { db } from '@/lib/db'
@@ -129,8 +129,9 @@ function toListItem(row: Row): GroupAssignmentListItem {
 export async function listGroupAssignments(
   session: Session,
   classroomSlug: string,
+  access?: StaffAccess,
 ): Promise<GroupAssignmentListItem[]> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
+  const classroom = await findStaffClassroom(session, classroomSlug, access)
   if (!classroom) return []
 
   const rows = await db
@@ -160,8 +161,9 @@ export async function findGroupAssignment(
   session: Session,
   classroomSlug: string,
   assignmentSlug: string,
+  access?: StaffAccess,
 ): Promise<GroupAssignmentListItem | null> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
+  const classroom = await findStaffClassroom(session, classroomSlug, access)
   if (!classroom) return null
 
   const [row] = await db

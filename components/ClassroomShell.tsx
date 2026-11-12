@@ -87,6 +87,7 @@ export async function ClassroomShell({
                 assignmentCount={counters?.assignments ?? 0}
                 studentCount={counters?.students ?? null}
                 staffCount={counters?.staff ?? null}
+                showStudents={counters?.role !== 'assistant'}
               />
             </div>
           </div>

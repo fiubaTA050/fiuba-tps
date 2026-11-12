@@ -39,11 +39,16 @@ export default async function AssignmentPage(
 
   const { slug, assignmentSlug } = await props.params
 
+  // A teaching assistant reads this dashboard too, narrowed to the padrones
+  // allocated to them: `allowAssistant` is the opt-in of every reader they may
+  // reach (docs/teaching-assistants.md). The rest stay teacher-only and come
+  // back null for them — the dialogs to link an account, the allocations.
+  const access = { allowAssistant: true }
   const [classroom, assignment, acceptances, unlinkedEntries, submissions, allocations] =
     await Promise.all([
-    findClassroomInstallation(session, slug),
-    findAssignment(session, slug, assignmentSlug),
-    listAssignmentAcceptances(session, slug, assignmentSlug),
+    findClassroomInstallation(session, slug, access),
+    findAssignment(session, slug, assignmentSlug, access),
+    listAssignmentAcceptances(session, slug, assignmentSlug, access),
     // What the "Link to student" dialog offers. Fetched with the rest rather
     // than when the dialog opens, the way the live site does it: the list is
     // small, and the page is force-dynamic so it is as fresh as the rows.
@@ -52,7 +57,7 @@ export default async function AssignmentPage(
     // `checkpoints` array means the teacher hasn't opened entregas, which
     // every row below reads correctly as "sin confirmar" without a special
     // case here.
-    listAssignmentSubmissions(session, slug, assignmentSlug),
+    listAssignmentSubmissions(session, slug, assignmentSlug, 'individual', access),
     // Who corrects each padrón: the menus on every row
     listAllocations(session, slug, assignmentSlug, 'individual'),
   ])
@@ -158,6 +163,7 @@ export default async function AssignmentPage(
           starterCode={starterCode}
           editHref={`/classrooms/${classroom.slug}/assignments/${assignment.slug}/edit`}
           downloadHref={`/classrooms/${classroom.slug}/assignments/${assignment.slug}/csv`}
+          teacher={classroom.role === 'teacher'}
           invitationUrl={inviteUrl}
           invitationsEnabled={invitationsEnabled}
           disabledReason={
@@ -235,6 +241,7 @@ export default async function AssignmentPage(
           unlinkedEntries={unlinkedEntries}
           allocations={allocations}
           archived={classroom.archivedAt !== null}
+          teacher={classroom.role === 'teacher'}
         />
       </div>
     </>

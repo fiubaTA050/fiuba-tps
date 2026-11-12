@@ -398,7 +398,14 @@ describe('findClassroomRole', () => {
 
     expect(await findClassroomRole(ta, 'sd-2026-1')).toEqual({
       role: 'assistant',
-      classroom: { id: org, githubId: 4321, installationId: 99, archivedAt: null },
+      classroom: {
+        id: org,
+        title: 'sd-2026-1',
+        slug: 'sd-2026-1',
+        githubId: 4321,
+        installationId: 99,
+        archivedAt: null,
+      },
       teachingAssistantId: taId,
     })
   })
@@ -700,7 +707,13 @@ describe('listClassroomStaff and countClassroomStaff', () => {
     await assistant(org, ta, profe)
 
     expect(await listClassroomStaff(ta, 'sd-2026-1')).toBeNull()
-    expect(await classroomCounters(ta, 'sd-2026-1')).toBeNull()
+    // The tab bar of a TA counts the assignments only, and draws no staff tab
+    expect(await classroomCounters(ta, 'sd-2026-1')).toEqual({
+      assignments: 0,
+      students: null,
+      staff: null,
+      role: 'assistant',
+    })
   })
 })
 
@@ -787,6 +800,7 @@ describe('the fixes of the review of the Docentes tab', () => {
       assignments: 0,
       students: null,
       staff: 1,
+      role: 'teacher',
     })
 
     await assignment(org, profe, 'tp0')
@@ -806,6 +820,7 @@ describe('the fixes of the review of the Docentes tab', () => {
       assignments: 2,
       students: 2,
       staff: 2,
+      role: 'teacher',
     })
   })
 })

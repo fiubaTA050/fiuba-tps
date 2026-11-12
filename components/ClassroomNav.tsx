@@ -24,6 +24,7 @@ export function ClassroomNav({
   assignmentCount,
   studentCount,
   staffCount,
+  showStudents = true,
 }: {
   slug: string
   tab: ClassroomTab
@@ -32,6 +33,8 @@ export function ClassroomNav({
   studentCount: number | null
   /** null when the caller is not a teacher of the classroom: the tab is not drawn */
   staffCount: number | null
+  /** False for a teaching assistant, who does not see the roster */
+  showStudents?: boolean
 }) {
   const base = `/classrooms/${slug}`
 
@@ -53,21 +56,23 @@ export function ClassroomNav({
           </Link>
         </li>
 
-        <li className="d-inline-flex">
-          <Link
-            href={`${base}/roster`}
-            className="UnderlineNav-item"
-            aria-current={tab === 'students' ? 'page' : undefined}
-          >
-            <PeopleIcon className="UnderlineNav-octicon" />
-            <span>Alumnos</span>
-            {studentCount !== null && (
-              <span title={String(studentCount)} className="Counter">
-                {studentCount}
-              </span>
-            )}
-          </Link>
-        </li>
+        {showStudents && (
+          <li className="d-inline-flex">
+            <Link
+              href={`${base}/roster`}
+              className="UnderlineNav-item"
+              aria-current={tab === 'students' ? 'page' : undefined}
+            >
+              <PeopleIcon className="UnderlineNav-octicon" />
+              <span>Alumnos</span>
+              {studentCount !== null && (
+                <span title={String(studentCount)} className="Counter">
+                  {studentCount}
+                </span>
+              )}
+            </Link>
+          </li>
+        )}
 
         {staffCount !== null && (
           <li className="d-inline-flex">

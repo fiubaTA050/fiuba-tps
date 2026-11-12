@@ -35,6 +35,7 @@ export function AssignmentHeader({
   invitationsEnabled,
   disabledReason,
   downloadHref,
+  teacher = true,
 }: {
   title: string
   group: boolean
@@ -50,6 +51,8 @@ export function AssignmentHeader({
   disabledReason: string | null
   /** The CSV export, when the assignment has one */
   downloadHref?: string
+  /** False for a teaching assistant: no link to hand out, no export, no editing */
+  teacher?: boolean
 }) {
   return (
     <div className="border-bottom py-3 pt-md-4 mb-3">
@@ -97,6 +100,7 @@ export function AssignmentHeader({
             </div>
           </div>
 
+          {teacher && (
           <div className="d-flex flex-wrap flex-items-start mt-3 mt-md-0">
             {/* 43ch is the live site's own width, and it is what makes a short
                 invitation link readable whole without selecting it */}
@@ -138,9 +142,10 @@ export function AssignmentHeader({
               </div>
             </details>
           </div>
+          )}
         </div>
 
-        {disabledReason && (
+        {teacher && disabledReason && (
           <p className="color-fg-attention f6 mt-2 mb-0 text-right">{disabledReason}</p>
         )}
       </div>

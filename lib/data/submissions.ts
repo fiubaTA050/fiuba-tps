@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { type SQL, and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import type { Session } from 'next-auth'
 
@@ -30,7 +30,9 @@ import {
   type RepoRef,
 } from '@/lib/data/assignment-kind'
 import { disabledState } from '@/lib/data/invitations'
+import type { StaffAccess } from '@/lib/data/organizations'
 import { isUniqueViolation } from '@/lib/data/postgres'
+import { findStaffAssignment, visibleRepo } from '@/lib/data/staff'
 import { db } from '@/lib/db'
 import { isReachableFromDefaultBranch, resolveRepositoryRef } from '@/lib/github/repositories'
 
@@ -237,8 +239,9 @@ export async function listAssignmentSubmissions(
   classroomSlug: string,
   assignmentSlug: string,
   kind: AssignmentKind = 'individual',
+  access?: StaffAccess,
 ): Promise<AssignmentSubmissions | null> {
-  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  const found = await findStaffAssignment(session, classroomSlug, assignmentSlug, kind, access)
   if (!found) return null
   if (!found.assignment) return { checkpoints: [] }
 
@@ -273,7 +276,8 @@ export async function listAssignmentSubmissions(
     })
     .from(submissions)
     .innerJoin(k.repos, eq(k.repos.id, k.submissionRepoId))
-    .where(inArray(submissions.checkpointId, checkpointIds))
+    // A TA's own rows only: every other one stays on the server
+    .where(and(inArray(submissions.checkpointId, checkpointIds), visibleRepo(found, kind)))
     .orderBy(k.submissionRepoId, submissions.checkpointId, desc(submissions.id))
 
   // Only the current submissions' runs, and only the succeeded ones: a
@@ -331,6 +335,15 @@ export async function listAssignmentSubmissions(
     checkpointIds.map((id) => [id, new Map()]),
   )
 
+  // A TA sees that a late submission was justified, and not why: the reason
+  // can carry the student's personal circumstances, and is a teacher's
+  const forRole = <T extends { reason: string; createdBy: string | null }>(
+    justification: T | null,
+  ): T | null =>
+    justification && found.role === 'assistant'
+      ? { ...justification, reason: '', createdBy: null }
+      : justification
+
   for (const row of rows) {
     const late = isLate(row.submittedAt, deadlineById.get(row.checkpointId)!)
     byCheckpoint.get(row.checkpointId)!.set(row.githubRepoId, {
@@ -340,7 +353,7 @@ export async function listAssignmentSubmissions(
       late,
       // A deadline moved later can leave a justification behind on a
       // submission that is no longer late; it justifies nothing then
-      justification: late ? (justificationBySubmission.get(row.id) ?? null) : null,
+      justification: late ? forRole(justificationBySubmission.get(row.id) ?? null) : null,
       passed: passedBySubmission.get(row.id) ?? null,
       hasFeedback: withFeedback.has(row.id),
     })
@@ -511,12 +524,19 @@ export async function findSubmissionHistory(
   githubRepoId: number,
   checkpointId: number,
   kind: AssignmentKind = 'individual',
+  access?: StaffAccess,
 ): Promise<SubmissionRow[] | null> {
-  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  const found = await findStaffAssignment(session, classroomSlug, assignmentSlug, kind, access)
   if (!found) return null
 
   const row = found.assignment
-    ? await findTeacherRepo(found.assignment.id, githubRepoId, checkpointId, kind)
+    ? await findTeacherRepo(
+        found.assignment.id,
+        githubRepoId,
+        checkpointId,
+        kind,
+        visibleRepo(found, kind),
+      )
     : null
 
   // No such checkpoint on this assignment, or this repo isn't this
@@ -537,6 +557,8 @@ async function findTeacherRepo(
   githubRepoId: number,
   checkpointId: number,
   kind: AssignmentKind,
+  /** `visibleRepo`: a TA's own rows only. Every row for a teacher */
+  visible: SQL = sql`true`,
 ) {
   const k = KIND[kind]
   const [row] = await db
@@ -550,7 +572,9 @@ async function findTeacherRepo(
       checkpoints,
       and(eq(checkpoints.id, checkpointId), eq(k.checkpointAssignmentId, assignmentId)),
     )
-    .where(and(eq(k.reposAssignmentId, assignmentId), eq(k.repos.githubRepoId, githubRepoId)))
+    .where(
+      and(eq(k.reposAssignmentId, assignmentId), eq(k.repos.githubRepoId, githubRepoId), visible),
+    )
 
   return row ?? null
 }
@@ -587,6 +611,8 @@ export type SubmissionDetail = {
   justifications: LateJustification[]
   /** Every saved version of its devolución, newest first: the first is the current one */
   feedback: FeedbackVersion[]
+  /** A TA's page leaves out what only a teacher can do: justify, extend, publish */
+  role: 'teacher' | 'assistant'
 }
 
 /**
@@ -605,11 +631,18 @@ export async function findSubmissionDetail(
   githubRepoId: number,
   submissionId: number,
   kind: AssignmentKind = 'individual',
+  access?: StaffAccess,
 ): Promise<SubmissionDetail | null> {
-  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  const found = await findStaffAssignment(session, classroomSlug, assignmentSlug, kind, access)
   if (!found?.assignment) return null
 
-  const row = await findTeacherSubmission(found.assignment.id, githubRepoId, submissionId, kind)
+  const row = await findTeacherSubmission(
+    found.assignment.id,
+    githubRepoId,
+    submissionId,
+    kind,
+    visibleRepo(found, kind),
+  )
   // Not this classroom's, not this assignment's repo, or not this
   // submission's id — never distinguished from each other, same stance as
   // findSubmissionHistory's "nothing to show" above
@@ -685,11 +718,14 @@ export async function findSubmissionDetail(
       late,
       lateJustified: late && justifications.some((justification) => justification.revokedAt === null),
     },
+    role: found.role,
     submittedBy: row.submittedBy,
     entrega: { title: row.checkpointTitle, resultsPublished: row.resultsPublishedAt !== null },
     newer: latest && latest.id !== row.id ? latest : null,
     gradingRuns: runs,
-    justifications,
+    // A TA reads whether it is justified (`lateJustified` above) and not the
+    // reasons, which can carry the student's personal circumstances
+    justifications: found.role === 'assistant' ? [] : justifications,
     feedback,
   }
 }
@@ -704,6 +740,8 @@ async function findTeacherSubmission(
   githubRepoId: number,
   submissionId: number,
   kind: AssignmentKind,
+  /** `visibleRepo`: a TA's own rows only. Every row for a teacher */
+  visible: SQL = sql`true`,
 ) {
   const k = KIND[kind]
   const [row] = await db
@@ -734,6 +772,7 @@ async function findTeacherSubmission(
         eq(k.reposAssignmentId, assignmentId),
         eq(k.repos.githubRepoId, githubRepoId),
         eq(submissions.id, submissionId),
+        visible,
       ),
     )
 
@@ -877,6 +916,7 @@ export async function saveSubmissionFeedback(
   body: string,
   basedOnId: number | null,
   kind: AssignmentKind = 'individual',
+  access?: StaffAccess,
 ): Promise<SubmissionFeedbackResult | null> {
   // A browser posts a textarea's line breaks as CRLF
   const trimmed = body.replace(/\r\n?/g, '\n').trim()
@@ -885,13 +925,19 @@ export async function saveSubmissionFeedback(
     return { success: false, error: 'Esa devolución es demasiado larga.' }
   }
 
-  const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
+  const found = await findStaffAssignment(session, classroomSlug, assignmentSlug, kind, access)
   if (!found) return null
 
   if (found.classroom.archivedAt) return { success: false, error: ARCHIVED_CLASSROOM }
 
   const row = found.assignment
-    ? await findTeacherSubmission(found.assignment.id, githubRepoId, submissionId, kind)
+    ? await findTeacherSubmission(
+        found.assignment.id,
+        githubRepoId,
+        submissionId,
+        kind,
+        visibleRepo(found, kind),
+      )
     : null
   if (!row) return { success: false, error: 'No encontramos esa entrega.' }
 

@@ -183,6 +183,8 @@ export async function saveSubmissionFeedbackAction(
     String(formData.get('body') ?? ''),
     basedOnId,
     kind,
+    // A TA writes the devolución of their own rows: the data layer narrows it
+    { allowAssistant: true },
   )
 
   if (!result) return { error: 'No encontramos ese classroom.', notice: null }

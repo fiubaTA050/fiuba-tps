@@ -9,13 +9,14 @@ import {
   assignments,
   inviteStatuses,
   organizations,
-  organizationsUsers,
   rosterEntries,
   rosters,
   users,
   type InviteStatusValue,
 } from '@/db/schema'
+import { type StaffAccess, findStaffClassroom } from '@/lib/data/organizations'
 import { isUniqueViolation } from '@/lib/data/postgres'
+import { allocatedTargets } from '@/lib/data/staff'
 import { db } from '@/lib/db'
 
 /**
@@ -438,7 +439,11 @@ export async function listAssignmentAcceptances(
   session: Session,
   classroomSlug: string,
   assignmentSlug: string,
+  access?: StaffAccess,
 ): Promise<AssignmentAcceptances | null> {
+  const staff = await findStaffClassroom(session, classroomSlug, access)
+  if (!staff) return null
+
   const [classroom] = await db
     .select({
       id: organizations.id,
@@ -446,17 +451,8 @@ export async function listAssignmentAcceptances(
       identifierName: rosters.identifierName,
     })
     .from(organizations)
-    .innerJoin(organizationsUsers, eq(organizationsUsers.organizationId, organizations.id))
     .leftJoin(rosters, eq(rosters.id, organizations.rosterId))
-    .where(
-      and(
-        eq(organizations.slug, classroomSlug),
-        eq(organizationsUsers.userId, Number(session.user.id)),
-        isNull(organizations.deletedAt),
-      ),
-    )
-
-  if (!classroom) return null
+    .where(eq(organizations.id, staff.id))
 
   const [invitation] = await db
     .select({ id: assignmentInvitations.id, assignmentId: assignments.id })
@@ -475,6 +471,36 @@ export async function listAssignmentAcceptances(
 
   if (!invitation) return null
 
+  // A TA reads the padrones allocated to them, and nothing else: no account
+  // that skipped the roster, since nothing can be allocated to one
+  const allowed = await allocatedTargets(
+    {
+      role: staff.role,
+      classroom: { id: staff.id, archivedAt: staff.archivedAt },
+      assignment: { id: invitation.assignmentId, title: '', slug: assignmentSlug },
+      teachingAssistantId: staff.teachingAssistantId,
+    },
+    'individual',
+  )
+  if (allowed) {
+    const all = classroom.rosterId === null ? null : await listAcceptances(classroom, invitation)
+    const entries = (all?.entries ?? []).filter((entry) => allowed.has(entry.entryId))
+    return {
+      identifierName: classroom.identifierName,
+      entries,
+      unlinkedAccounts: [],
+      acceptedCount: entries.filter((entry) => entry.state === 'accepted').length,
+    }
+  }
+
+  return listAcceptances(classroom, invitation)
+}
+
+/** Every padrón and every account that accepted, for a teacher */
+async function listAcceptances(
+  classroom: { id: number; rosterId: number | null; identifierName: string | null },
+  invitation: { id: number; assignmentId: number },
+): Promise<AssignmentAcceptances> {
   // Everyone who accepted, whatever they did about the roster
   const accepted = await db
     .select({

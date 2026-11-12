@@ -19,7 +19,7 @@ import {
   validateCheckpointTitles,
   type CheckpointInput,
 } from '@/lib/data/checkpoints'
-import { findTeachingClassroom } from '@/lib/data/organizations'
+import { type StaffAccess, findStaffClassroom, findTeachingClassroom } from '@/lib/data/organizations'
 import { isUniqueViolation } from '@/lib/data/postgres'
 import { db } from '@/lib/db'
 
@@ -85,8 +85,9 @@ export type NewAssignmentInput = {
 export async function listAssignments(
   session: Session,
   classroomSlug: string,
+  access?: StaffAccess,
 ): Promise<AssignmentListItem[]> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
+  const classroom = await findStaffClassroom(session, classroomSlug, access)
   if (!classroom) return []
 
   const rows = await db
@@ -130,8 +131,9 @@ export async function findAssignment(
   session: Session,
   classroomSlug: string,
   assignmentSlug: string,
+  access?: StaffAccess,
 ): Promise<AssignmentListItem | null> {
-  const classroom = await findTeachingClassroom(session, classroomSlug)
+  const classroom = await findStaffClassroom(session, classroomSlug, access)
   if (!classroom) return null
 
   const [row] = await db

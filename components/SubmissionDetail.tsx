@@ -51,9 +51,12 @@ export async function SubmissionDetail({
   const id = Number(submissionId)
   if (!Number.isInteger(githubRepoId) || !Number.isInteger(id)) notFound()
 
+  // A teaching assistant opens the entregas of their own rows too, and writes
+  // the devolución: `allowAssistant` is the opt-in (docs/teaching-assistants.md)
+  const access = { allowAssistant: true }
   const [classroom, detail] = await Promise.all([
-    findClassroomInstallation(session, slug),
-    findSubmissionDetail(session, slug, assignmentSlug, githubRepoId, id, kind),
+    findClassroomInstallation(session, slug, access),
+    findSubmissionDetail(session, slug, assignmentSlug, githubRepoId, id, kind, access),
   ])
 
   if (!classroom || !detail) notFound()
@@ -127,8 +130,9 @@ export async function SubmissionDetail({
         </div>
 
         {/* Only a late submission has anything to justify — see
-            lateSubmissionJustifications in db/schema.ts */}
-        {submission.late && (
+            lateSubmissionJustifications in db/schema.ts. A teacher's: a TA
+            reads whether it is justified in the label above, never why */}
+        {submission.late && detail.role === 'teacher' && (
           <div className="Box mt-3">
             <div className="Box-body">
               <div className="d-flex flex-justify-between flex-items-center mb-2">
@@ -216,7 +220,7 @@ export async function SubmissionDetail({
           versions={detail.feedback}
           entrega={detail.entrega.title ?? 'esta entrega'}
           published={detail.entrega.resultsPublished}
-          publishHref={`${assignmentPath}/edit#entregas`}
+          publishHref={detail.role === 'teacher' ? `${assignmentPath}/edit#entregas` : null}
         />
       </div>
     </>

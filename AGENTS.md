@@ -266,6 +266,19 @@ reference code without mental translation. The confusing one:
   by `organizations_users`, and classrooms already created keep working.
   `users.site_admin` exists in the schema, unused, if a master key is ever
   wanted.
+- **A teaching assistant is a role of this app, not an owner of the org.** In
+  the original, "TAs and Admins" is `organizations_users` with no role column:
+  being one means being an owner of the GitHub organization
+  (`GitHubOrganization#admin?`), which makes you admin of every repository.
+  Teachers still are exactly that, and are listed read-only on the
+  "Docentes" tab (`settings/invitations`). TAs are loaded by GitHub account —
+  no link — into `teaching_assistants`, allocated per assignment to padrones
+  or teams, and read only those rows: the dashboards, the entrega detail and
+  the devolución. They do not justify, extend, publish, link accounts, edit,
+  export or see the roster, and never through an API key. Every reader they
+  reach opts in with `{ allowAssistant: true }`; everything else stays
+  teacher-only without knowing TAs exist. See `docs/teaching-assistants.md`.
+  Giving them access to the repositories on GitHub is the next step, not done.
 - **Editing propagates nothing to the repositories already created**, not even
   the visibility. `Assignment::Editor#update_attribute_for_all_assignment_repos`
   has a single `when "public_repo"` that enqueues
@@ -302,10 +315,9 @@ reference code without mental translation. The confusing one:
   *not* propagate to existing repositories.
 - **Teaching assistants follow `docs/teaching-assistants.md`**, which records
   why a TA is a role of this app and not an org owner, and why it lives in its
-  own table instead of a role column on `organizations_users`. The tables and
-  `findClassroomRole` exist, the "Docentes" tab adds and removes TAs, and
-  both assignment dashboards allocate them to padrones or teams; nothing lets
-  a TA in yet.
+  own table instead of a role column on `organizations_users`. A reader a TA
+  may reach takes `{ allowAssistant: true }` and narrows to their rows with
+  `lib/data/staff.ts`; one that does not take it stays teacher-only.
 - **Importing an export of the live GitHub Classroom follows
   `docs/importar-el-export-de-github-classroom.md`**. The export is a dump of
   the public Classroom API, so what it cannot answer — the App installation,

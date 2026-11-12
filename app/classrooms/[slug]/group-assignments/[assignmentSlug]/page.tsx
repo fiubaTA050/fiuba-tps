@@ -46,17 +46,24 @@ export default async function GroupAssignmentPage(
 
   // The roster's size is the first tile's "alumnos en el roster"; it is an
   // indexed count
+  // A teaching assistant reads this dashboard too, narrowed to the teams
+  // allocated to them: `allowAssistant` is the opt-in of every reader they may
+  // reach (docs/teaching-assistants.md). The roster and the allocations stay
+  // teacher-only and come back null for them.
+  const access = { allowAssistant: true }
   const [classroom, assignment, acceptances, roster, submissions, allocations] = await Promise.all([
-    findClassroomInstallation(session, slug),
-    findGroupAssignment(session, slug, assignmentSlug),
-    listGroupAssignmentAcceptances(session, slug, assignmentSlug),
+    findClassroomInstallation(session, slug, access),
+    findGroupAssignment(session, slug, assignmentSlug, access),
+    listGroupAssignmentAcceptances(session, slug, assignmentSlug, access),
     rosterSummary(session, slug),
-    listAssignmentSubmissions(session, slug, assignmentSlug, 'group'),
+    listAssignmentSubmissions(session, slug, assignmentSlug, 'group', access),
     // Who corrects each team: the menus on every row
     listAllocations(session, slug, assignmentSlug, 'group'),
   ])
 
   if (!classroom || !assignment || !acceptances || !submissions) notFound()
+
+  const teacher = classroom.role === 'teacher'
 
   const searchParams = await props.searchParams
   const justCreated = searchParams.created === '1'
@@ -149,6 +156,7 @@ export default async function GroupAssignmentPage(
           starterCode={starterCode}
           editHref={`/classrooms/${classroom.slug}/group-assignments/${assignment.slug}/edit`}
           downloadHref={`/classrooms/${classroom.slug}/group-assignments/${assignment.slug}/csv`}
+          teacher={teacher}
           invitationUrl={inviteUrl}
           invitationsEnabled={invitationsEnabled}
           disabledReason={
@@ -184,10 +192,19 @@ export default async function GroupAssignmentPage(
             {
               label: 'Equipos',
               total: acceptances.teams.length,
-              parts: [
-                { value: roster?.count ?? 0, label: 'alumnos en la lista' },
-                { value: acceptances.studentsNotOnTeam.length, label: 'sin equipo' },
-              ],
+              // A TA reads their own teams, not the roster: who is left
+              // without a team is a teacher's question
+              parts: teacher
+                ? [
+                    { value: roster?.count ?? 0, label: 'alumnos en la lista' },
+                    { value: acceptances.studentsNotOnTeam.length, label: 'sin equipo' },
+                  ]
+                : [
+                    {
+                      value: acceptances.teams.reduce((n, team) => n + team.members.length, 0),
+                      label: 'integrantes',
+                    },
+                  ],
             },
             {
               label: 'Equipos que aceptaron',
@@ -218,7 +235,12 @@ export default async function GroupAssignmentPage(
           ]}
         />
 
-        {acceptances.teams.length === 0 ? (
+        {acceptances.teams.length === 0 && !teacher ? (
+          <div className="blankslate blankslate-spacious">
+            <h3 className="mb-2">Todavía no tenés equipos asignados en este trabajo práctico</h3>
+            <p className="color-fg-muted mb-0">Los asigna un profesor desde este mismo tablero.</p>
+          </div>
+        ) : acceptances.teams.length === 0 ? (
           <div className="blankslate blankslate-spacious">
             <h3 className="mb-2">Todavía no hay equipos</h3>
             <p className="color-fg-muted mb-0">
@@ -228,6 +250,7 @@ export default async function GroupAssignmentPage(
         ) : (
           <AssignmentRepoList
             title="Equipos"
+            teacher={teacher}
             classroomSlug={classroom.slug}
             assignmentSlug={assignment.slug}
             kind="group"

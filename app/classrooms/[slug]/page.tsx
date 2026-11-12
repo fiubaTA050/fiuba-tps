@@ -40,13 +40,19 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
 
   const { slug } = await props.params
 
+  // A teaching assistant reads this list too: `allowAssistant` is the opt-in
+  // every reader they may reach takes (docs/teaching-assistants.md)
+  const access = { allowAssistant: true }
   const [classroom, assignments, groupAssignments] = await Promise.all([
-    findClassroom(session, slug),
-    listAssignments(session, slug),
-    listGroupAssignments(session, slug),
+    findClassroom(session, slug, access),
+    listAssignments(session, slug, access),
+    listGroupAssignments(session, slug, access),
   ])
 
   if (!classroom) notFound()
+
+  // Creating, editing, deleting and handing out the link are a teacher's
+  const teacher = classroom.role === 'teacher'
 
   // flash[:success]: only right after creating, not on every later visit
   const searchParams = await props.searchParams
@@ -101,7 +107,7 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
           carrying a `plus` leading visual, as the live site has it */}
       <div className="d-md-flex flex-items-center flex-justify-between mb-3">
         <h2 className="f2 text-normal">Trabajos prácticos</h2>
-        {listed.length > 0 && (
+        {listed.length > 0 && teacher && (
           // The original disabled the button on an archived classroom instead
           // of hiding it, so the page still reads the same either way.
           <Link
@@ -119,7 +125,7 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
       {listed.length === 0 ? (
         <div className="blankslate blankslate-spacious">
           <h3 className="mb-2">Todavía no hay trabajos prácticos</h3>
-          {classroom.archivedAt ? (
+          {!teacher ? null : classroom.archivedAt ? (
             <p className="color-fg-muted mb-0">
               Este classroom está archivado, no se pueden crear trabajos prácticos.
             </p>
@@ -174,14 +180,15 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
                   </div>
                 </div>
 
-                <div className="d-flex flex-items-center flex-justify-end flex-shrink-0 mt-3 mt-md-0">
-                  <InvitationLink
-                    variant="button"
-                    url={assignment.invitationUrl}
-                    disabled={!assignment.invitationsEnabled || Boolean(classroom.archivedAt)}
-                  />
+                {teacher && (
+                  <div className="d-flex flex-items-center flex-justify-end flex-shrink-0 mt-3 mt-md-0">
+                    <InvitationLink
+                      variant="button"
+                      url={assignment.invitationUrl}
+                      disabled={!assignment.invitationsEnabled || Boolean(classroom.archivedAt)}
+                    />
 
-                  {/* The live site's two icon-only buttons. Its trash opens a
+                    {/* The live site's two icon-only buttons. Its trash opens a
                       delete modal; here deleting lives in the edit screen's
                       danger zone — see docs/edicion-y-borrado-de-assignments.md
                       — so it links straight to it, and it is red at rest, not
@@ -189,25 +196,26 @@ export default async function ClassroomPage(props: PageProps<'/classrooms/[slug]
                       destroys something. `color-fg-danger` is a utility and
                       wins on `!important`, so it goes only when the link is
                       live — otherwise it would repaint the disabled state. */}
-                  <Link
-                    href={assignment.editHref}
-                    className={`btn-octicon ml-2 ${classroom.archivedAt ? 'disabled' : ''}`}
-                    aria-disabled={Boolean(classroom.archivedAt)}
-                    aria-label={`Editar ${assignment.title}`}
-                  >
-                    <PencilIcon />
-                  </Link>
-                  <Link
-                    href={`${assignment.editHref}#borrar`}
-                    className={`btn-octicon btn-octicon-danger ${
-                      classroom.archivedAt ? 'disabled' : 'color-fg-danger'
-                    }`}
-                    aria-disabled={Boolean(classroom.archivedAt)}
-                    aria-label={`Borrar ${assignment.title}`}
-                  >
-                    <TrashIcon />
-                  </Link>
-                </div>
+                    <Link
+                      href={assignment.editHref}
+                      className={`btn-octicon ml-2 ${classroom.archivedAt ? 'disabled' : ''}`}
+                      aria-disabled={Boolean(classroom.archivedAt)}
+                      aria-label={`Editar ${assignment.title}`}
+                    >
+                      <PencilIcon />
+                    </Link>
+                    <Link
+                      href={`${assignment.editHref}#borrar`}
+                      className={`btn-octicon btn-octicon-danger ${
+                        classroom.archivedAt ? 'disabled' : 'color-fg-danger'
+                      }`}
+                      aria-disabled={Boolean(classroom.archivedAt)}
+                      aria-label={`Borrar ${assignment.title}`}
+                    >
+                      <TrashIcon />
+                    </Link>
+                  </div>
+                )}
               </div>
             </article>
           ))}

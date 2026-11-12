@@ -294,6 +294,19 @@ extender o publicar.
   se dice en FIUBA. Sumarlo a `glosario-ui-en-espanol`.
 - **Si un ayudante ve la pestaña Docentes en solo lectura.** Por ahora no.
 
+## Estado (11/11/2026)
+
+Hechos los pasos 1 a 6. Lo que la implementación agregó a la spec:
+
+- **Cómo se abre un lector.** No con `findClassroomRole` directo: cada función
+  que el ayudante puede alcanzar recibe `{ allowAssistant: true }`
+  (`StaffAccess`), y sin esa opción sigue siendo solo de profesores. Así la
+  edición, los CSV y MCP, que comparten esas funciones, quedan cerrados sin
+  tocarlos. Las filas se filtran con `visibleRepo` y `allocatedTargets`, en
+  `lib/data/staff.ts`.
+- **Lo que no se hizo:** la vinculación de owners por URL directa (sigue
+  siendo desde el índice) y el acceso a los repositorios en GitHub.
+
 ## Orden de trabajo
 
 1. Migración y tablas. Se genera la migración; **no se aplica a producción
