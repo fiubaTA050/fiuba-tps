@@ -36,10 +36,13 @@ vi.mock('@/lib/db', () => ({
 const github = {
   repos: new Map<number, { owner: string; name: string } | null>(),
   tokenCalls: 0,
+  /** Runs while the token is being minted — what a teacher can do in that window */
+  duringMint: null as null | (() => Promise<void>),
 }
 
 vi.mock('@/lib/github/client', () => ({
   mintRepositoryScopedToken: async () => {
+    await github.duringMint?.()
     github.tokenCalls += 1
     return { token: `scoped-token-${github.tokenCalls}`, expiresAt: new Date(Date.now() + 3_600_000) }
   },
@@ -61,6 +64,7 @@ beforeEach(async () => {
   nextGithubId = 1000
   github.repos.clear()
   github.tokenCalls = 0
+  github.duringMint = null
 })
 
 async function teacher(): Promise<number> {
@@ -338,14 +342,21 @@ describe('leaseSubmissionForGrading', () => {
 
   describe('with a repository exempted from the close', () => {
     /** Exempts the repo and entrega behind `submissionId`, returning both ids */
-    async function exempt(submissionId: number, by: number) {
+    async function exempt(
+      submissionId: number,
+      by: number,
+      expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000),
+    ) {
       const [row] = await db
         .select({ repoId: submissions.assignmentRepoId, checkpointId: submissions.checkpointId })
         .from(submissions)
         .where(eq(submissions.id, submissionId))
-      await db
-        .insert(submissionExemptions)
-        .values({ checkpointId: row.checkpointId, assignmentRepoId: row.repoId, createdByUserId: by })
+      await db.insert(submissionExemptions).values({
+        checkpointId: row.checkpointId,
+        assignmentRepoId: row.repoId,
+        createdByUserId: by,
+        expiresAt,
+      })
       return row
     }
 
@@ -390,6 +401,51 @@ describe('leaseSubmissionForGrading', () => {
       expect(lease).toMatchObject({ sha: 'b'.repeat(40) })
       const [run] = await db.select().from(gradingRuns).where(eq(gradingRuns.id, lease!.leaseId))
       expect(run.submissionId).toBe(resubmission.id)
+    })
+
+    it('does not grade a submission extended while the lease was being prepared', async () => {
+      const profe = await teacher()
+      const alumna = await student()
+      const org = await classroom(profe)
+      const assignment = await gradableAssignment(org, profe)
+      const { submissionId } = await submittedRepo(assignment, alumna)
+      github.duringMint = async () => {
+        await exempt(submissionId, profe)
+      }
+
+      expect(await leaseSubmissionForGrading(profe, await apiKey(profe))).toBeNull()
+      expect(await db.select().from(gradingRuns)).toHaveLength(0)
+    })
+
+    it('does not grade a submission whose entrega was reopened while the lease was being prepared', async () => {
+      const profe = await teacher()
+      const alumna = await student()
+      const org = await classroom(profe)
+      const assignment = await gradableAssignment(org, profe)
+      await submittedRepo(assignment, alumna)
+      github.duringMint = async () => {
+        await db.update(checkpoints).set({ closedAt: null })
+      }
+
+      expect(await leaseSubmissionForGrading(profe, await apiKey(profe))).toBeNull()
+      expect(await db.select().from(gradingRuns)).toHaveLength(0)
+    })
+
+    // What happened to a student in production: the exemption was never
+    // revoked and the re-submission sat ungraded. Expiring is enough now
+    it('grades it once the exemption expires, with no one revoking it', async () => {
+      const profe = await teacher()
+      const alumna = await student()
+      const org = await classroom(profe)
+      const assignment = await gradableAssignment(org, profe)
+      const { submissionId } = await submittedRepo(assignment, alumna)
+      await exempt(submissionId, profe, new Date(Date.now() - 1000))
+
+      const lease = await leaseSubmissionForGrading(profe, await apiKey(profe))
+
+      expect(lease).not.toBeNull()
+      const [run] = await db.select().from(gradingRuns).where(eq(gradingRuns.id, lease!.leaseId))
+      expect(run.submissionId).toBe(submissionId)
     })
   })
 

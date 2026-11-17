@@ -105,8 +105,9 @@ por un timer.
 
 Una entrega cerrada se puede reabrir para **un solo repositorio**: el menú ⋯
 al final de la fila del alumno, en el dashboard del docente, con la entrega
-cerrada abierta en su pestaña → "Extender entrega"; la fila pasa a decir
-"Entrega extendida" y el mismo menú ofrece "Revocar extensión"
+cerrada abierta en su pestaña → "Extender entrega", eligiendo **hasta
+cuándo**; la fila pasa a decir "Extendida hasta <fecha>" y el mismo menú
+ofrece "Cambiar fecha de la extensión" y "Revocar extensión"
 (`submission_exemptions`, agregado 2026-09-22, en la UI desde 2026-09-23).
 Es el port del "Extend deadline" del sitio vivo — un menú "Actions:" a la
 derecha de "Repository", según la captura de GitHub Docs ("Extending an
@@ -114,25 +115,48 @@ assignment's deadline for an individual or group") — que exime a un equipo
 del *cutoff* (el corte que le saca el permiso de push). Acá lo que corta es
 `closed_at`, así que la exención es de eso.
 
-- **No tiene fecha**, como la del sitio vivo: dura hasta que el docente la
-  revoca. Una fecha de vencimiento sería una divergencia sin pedido detrás, y
-  el cierre de la entrega ya es una palanca manual.
+- **Tiene fecha de fin obligatoria** (`submission_exemptions.expires_at`,
+  agregada 2026-11-16). Es una divergencia: la del sitio vivo no tiene fecha
+  y dura hasta que se la revoca, y así estuvo portada hasta esa fecha. Se
+  cambió por un caso real: en TP1 un alumno reentregó con la extensión, nadie
+  la revocó, y durante dos meses el lease salteó su entrega mientras él veía
+  "pendiente". Con fecha, cuando termina el repositorio vuelve a quedar bajo
+  el cierre sin que nadie haga nada. No hace falta ningún job: cada lectura
+  compara `expires_at` con el reloj (`activeExemption` en
+  `lib/data/assignment-kind.ts`). La migración 0023 puso a las extensiones
+  vigentes a vencer en el momento de aplicarse.
+- La fecha se elige en hora argentina, igual que la deadline, tiene que ser
+  futura y no puede pasar de **60 días** (`MAX_EXEMPTION_DAYS`): sin tope, un
+  año mal tipeado era otra vez la extensión sin fin.
+- "Cambiar fecha de la extensión" solo mueve `expires_at` y conserva quién la
+  otorgó y cuándo. Si mientras el docente tenía la pantalla abierta la
+  extensión venció o la revocaron, se rechaza en vez de otorgar una nueva,
+  que reabriría una entrega que el corrector quizás ya tomó. Una vencida o
+  revocada se vuelve a extender desde "Extender entrega", sobre la misma fila.
+- El lease vuelve a mirar el cierre y la extensión con la fila bloqueada,
+  justo antes de crear la corrida: las llamadas a GitHub del medio tardan
+  cientos de milisegundos, y extender o reabrir en ese intervalo tiene que
+  ganar.
+- El alumno ve hasta cuándo tiene: "El docente te extendió esta entrega hasta
+  el …".
 - **Solo levanta el cierre de la entrega.** Si el assignment está Inactive o
   el classroom archivado, la exención no alcanza.
 - **No toca "Tarde"**, que se sigue midiendo contra `deadline_at`. Una
   entrega extendida confirmada después de la deadline queda marcada, igual
   que el "Late" del sitio vivo.
 - **El lease no ofrece el repositorio mientras la exención esté vigente**,
-  porque el alumno todavía puede cambiar lo que se corrige. Al revocarla, la
-  entrega vigente (la última fila, como siempre) queda elegible sin que el
-  docente vuelva a cerrar nada. Si el worker ya había corregido la entrega
+  porque el alumno todavía puede cambiar lo que se corrige. Cuando vence, o
+  si se la revoca antes, la entrega vigente (la última fila, como siempre)
+  queda elegible sin que el docente vuelva a cerrar nada. Si el worker ya había corregido la entrega
   anterior, esa corrida queda colgada de esa fila.
 - **Reabrir la entrega revoca sus extensiones.** Con la entrega abierta ya no
   hay nada de qué eximir, y el dashboard no las muestra; si quedaran activas,
   volverían solas al cerrar de nuevo, dejando a esos alumnos confirmando y
   fuera del lease sin que nadie lo vea.
 - Revocar setea `revoked_at` en vez de borrar, así una entrega confirmada
-  después del cierre conserva el motivo por el que existe.
+  después del cierre conserva el motivo por el que existe. Una extensión que
+  venció sola queda con `revoked_at` en null: revocar es el docente
+  cortándola antes.
 
 ## Justificar una entrega tardía
 

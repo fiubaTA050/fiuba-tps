@@ -565,19 +565,21 @@ describe('the fixes of the review of the TA view', () => {
         checkpointId: w.checkpoint,
         assignmentRepoId: w.repoIds.mine,
         createdByUserId: idOf(w.profe),
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       },
       {
         checkpointId: w.checkpoint,
         assignmentRepoId: w.repoIds.theirs,
         createdByUserId: idOf(w.profe),
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       },
     ])
 
     const forTa = await listAssignmentSubmissions(w.ta, SLUG, 'tp0', 'individual', OPEN)
     const forProfe = await listAssignmentSubmissions(w.profe, SLUG, 'tp0')
 
-    expect([...forTa!.checkpoints[0].exemptRepoIds]).toEqual([w.mine.repo])
-    expect([...forProfe!.checkpoints[0].exemptRepoIds].sort()).toEqual([w.mine.repo, w.theirs.repo])
+    expect([...forTa!.checkpoints[0].exemptUntil.keys()]).toEqual([w.mine.repo])
+    expect([...forProfe!.checkpoints[0].exemptUntil.keys()].sort()).toEqual([w.mine.repo, w.theirs.repo])
   })
 
   it('leaves off the index a classroom where the TA is also a student, or that was deleted', async () => {

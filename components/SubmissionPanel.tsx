@@ -205,11 +205,11 @@ function PanelBody({
       )}
 
       {/* The entrega is closed for everyone else — see submissionExemptions in db/schema.ts */}
-      {panel.exempt && (
+      {panel.exemptUntil && (
         <div className="flash mb-3">
           {group
-            ? 'El docente le extendió esta entrega a tu equipo aunque esté cerrada. Lo que confirmes reemplaza la entrega anterior del equipo.'
-            : 'El docente te extendió esta entrega aunque esté cerrada. Lo que confirmes reemplaza tu entrega anterior.'}
+            ? `El docente le extendió esta entrega a tu equipo hasta el ${formatArgentina(panel.exemptUntil)}, aunque esté cerrada. Lo que confirmen hasta entonces reemplaza la entrega anterior del equipo, y es lo que se corrige cuando termine.`
+            : `El docente te extendió esta entrega hasta el ${formatArgentina(panel.exemptUntil)}, aunque esté cerrada. Lo que confirmes hasta entonces reemplaza tu entrega anterior, y es lo que se corrige cuando termine.`}
         </div>
       )}
 

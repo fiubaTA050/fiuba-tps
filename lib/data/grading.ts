@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 
 import {
   checkpoints,
@@ -10,7 +10,7 @@ import {
   submissionExemptions,
   submissions,
 } from '@/db/schema'
-import { KIND, type AssignmentKind } from '@/lib/data/assignment-kind'
+import { KIND, activeExemption, type AssignmentKind } from '@/lib/data/assignment-kind'
 import { db } from '@/lib/db'
 import { mintRepositoryScopedToken } from '@/lib/github/client'
 import { findRepositoryOwnerAndName } from '@/lib/github/repositories'
@@ -74,7 +74,8 @@ type Candidate = {
  *    is closed, the oldest one that is not already graded, not already
  *    leased and active, and under the attempt cap. A repository exempted
  *    from the close is skipped while the exemption lasts: the student can
- *    still replace what would be graded.
+ *    still replace what would be graded. Once it expires the submission is
+ *    offered with no one doing anything.
  * 3. GitHub is asked for the repo and the token **before** anything is
  *    written: if either fails (a deleted repository, a stale installation —
  *    see installation-id-goes-stale, not self-healed here since there is no
@@ -215,7 +216,33 @@ function isEligible(attempts: Attempt[]): boolean {
   return true
 }
 
+/**
+ * Everything `findOldestEligibleCandidate` checked, read again under the row
+ * lock: the GitHub calls in between take hundreds of milliseconds, and a
+ * teacher extending the entrega or reopening it in that window must win —
+ * a submission graded while the student can still replace it is never
+ * graded again, since `isEligible` skips one with a succeeded run.
+ */
 async function isStillEligible(tx: Transaction, submissionId: number): Promise<boolean> {
+  const [gate] = await tx
+    .select({ closedAt: checkpoints.closedAt, exemptionId: submissionExemptions.id })
+    .from(submissions)
+    .innerJoin(checkpoints, eq(checkpoints.id, submissions.checkpointId))
+    .leftJoin(
+      submissionExemptions,
+      and(
+        eq(submissionExemptions.checkpointId, submissions.checkpointId),
+        or(
+          eq(submissionExemptions.assignmentRepoId, submissions.assignmentRepoId),
+          eq(submissionExemptions.groupAssignmentRepoId, submissions.groupAssignmentRepoId),
+        ),
+        activeExemption(),
+      ),
+    )
+    .where(eq(submissions.id, submissionId))
+
+  if (!gate || gate.closedAt === null || gate.exemptionId !== null) return false
+
   const attempts = await tx
     .select({ status: gradingRuns.status, expiresAt: gradingRuns.expiresAt })
     .from(gradingRuns)
@@ -311,7 +338,7 @@ async function currentSubmissions(orgIds: number[], kind: AssignmentKind) {
       and(
         eq(submissionExemptions.checkpointId, submissions.checkpointId),
         eq(k.exemptionRepoId, k.submissionRepoId),
-        isNull(submissionExemptions.revokedAt),
+        activeExemption(),
       ),
     )
     .where(

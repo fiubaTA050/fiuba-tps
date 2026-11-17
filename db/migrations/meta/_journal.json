@@ -162,6 +162,13 @@
       "when": 1794453317280,
       "tag": "0022_ta_repo_accesses",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794873090185,
+      "tag": "0023_exemption_expires_at",
+      "breakpoints": true
     }
   ]
 }

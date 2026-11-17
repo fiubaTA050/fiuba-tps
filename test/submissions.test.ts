@@ -83,6 +83,7 @@ const {
   revokeLateSubmissionJustification,
   saveSubmissionFeedback,
   setSubmissionExemption,
+  MAX_EXEMPTION_DAYS,
 } = await import('@/lib/data/submissions')
 
 let nextUid = 1
@@ -194,7 +195,7 @@ async function ageLastSubmission(): Promise<void> {
  */
 async function classroomWithAssignment(
   profe: Session,
-): Promise<{ classroomSlug: string; assignmentSlug: string; assignmentId: number }> {
+): Promise<{ classroomSlug: string; assignmentSlug: string; assignmentId: number; classroomId: number }> {
   const githubId = nextGithubId++
 
   const [classroom] = await db
@@ -225,6 +226,7 @@ async function classroomWithAssignment(
     classroomSlug: classroom.slug,
     assignmentSlug: assignment.slug,
     assignmentId: assignment.id,
+    classroomId: classroom.id,
   }
 }
 
@@ -1210,12 +1212,21 @@ describe('findSubmissionDetail', () => {
  * db/schema.ts. No spec to port: the archived Rails code has no equivalent.
  */
 describe('submission exemptions', () => {
-  async function exempt(repoId: number, checkpointId: number, by: Session, revokedAt: Date | null = null) {
+  const inADay = () => new Date(Date.now() + 24 * 60 * 60 * 1000)
+
+  async function exempt(
+    repoId: number,
+    checkpointId: number,
+    by: Session,
+    revokedAt: Date | null = null,
+    expiresAt: Date = inADay(),
+  ) {
     await db.insert(submissionExemptions).values({
       checkpointId,
       assignmentRepoId: repoId,
       createdByUserId: Number(by.user.id),
       revokedAt,
+      expiresAt,
     })
   }
 
@@ -1237,7 +1248,21 @@ describe('submission exemptions', () => {
 
     expect(result).toMatchObject({ success: true })
     const [panel] = (await findSubmissionPanels(alumna, key))!
-    expect(panel).toMatchObject({ enabled: true, exempt: true, disabledReason: null })
+    expect(panel).toMatchObject({ enabled: true, disabledReason: null })
+    expect(panel.exemptUntil).toBeInstanceOf(Date)
+  })
+
+  // The case that motivated the end date: nobody revokes, and it still closes
+  it('refuses again once the exemption expires, with no one revoking it', async () => {
+    const alumna = await student('alumna')
+    const { key, repoId, checkpointId } = await assignmentWithRepo(alumna, { closedAt: new Date() })
+    await exempt(repoId, checkpointId!, alumna, null, new Date(Date.now() - 1000))
+
+    const result = await confirmSubmission(alumna, key, checkpointId!, 'main', 'No usé herramientas de IA.')
+
+    expect(result).toMatchObject({ success: false })
+    const [panel] = (await findSubmissionPanels(alumna, key))!
+    expect(panel).toMatchObject({ enabled: false, exemptUntil: null })
   })
 
   it('refuses again once the exemption is revoked', async () => {
@@ -1249,7 +1274,7 @@ describe('submission exemptions', () => {
 
     expect(result).toMatchObject({ success: false })
     const [panel] = (await findSubmissionPanels(alumna, key))!
-    expect(panel).toMatchObject({ enabled: false, exempt: false })
+    expect(panel).toMatchObject({ enabled: false, exemptUntil: null })
   })
 
   it('does not reach another student of the same assignment', async () => {
@@ -1288,7 +1313,7 @@ describe('submission exemptions', () => {
     await exempt(repoId, checkpointId!, alumna)
 
     const [panel] = (await findSubmissionPanels(alumna, key))!
-    expect(panel).toMatchObject({ enabled: false, exempt: false })
+    expect(panel).toMatchObject({ enabled: false, exemptUntil: null })
   })
 
   it('does not lift an inactive assignment, only the close', async () => {
@@ -1310,7 +1335,7 @@ describe('submission exemptions', () => {
     await exempt(repoId, checkpointId!, alumna)
 
     const [panel] = (await findSubmissionPanels(alumna, key))!
-    expect(panel).toMatchObject({ enabled: true, exempt: false })
+    expect(panel).toMatchObject({ enabled: true, exemptUntil: null })
   })
 
   it('shows the teacher which entrega is closed and who is exempt from it', async () => {
@@ -1321,14 +1346,18 @@ describe('submission exemptions', () => {
     const checkpointId = await closedCheckpoint(assignmentId)
     const repo1 = await repoFor(assignmentId, alumna1)
     const repo2 = await repoFor(assignmentId, alumna2)
-    await exempt(repo1.repoId, checkpointId, profe)
+    const repo3 = await repoFor(assignmentId, await student('alumna3'))
+    const until = inADay()
+    await exempt(repo1.repoId, checkpointId, profe, null, until)
     await exempt(repo2.repoId, checkpointId, profe, new Date())
+    await exempt(repo3.repoId, checkpointId, profe, null, new Date(Date.now() - 1000))
 
     const result = await listAssignmentSubmissions(profe, classroomSlug, assignmentSlug)
     const checkpoint = checkpointResult(result, checkpointId)
 
     expect(checkpoint?.closed).toBe(true)
-    expect([...checkpoint!.exemptRepoIds]).toEqual([repo1.githubRepoId])
+    // Revoked and expired alike are gone
+    expect([...checkpoint!.exemptUntil]).toEqual([[repo1.githubRepoId, until]])
   })
 
   describe('setSubmissionExemption', () => {
@@ -1339,17 +1368,136 @@ describe('submission exemptions', () => {
       const checkpointId = await closedCheckpoint(assignmentId)
       const { githubRepoId } = await repoFor(assignmentId, alumna)
 
-      const set = (value: boolean) =>
-        setSubmissionExemption(profe, classroomSlug, assignmentSlug, checkpointId, githubRepoId, value)
+      const set = (until: Date | null) =>
+        setSubmissionExemption(profe, classroomSlug, assignmentSlug, checkpointId, githubRepoId, until)
 
-      expect(await set(true)).toEqual({ success: true })
-      expect(await set(false)).toEqual({ success: true })
+      expect(await set(inADay())).toEqual({ success: true })
+      expect(await set(null)).toEqual({ success: true })
       expect((await db.select().from(submissionExemptions))[0].revokedAt).not.toBeNull()
-      expect(await set(true)).toEqual({ success: true })
+      const later = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+      expect(await set(later)).toEqual({ success: true })
 
       const rows = await db.select().from(submissionExemptions)
       expect(rows).toHaveLength(1)
       expect(rows[0].revokedAt).toBeNull()
+      expect(rows[0].expiresAt).toEqual(later)
+    })
+
+    it('moves the end date of an active exemption, keeping who granted it and when', async () => {
+      const profe = await student('profe')
+      const otraProfe = await student('otra-profe')
+      const alumna = await student('alumna')
+      const { classroomSlug, assignmentSlug, assignmentId, classroomId } = await classroomWithAssignment(profe)
+      await db.insert(organizationsUsers).values({ organizationId: classroomId, userId: Number(otraProfe.user.id) })
+      const checkpointId = await closedCheckpoint(assignmentId)
+      const { githubRepoId } = await repoFor(assignmentId, alumna)
+      const later = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+
+      await setSubmissionExemption(profe, classroomSlug, assignmentSlug, checkpointId, githubRepoId, inADay())
+      const [granted] = await db.select().from(submissionExemptions)
+      expect(
+        await setSubmissionExemption(otraProfe, classroomSlug, assignmentSlug, checkpointId, githubRepoId, later),
+      ).toEqual({ success: true })
+
+      const rows = await db.select().from(submissionExemptions)
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({
+        expiresAt: later,
+        createdAt: granted.createdAt,
+        createdByUserId: Number(profe.user.id),
+      })
+    })
+
+    it('refuses an end date further than the cap', async () => {
+      const profe = await student('profe')
+      const alumna = await student('alumna')
+      const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+      const checkpointId = await closedCheckpoint(assignmentId)
+      const { githubRepoId } = await repoFor(assignmentId, alumna)
+      const day = 24 * 60 * 60 * 1000
+
+      const tooLate = await setSubmissionExemption(
+        profe,
+        classroomSlug,
+        assignmentSlug,
+        checkpointId,
+        githubRepoId,
+        new Date(Date.now() + (MAX_EXEMPTION_DAYS + 1) * day),
+      )
+      expect(tooLate).toMatchObject({ success: false })
+      expect(await db.select().from(submissionExemptions)).toHaveLength(0)
+
+      expect(
+        await setSubmissionExemption(
+          profe,
+          classroomSlug,
+          assignmentSlug,
+          checkpointId,
+          githubRepoId,
+          new Date(Date.now() + (MAX_EXEMPTION_DAYS - 1) * day),
+        ),
+      ).toEqual({ success: true })
+    })
+
+    // The teacher's screen still showed it active; granting a new one here
+    // would re-open a submission that may be graded by now
+    it('refuses "Cambiar fecha" on an extension that already ran out', async () => {
+      const profe = await student('profe')
+      const alumna = await student('alumna')
+      const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+      const checkpointId = await closedCheckpoint(assignmentId)
+      const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+      const expiredAt = new Date(Date.now() - 1000)
+      await exempt(repoId, checkpointId, profe, null, expiredAt)
+
+      const result = await setSubmissionExemption(
+        profe,
+        classroomSlug,
+        assignmentSlug,
+        checkpointId,
+        githubRepoId,
+        inADay(),
+        'individual',
+        { changeOnly: true },
+      )
+
+      expect(result).toMatchObject({ success: false })
+      expect((await db.select().from(submissionExemptions))[0].expiresAt).toEqual(expiredAt)
+    })
+
+    it('refuses an end date that already passed', async () => {
+      const profe = await student('profe')
+      const alumna = await student('alumna')
+      const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+      const checkpointId = await closedCheckpoint(assignmentId)
+      const { githubRepoId } = await repoFor(assignmentId, alumna)
+
+      const result = await setSubmissionExemption(
+        profe,
+        classroomSlug,
+        assignmentSlug,
+        checkpointId,
+        githubRepoId,
+        new Date(Date.now() - 1000),
+      )
+
+      expect(result).toMatchObject({ success: false })
+      expect(await db.select().from(submissionExemptions)).toHaveLength(0)
+    })
+
+    it('leaves an expired exemption alone when revoking', async () => {
+      const profe = await student('profe')
+      const alumna = await student('alumna')
+      const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+      const checkpointId = await closedCheckpoint(assignmentId)
+      const { repoId, githubRepoId } = await repoFor(assignmentId, alumna)
+      await exempt(repoId, checkpointId, profe, null, new Date(Date.now() - 1000))
+
+      expect(
+        await setSubmissionExemption(profe, classroomSlug, assignmentSlug, checkpointId, githubRepoId, null),
+      ).toEqual({ success: true })
+      // It ran out on its own; revoked_at stays for the teacher taking it back
+      expect((await db.select().from(submissionExemptions))[0].revokedAt).toBeNull()
     })
 
     it('refuses on an open entrega', async () => {
@@ -1365,7 +1513,7 @@ describe('submission exemptions', () => {
         assignmentSlug,
         checkpointId,
         githubRepoId,
-        true,
+        inADay(),
       )
 
       expect(result).toMatchObject({ success: false })
@@ -1386,7 +1534,7 @@ describe('submission exemptions', () => {
         assignmentSlug,
         checkpointId,
         githubRepoId,
-        true,
+        inADay(),
       )
 
       expect(result).toMatchObject({ success: false })
@@ -1409,7 +1557,7 @@ describe('submission exemptions', () => {
           mine.assignmentSlug,
           otherCheckpointId,
           githubRepoId,
-          true,
+          inADay(),
         ),
       ).toMatchObject({ success: false })
       expect(
@@ -1419,7 +1567,7 @@ describe('submission exemptions', () => {
           mine.assignmentSlug,
           checkpointId,
           otherRepo.githubRepoId,
-          true,
+          inADay(),
         ),
       ).toMatchObject({ success: false })
       expect(await db.select().from(submissionExemptions)).toHaveLength(0)
@@ -1434,7 +1582,7 @@ describe('submission exemptions', () => {
       const { githubRepoId } = await repoFor(assignmentId, alumna)
 
       expect(
-        await setSubmissionExemption(ajeno, classroomSlug, assignmentSlug, checkpointId, githubRepoId, true),
+        await setSubmissionExemption(ajeno, classroomSlug, assignmentSlug, checkpointId, githubRepoId, inADay()),
       ).toBeNull()
       expect(await db.select().from(submissionExemptions)).toHaveLength(0)
     })

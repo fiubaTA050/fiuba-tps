@@ -14,6 +14,7 @@ import {
   setSubmissionExemption,
 } from '@/lib/data/submissions'
 import { setAllocation } from '@/lib/data/teaching-assistants'
+import { parseArgentinaDateTime } from '@/lib/dates'
 import { positiveInteger } from '@/lib/form'
 import { isUsableSession } from '@/lib/session'
 
@@ -80,14 +81,22 @@ export async function setSubmissionExemptionAction(
     return { error: 'No encontramos esa entrega.', notice: null }
   }
 
+  // Required: an extension with no end is what got forgotten — see
+  // submissionExemptions in db/schema.ts
+  const until = exempt ? parseArgentinaDateTime(String(formData.get('expires_at') ?? '')) : null
+  if (exempt && until === null) {
+    return { error: 'Elegí hasta cuándo dura la extensión.', notice: null }
+  }
+
   const result = await setSubmissionExemption(
     session,
     classroomSlug,
     assignmentSlug,
     checkpointId,
     githubRepoId,
-    exempt,
+    until,
     kind,
+    { changeOnly: formData.get('mode') === 'change' },
   )
 
   if (!result) return { error: 'No encontramos ese classroom.', notice: null }

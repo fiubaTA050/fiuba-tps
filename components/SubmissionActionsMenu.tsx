@@ -9,19 +9,20 @@ import {
   KebabHorizontalIcon,
 } from '@primer/octicons-react'
 import Link from 'next/link'
-import { type ReactNode, type RefObject, useActionState, useRef } from 'react'
+import { type ReactNode, type RefObject, useActionState, useRef, useState } from 'react'
 
 import { setSubmissionExemptionAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
 import { EMPTY_STATE, type RosterActionState } from '@/app/classrooms/[slug]/roster/state'
 import type { AssignmentKind } from '@/lib/assignment-paths'
+import { toArgentinaDateTimeInput } from '@/lib/dates'
 
 import { LateJustificationDialog, type LateJustificationTarget } from './LateJustificationDialog'
 
 type Extension = {
   /** "2A", or "la entrega" for the single unnamed one */
   entrega: string
-  /** Whether the extension is active now, which makes this the revoke flow */
-  extended: boolean
+  /** When the active extension runs out; null when there is none to change or revoke */
+  extendedUntil: Date | null
   classroomSlug: string
   assignmentSlug: string
   kind: AssignmentKind
@@ -33,6 +34,7 @@ type Extension = {
  * The ⋯ at the end of a dashboard row. Three independent items, each only
  * where it means something: "Extender entrega" / "Revocar extensión" over an
  * entrega the teacher already closed (`submissionExemptions` in db/schema.ts),
+ * plus "Cambiar fecha de la extensión" over an active one,
  * "Justificar entrega tardía" / "Quitar justificación" over a current
  * submission that is late (`lateSubmissionJustifications`, LateJustificationDialog),
  * and "Escribir devolución" / "Ver devolución" over any current submission —
@@ -47,7 +49,8 @@ type Extension = {
  * `revoke-assignment-deadline-<id>` dialogs in the saved capture of the group
  * dashboard — the menu itself is painted by JS and is not in that capture.
  * What it extends differs: there the cutoff that removes push access, here
- * the entrega's close.
+ * the entrega's close, and until a date the teacher has to pick — the live
+ * extension has none.
  *
  * The menu is the classroom card's kebab (ClassroomList.tsx); the dialog is
  * the native `<dialog>` of LinkToStudentDialog. Deliberate divergence from the
@@ -73,6 +76,7 @@ export function SubmissionActionsMenu({
 }) {
   const menu = useRef<HTMLDetailsElement>(null)
   const extensionDialog = useRef<HTMLDialogElement>(null)
+  const changeDateDialog = useRef<HTMLDialogElement>(null)
   const justificationDialog = useRef<HTMLDialogElement>(null)
 
   function open(dialog: RefObject<HTMLDialogElement | null>) {
@@ -98,9 +102,15 @@ export function SubmissionActionsMenu({
                   <div className="ActionList-sectionDivider-title">Acciones:</div>
                 </li>
 
+                {extension?.extendedUntil && (
+                  <MenuItem icon={<CalendarIcon />} onClick={() => open(changeDateDialog)}>
+                    Cambiar fecha de la extensión
+                  </MenuItem>
+                )}
+
                 {extension && (
                   <MenuItem icon={<CalendarIcon />} onClick={() => open(extensionDialog)}>
-                    {extension.extended ? 'Revocar extensión' : 'Extender entrega'}
+                    {extension.extendedUntil ? 'Revocar extensión' : 'Extender entrega'}
                   </MenuItem>
                 )}
 
@@ -134,7 +144,18 @@ export function SubmissionActionsMenu({
         </div>
       </details>
 
-      {extension && <ExtensionDialog dialogRef={extensionDialog} name={name} {...extension} />}
+      {extension && (
+        <ExtensionDialog
+          dialogRef={extensionDialog}
+          name={name}
+          mode={extension.extendedUntil ? 'revoke' : 'extend'}
+          {...extension}
+        />
+      )}
+
+      {extension?.extendedUntil && (
+        <ExtensionDialog dialogRef={changeDateDialog} name={name} mode="change" {...extension} />
+      )}
 
       {justification && (
         <LateJustificationDialog dialogRef={justificationDialog} name={name} target={justification} />
@@ -167,17 +188,26 @@ function MenuItem({
   )
 }
 
+/**
+ * One dialog, three flows. Extending and changing the date both post an end
+ * date and differ only in their copy; revoking posts none.
+ */
 function ExtensionDialog({
   dialogRef: dialog,
   name,
+  mode,
   entrega,
-  extended,
+  extendedUntil,
   classroomSlug,
   assignmentSlug,
   kind,
   checkpointId,
   githubRepoId,
-}: Extension & { dialogRef: RefObject<HTMLDialogElement | null>; name: string }) {
+}: Extension & {
+  dialogRef: RefObject<HTMLDialogElement | null>
+  name: string
+  mode: 'extend' | 'change' | 'revoke'
+}) {
   const [state, formAction, pending] = useActionState(
     async (previous: RosterActionState, formData: FormData) => {
       const result = await setSubmissionExemptionAction(previous, formData)
@@ -189,14 +219,35 @@ function ExtensionDialog({
     EMPTY_STATE,
   )
 
-  const titleId = `submission-extension-${checkpointId}-${githubRepoId}`
+  // Closing without saving forgets the attempt: the date field goes back to
+  // the stored one (`reset` restores `defaultValue`) and the last error stops
+  // showing. Without this, a date typed and cancelled would be the one
+  // "Guardar fecha" sends next time
+  const form = useRef<HTMLFormElement>(null)
+  const [dismissed, setDismissed] = useState<RosterActionState | null>(null)
+
+  const titleId = `submission-extension-${mode}-${checkpointId}-${githubRepoId}`
+  const dateId = `${titleId}-until`
+  const revoking = mode === 'revoke'
 
   return (
-    <dialog ref={dialog} className="modal" aria-labelledby={titleId}>
-      <div className="Box Box--overlay text-left">
+    <dialog
+      ref={dialog}
+      className="modal"
+      aria-labelledby={titleId}
+      onClose={() => {
+        form.current?.reset()
+        setDismissed(state)
+      }}
+    >
+      <form ref={form} action={formAction} className="Box Box--overlay text-left">
         <div className="Box-header d-flex flex-justify-between flex-items-center">
           <h2 className="Box-title" id={titleId}>
-            {extended ? `Revocar la extensión de ${name}` : `Extender la entrega de ${name}`}
+            {mode === 'revoke'
+              ? `Revocar la extensión de ${name}`
+              : mode === 'change'
+                ? `Cambiar la extensión de ${name}`
+                : `Extender la entrega de ${name}`}
           </h2>
           <button
             type="button"
@@ -209,55 +260,88 @@ function ExtensionDialog({
         </div>
 
         <div className="Box-body">
-          {state.error && <div className="flash flash-error mb-3">{state.error}</div>}
+          {state.error && state !== dismissed && (
+            <div className="flash flash-error mb-3">{state.error}</div>
+          )}
 
           <div className="flash flash-warn">
             <strong>
-              {extended
+              {mode === 'revoke'
                 ? `Vas a revocar la extensión de ${name}.`
-                : `Vas a extender ${entrega} para ${name}.`}
+                : mode === 'change'
+                  ? `Vas a cambiar hasta cuándo dura la extensión de ${name}.`
+                  : `Vas a extender ${entrega} para ${name}.`}
             </strong>
           </div>
 
+          {!revoking && (
+            <div className="form-group mt-3 mb-0">
+              <div className="form-group-header">
+                <label htmlFor={dateId}>Hasta</label>
+              </div>
+              <div className="form-group-body">
+                {/* Required: an extension with no end is what got forgotten —
+                    see submissionExemptions in db/schema.ts. Argentine time,
+                    like the deadline on the edit screen (lib/dates.ts) */}
+                <input
+                  id={dateId}
+                  type="datetime-local"
+                  name="expires_at"
+                  className="form-control"
+                  required
+                  defaultValue={
+                    mode === 'change' && extendedUntil ? toArgentinaDateTimeInput(extendedUntil) : ''
+                  }
+                />
+                <p className="note">Hora de Argentina.</p>
+              </div>
+            </div>
+          )}
+
           <div className="mt-3 px-2 d-flex">
-            <GitPullRequestIcon className={`mr-3 flex-shrink-0 ${extended ? '' : 'color-fg-success'}`} />
+            <GitPullRequestIcon className={`mr-3 flex-shrink-0 ${revoking ? '' : 'color-fg-success'}`} />
             <p className="mb-0">
-              {extended
+              {revoking
                 ? `No va a poder confirmar más entregas para ${entrega}. La que tenga confirmada es la que se corrige.`
-                : `Va a poder confirmar una entrega nueva para ${entrega} aunque esté cerrada.`}
+                : `Va a poder confirmar una entrega nueva para ${entrega} hasta esa fecha, aunque esté cerrada.`}
             </p>
           </div>
           <div className="mt-2 px-2 d-flex">
             <ClockIcon className="mr-3 flex-shrink-0" />
             <p className="mb-0">
-              {extended
+              {revoking
                 ? 'Podés volver a extenderla cuando quieras.'
-                : 'Podés revocar la extensión cuando quieras.'}
+                : 'Cuando termine, se corrige la que tenga confirmada. Podés revocarla antes.'}
             </p>
           </div>
         </div>
 
-        <form action={formAction} className="Box-footer d-flex flex-justify-end">
+        <div className="Box-footer d-flex flex-justify-end">
           <input type="hidden" name="classroom_slug" value={classroomSlug} />
           <input type="hidden" name="assignment_slug" value={assignmentSlug} />
           <input type="hidden" name="kind" value={kind} />
           <input type="hidden" name="checkpoint_id" value={checkpointId} />
           <input type="hidden" name="github_repo_id" value={githubRepoId} />
-          <input type="hidden" name="exempt" value={extended ? '0' : '1'} />
+          <input type="hidden" name="exempt" value={revoking ? '0' : '1'} />
+          <input type="hidden" name="mode" value={mode} />
           <button type="button" className="btn mr-2" onClick={() => dialog.current?.close()}>
             Cancelar
           </button>
-          {extended ? (
+          {revoking ? (
             <button type="submit" className="btn btn-danger" disabled={pending}>
               {pending ? 'Revocando…' : 'Revocar extensión'}
+            </button>
+          ) : mode === 'change' ? (
+            <button type="submit" className="btn btn-primary" disabled={pending}>
+              {pending ? 'Guardando…' : 'Guardar fecha'}
             </button>
           ) : (
             <button type="submit" className="btn btn-primary" disabled={pending}>
               {pending ? 'Extendiendo…' : 'Extender entrega'}
             </button>
           )}
-        </form>
-      </div>
+        </div>
+      </form>
     </dialog>
   )
 }

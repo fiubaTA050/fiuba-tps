@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, gt, isNull } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import {
@@ -59,6 +59,18 @@ export function repoOwner(repo: RepoRef) {
   return repo.kind === 'group'
     ? { groupAssignmentRepoId: repo.id }
     : { assignmentRepoId: repo.id }
+}
+
+/**
+ * An exemption that still lets its repository past the close: not revoked
+ * and not expired. Every reader of `submission_exemptions` goes through this,
+ * so an expired one needs no job to stop counting — see db/schema.ts.
+ */
+export function activeExemption() {
+  return and(
+    isNull(submissionExemptions.revokedAt),
+    gt(submissionExemptions.expiresAt, new Date()),
+  )
 }
 
 export type TeachingAssignment = {
