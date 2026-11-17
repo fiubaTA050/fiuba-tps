@@ -338,14 +338,21 @@ describe('leaseSubmissionForGrading', () => {
 
   describe('with a repository exempted from the close', () => {
     /** Exempts the repo and entrega behind `submissionId`, returning both ids */
-    async function exempt(submissionId: number, by: number) {
+    async function exempt(
+      submissionId: number,
+      by: number,
+      expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000),
+    ) {
       const [row] = await db
         .select({ repoId: submissions.assignmentRepoId, checkpointId: submissions.checkpointId })
         .from(submissions)
         .where(eq(submissions.id, submissionId))
-      await db
-        .insert(submissionExemptions)
-        .values({ checkpointId: row.checkpointId, assignmentRepoId: row.repoId, createdByUserId: by })
+      await db.insert(submissionExemptions).values({
+        checkpointId: row.checkpointId,
+        assignmentRepoId: row.repoId,
+        createdByUserId: by,
+        expiresAt,
+      })
       return row
     }
 
@@ -390,6 +397,23 @@ describe('leaseSubmissionForGrading', () => {
       expect(lease).toMatchObject({ sha: 'b'.repeat(40) })
       const [run] = await db.select().from(gradingRuns).where(eq(gradingRuns.id, lease!.leaseId))
       expect(run.submissionId).toBe(resubmission.id)
+    })
+
+    // What happened to a student in production: the exemption was never
+    // revoked and the re-submission sat ungraded. Expiring is enough now
+    it('grades it once the exemption expires, with no one revoking it', async () => {
+      const profe = await teacher()
+      const alumna = await student()
+      const org = await classroom(profe)
+      const assignment = await gradableAssignment(org, profe)
+      const { submissionId } = await submittedRepo(assignment, alumna)
+      await exempt(submissionId, profe, new Date(Date.now() - 1000))
+
+      const lease = await leaseSubmissionForGrading(profe, await apiKey(profe))
+
+      expect(lease).not.toBeNull()
+      const [run] = await db.select().from(gradingRuns).where(eq(gradingRuns.id, lease!.leaseId))
+      expect(run.submissionId).toBe(submissionId)
     })
   })
 

@@ -75,11 +75,36 @@ describe('the dashboard actions', () => {
   it('extend a team\'s entrega on the group path and revalidate the group dashboard', async () => {
     await setSubmissionExemptionAction(
       EMPTY,
-      form({ ...target, checkpoint_id: '3', exempt: '1', kind: 'group' }),
+      form({ ...target, checkpoint_id: '3', exempt: '1', expires_at: '2026-12-01T23:59', kind: 'group' }),
     )
 
-    expect(data.setSubmissionExemption).toHaveBeenCalledWith(session, 'tps', 'tp2', 3, 77, true, 'group')
+    // Argentine time, -03:00
+    expect(data.setSubmissionExemption).toHaveBeenCalledWith(
+      session,
+      'tps',
+      'tp2',
+      3,
+      77,
+      new Date('2026-12-02T02:59:00Z'),
+      'group',
+    )
     expect(revalidatePath).toHaveBeenCalledWith('/classrooms/tps/group-assignments/tp2')
+  })
+
+  it('refuse to extend with no end date', async () => {
+    const result = await setSubmissionExemptionAction(
+      EMPTY,
+      form({ ...target, checkpoint_id: '3', exempt: '1', expires_at: '', kind: 'group' }),
+    )
+
+    expect(result.error).toBeTruthy()
+    expect(data.setSubmissionExemption).not.toHaveBeenCalled()
+  })
+
+  it('revoke with no end date', async () => {
+    await setSubmissionExemptionAction(EMPTY, form({ ...target, checkpoint_id: '3', exempt: '0', kind: 'group' }))
+
+    expect(data.setSubmissionExemption).toHaveBeenCalledWith(session, 'tps', 'tp2', 3, 77, null, 'group')
   })
 
   it('justify, and take back, a team\'s late entrega on the group path', async () => {

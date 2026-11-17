@@ -885,13 +885,19 @@ export const submissions = pgTable(
  * …'s deadline extension" (saved capture of the group dashboard; the archived
  * Rails code has no equivalent). There it exempts a team from the *cutoff*
  * deadline, which revokes push access; here what cuts is `checkpoints.closed_at`,
- * so the exemption is from that. Like the live one it has no date of its own:
- * the teacher revokes it by hand, the same lever `closed_at` already is.
+ * so the exemption is from that.
  *
- * While active, `confirmSubmission` accepts this repository's confirmations and
- * the grading lease skips it — the student can still change what gets graded.
- * Revoking sets `revoked_at` instead of deleting, and exempting again clears it,
- * so a submission confirmed after the close keeps the reason it exists.
+ * Deliberate divergence: the live one has no date and lasts until revoked.
+ * Here `expires_at` is required. An exemption with no end was forgotten in
+ * production — the student re-submitted, nobody revoked it, and the lease
+ * skipped that submission for two months while the student saw "pendiente".
+ * Expiring needs no job: every reader compares `expires_at` with the clock.
+ *
+ * Active means not revoked and not expired. While active, `confirmSubmission`
+ * accepts this repository's confirmations and the grading lease skips it — the
+ * student can still change what gets graded. Revoking sets `revoked_at` instead
+ * of deleting, and exempting again clears it with a new `expires_at`, so a
+ * submission confirmed after the close keeps the reason it exists.
  *
  * It changes nothing about "Tarde": that still reads against `deadline_at`.
  * Of a student's repository or a team's, exactly one, like `submissions`.
@@ -914,7 +920,9 @@ export const submissionExemptions = pgTable(
       .notNull()
       .references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    /** Null while the exemption is active */
+    /** When the repository falls back under the close, with no one revoking it */
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** Null unless the teacher took it back early */
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
   },
   (table) => [

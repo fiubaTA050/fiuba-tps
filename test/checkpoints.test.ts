@@ -436,6 +436,7 @@ describe('saveCheckpoints', () => {
       checkpointId: created.id,
       assignmentRepoId: repo.id,
       createdByUserId: Number(profe.user.id),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     })
 
     // A re-save that keeps it closed leaves the extension alone

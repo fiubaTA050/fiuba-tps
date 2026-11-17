@@ -10,7 +10,7 @@ import {
   submissionExemptions,
   submissions,
 } from '@/db/schema'
-import { KIND, type AssignmentKind } from '@/lib/data/assignment-kind'
+import { KIND, activeExemption, type AssignmentKind } from '@/lib/data/assignment-kind'
 import { db } from '@/lib/db'
 import { mintRepositoryScopedToken } from '@/lib/github/client'
 import { findRepositoryOwnerAndName } from '@/lib/github/repositories'
@@ -74,7 +74,8 @@ type Candidate = {
  *    is closed, the oldest one that is not already graded, not already
  *    leased and active, and under the attempt cap. A repository exempted
  *    from the close is skipped while the exemption lasts: the student can
- *    still replace what would be graded.
+ *    still replace what would be graded. Once it expires the submission is
+ *    offered with no one doing anything.
  * 3. GitHub is asked for the repo and the token **before** anything is
  *    written: if either fails (a deleted repository, a stale installation —
  *    see installation-id-goes-stale, not self-healed here since there is no
@@ -311,7 +312,7 @@ async function currentSubmissions(orgIds: number[], kind: AssignmentKind) {
       and(
         eq(submissionExemptions.checkpointId, submissions.checkpointId),
         eq(k.exemptionRepoId, k.submissionRepoId),
-        isNull(submissionExemptions.revokedAt),
+        activeExemption(),
       ),
     )
     .where(

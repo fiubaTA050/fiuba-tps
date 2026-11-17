@@ -435,7 +435,7 @@ describe('the teacher on a group assignment', () => {
       fixture.assignmentSlug,
       checkpointId,
       githubRepoId!,
-      true,
+      new Date(Date.now() + 24 * 60 * 60 * 1000),
       'group',
     )
     expect(exempted).toEqual({ success: true })
@@ -447,7 +447,7 @@ describe('the teacher on a group assignment', () => {
       fixture.assignmentSlug,
       'group',
     )
-    expect([...listed!.checkpoints[0].exemptRepoIds]).toEqual([githubRepoId])
+    expect([...listed!.checkpoints[0].exemptUntil.keys()]).toEqual([githubRepoId])
   })
 
   it('justifies a late team submission and writes its devolución', async () => {

@@ -25,6 +25,7 @@ import {
 } from '@/db/schema'
 import {
   KIND,
+  activeExemption,
   findTeachingAssignment,
   repoOwner,
   type AssignmentKind,
@@ -136,6 +137,8 @@ export type CheckpointPanel = {
    * on an open one the exemption changes nothing and is not reported.
    */
   exempt: boolean
+  /** When that exemption runs out, or null when `exempt` is false */
+  exemptUntil: Date | null
   disabledReason: string | null
   current: SubmissionRow | null
   /** Every confirmation, newest first. The student argues with data, not memory */
@@ -216,8 +219,8 @@ export type CheckpointSubmissions = {
   closed: boolean
   /** Has an `autograderId`: its submissions get a `passed` once graded */
   autograded: boolean
-  /** Repositories with an active exemption from that close, by GitHub repo id */
-  exemptRepoIds: Set<number>
+  /** When each repository's active exemption from that close runs out, by GitHub repo id */
+  exemptUntil: Map<number, Date>
   /** Keyed by the GitHub repo id — the same key `listRepositorySnapshots` and
    *  `AssignmentAcceptances` use, not the internal `assignment_repos.id` */
   byRepoId: Map<number, CurrentSubmission>
@@ -374,24 +377,25 @@ export async function listAssignmentSubmissions(
     .select({
       checkpointId: submissionExemptions.checkpointId,
       githubRepoId: k.repos.githubRepoId,
+      expiresAt: submissionExemptions.expiresAt,
     })
     .from(submissionExemptions)
     .innerJoin(k.repos, eq(k.repos.id, k.exemptionRepoId))
     .where(
       and(
         inArray(submissionExemptions.checkpointId, checkpointIds),
-        isNull(submissionExemptions.revokedAt),
+        activeExemption(),
         // Like the submissions above: a TA's rows only, or the ids of every
         // extended repository would reach their browser
         visibleRepo(found, kind),
       ),
     )
 
-  const exemptByCheckpoint = new Map<number, Set<number>>(
-    checkpointIds.map((id) => [id, new Set()]),
+  const exemptByCheckpoint = new Map<number, Map<number, Date>>(
+    checkpointIds.map((id) => [id, new Map()]),
   )
   for (const row of exemptions) {
-    exemptByCheckpoint.get(row.checkpointId)!.add(row.githubRepoId)
+    exemptByCheckpoint.get(row.checkpointId)!.set(row.githubRepoId, row.expiresAt)
   }
 
   return {
@@ -401,7 +405,7 @@ export async function listAssignmentSubmissions(
       deadlineAt: row.deadlineAt,
       closed: row.closedAt !== null,
       autograded: row.autograderId !== null,
-      exemptRepoIds: exemptByCheckpoint.get(row.id)!,
+      exemptUntil: exemptByCheckpoint.get(row.id)!,
       byRepoId: byCheckpoint.get(row.id)!,
     })),
   }
@@ -484,6 +488,7 @@ export async function findSubmissionPanels(
       // Only when it is what lets them in: an Inactive/archived assignment
       // refuses anyway, and the notice would contradict the disabled form
       exempt: enabled && closed && checkpoint.exempt,
+      exemptUntil: enabled && closed && checkpoint.exempt ? checkpoint.exemptUntil : null,
       current: null,
       history: [],
       grading: null,
@@ -1148,9 +1153,10 @@ async function findStudentFeedback(history: SubmissionRow[]): Promise<StudentFee
 export type SubmissionExemptionResult = { success: true } | { success: false; error: string }
 
 /**
- * Lets one repository back into a closed entrega, or takes that back — the
- * live site's "Extend …'s assignment deadline" / "Revoke …'s deadline
- * extension". See `submissionExemptions` in db/schema.ts.
+ * Lets one repository back into a closed entrega until `until`, or takes
+ * that back early when `until` is null — the live site's "Extend …'s
+ * assignment deadline" / "Revoke …'s deadline extension", with the end date
+ * the live one does not have. See `submissionExemptions` in db/schema.ts.
  *
  * Refused on an open entrega: there is nothing to exempt from, and an
  * exemption lying in wait would silently outlive the next close.
@@ -1161,7 +1167,7 @@ export async function setSubmissionExemption(
   assignmentSlug: string,
   checkpointId: number,
   githubRepoId: number,
-  exempt: boolean,
+  until: Date | null,
   kind: AssignmentKind = 'individual',
 ): Promise<SubmissionExemptionResult | null> {
   const found = await findTeachingAssignment(session, classroomSlug, assignmentSlug, kind)
@@ -1176,25 +1182,37 @@ export async function setSubmissionExemption(
 
   if (!row) return { success: false, error: 'No encontramos esa entrega.' }
 
-  if (exempt && row.closedAt === null) {
+  if (until !== null && row.closedAt === null) {
     return { success: false, error: 'La entrega está abierta, no hace falta extenderla.' }
   }
 
-  if (exempt) {
+  // One already past would be an extension that lets nobody in
+  if (until !== null && until.getTime() <= Date.now()) {
+    return { success: false, error: 'La extensión tiene que terminar en el futuro.' }
+  }
+
+  if (until !== null) {
+    // Over an active one too: that is how the teacher moves its end date
     await db
       .insert(submissionExemptions)
       .values({
         checkpointId,
         ...repoOwner({ kind, id: row.repoId }),
         createdByUserId: Number(session.user.id),
+        expiresAt: until,
       })
       .onConflictDoUpdate({
         target: [submissionExemptions.checkpointId, k.exemptionRepoId],
-        set: { revokedAt: null, createdByUserId: Number(session.user.id), createdAt: new Date() },
+        set: {
+          revokedAt: null,
+          expiresAt: until,
+          createdByUserId: Number(session.user.id),
+          createdAt: new Date(),
+        },
       })
   } else {
-    // Revoking an exemption that does not exist is a no-op, not an error:
-    // the double click on "Revocar" lands here
+    // Revoking an exemption that does not exist, or already expired, is a
+    // no-op, not an error: the double click on "Revocar" lands here
     await db
       .update(submissionExemptions)
       .set({ revokedAt: new Date() })
@@ -1202,7 +1220,7 @@ export async function setSubmissionExemption(
         and(
           eq(submissionExemptions.checkpointId, checkpointId),
           eq(k.exemptionRepoId, row.repoId),
-          isNull(submissionExemptions.revokedAt),
+          activeExemption(),
         ),
       )
   }
@@ -1563,6 +1581,7 @@ async function loadContext(session: Session, key: string, kind: AssignmentKind) 
         autograderId: row.autograderId,
         resultsPublishedAt: row.resultsPublishedAt,
         exempt: row.exemptionId !== null,
+        exemptUntil: row.exemptionExpiresAt,
       })),
   }
 }
@@ -1575,6 +1594,7 @@ const checkpointFields = {
   autograderId: checkpoints.autograderId,
   resultsPublishedAt: checkpoints.resultsPublishedAt,
   exemptionId: submissionExemptions.id,
+  exemptionExpiresAt: submissionExemptions.expiresAt,
 }
 
 async function loadIndividualRows(session: Session, key: string) {
@@ -1609,7 +1629,7 @@ async function loadIndividualRows(session: Session, key: string) {
       and(
         eq(submissionExemptions.checkpointId, checkpoints.id),
         eq(submissionExemptions.assignmentRepoId, assignmentRepos.id),
-        isNull(submissionExemptions.revokedAt),
+        activeExemption(),
       ),
     )
     .where(and(eq(assignmentInvitations.key, key), isNull(assignmentInvitations.deletedAt)))
@@ -1663,7 +1683,7 @@ async function loadGroupRows(session: Session, key: string) {
       and(
         eq(submissionExemptions.checkpointId, checkpoints.id),
         eq(submissionExemptions.groupAssignmentRepoId, groupAssignmentRepos.id),
-        isNull(submissionExemptions.revokedAt),
+        activeExemption(),
       ),
     )
     .where(

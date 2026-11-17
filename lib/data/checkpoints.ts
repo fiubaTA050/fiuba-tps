@@ -1,12 +1,13 @@
 import 'server-only'
 
-import { and, count, eq, isNull } from 'drizzle-orm'
+import { and, count, eq } from 'drizzle-orm'
 import type { Session } from 'next-auth'
 
 import { checkpoints, submissionExemptions, submissions } from '@/db/schema'
 import { parseArgentinaDateTime } from '@/lib/dates'
 import {
   KIND,
+  activeExemption,
   checkpointOwner,
   findTeachingAssignment,
   type AssignmentKind,
@@ -398,7 +399,7 @@ export async function saveCheckpoints(
             .where(
               and(
                 eq(submissionExemptions.checkpointId, row.id),
-                isNull(submissionExemptions.revokedAt),
+                activeExemption(),
               ),
             )
         }

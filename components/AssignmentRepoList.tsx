@@ -717,7 +717,7 @@ function RepoListItem({
   }
 }) {
   const { snapshot } = row
-  const extended = row.repoId !== null && checkpoint?.exemptRepoIds.has(row.repoId) === true
+  const extendedUntil = (row.repoId !== null && checkpoint?.exemptUntil.get(row.repoId)) || null
   const justifiable = teacher && row.submission?.late === true && row.submission.id !== undefined
   const extendable = teacher && checkpoint?.closed === true
   const submissionId = row.submission?.id
@@ -773,10 +773,11 @@ function RepoListItem({
               )}
 
               {/* The live "Deadline extended" (GitHub Docs); its colour is not
-                  documented, attention keeps it apart from Entregado and Tarde */}
-              {checkpoint?.closed && extended && (
+                  documented, attention keeps it apart from Entregado and Tarde.
+                  The date is this port's: the live one has none to show */}
+              {checkpoint?.closed && extendedUntil && (
                 <span className="IssueLabel IssueLabel--big mr-2 color-bg-attention">
-                  Entrega extendida
+                  Extendida hasta {formatArgentina(extendedUntil)}
                 </span>
               )}
             </div>
@@ -882,7 +883,7 @@ function RepoListItem({
                 extendable && checkpoint
                   ? {
                       entrega: checkpoint.title ?? 'la entrega',
-                      extended,
+                      extendedUntil,
                       classroomSlug,
                       assignmentSlug,
                       kind,
