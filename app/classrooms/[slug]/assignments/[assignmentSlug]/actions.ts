@@ -96,6 +96,7 @@ export async function setSubmissionExemptionAction(
     githubRepoId,
     until,
     kind,
+    { changeOnly: formData.get('mode') === 'change' },
   )
 
   if (!result) return { error: 'No encontramos ese classroom.', notice: null }

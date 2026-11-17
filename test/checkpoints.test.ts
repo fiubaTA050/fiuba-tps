@@ -451,6 +451,33 @@ describe('saveCheckpoints', () => {
     expect((await db.select().from(submissionExemptions))[0].revokedAt).not.toBeNull()
   })
 
+  // revoked_at means a teacher took it back early; one that ran out on its
+  // own keeps it null — see "Extensión por alumno" in docs/entregas.md
+  it('leaves an expired extension alone when the entrega is reopened', async () => {
+    const profe = await teacher()
+    const { classroomSlug, assignmentSlug, assignmentId } = await classroomWithAssignment(profe)
+    await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+      { id: null, title: '2A', deadlineAt: null, autograderId: null, closed: true, resultsPublished: false },
+    ])
+    const [created] = (await listCheckpoints(profe, classroomSlug, assignmentSlug))!
+    const [repo] = await db
+      .insert(assignmentRepos)
+      .values({ assignmentId, userId: Number(profe.user.id), githubRepoId: nextGithubId++ })
+      .returning({ id: assignmentRepos.id })
+    await db.insert(submissionExemptions).values({
+      checkpointId: created.id,
+      assignmentRepoId: repo.id,
+      createdByUserId: Number(profe.user.id),
+      expiresAt: new Date(Date.now() - 1000),
+    })
+
+    await saveCheckpoints(profe, classroomSlug, assignmentSlug, [
+      { id: created.id, title: '2A', deadlineAt: null, autograderId: null, closed: false, resultsPublished: false },
+    ])
+
+    expect((await db.select().from(submissionExemptions))[0].revokedAt).toBeNull()
+  })
+
   it('clears the date and leaves the entrega open', async () => {
     const profe = await teacher()
     const { classroomSlug, assignmentSlug } = await classroomWithAssignment(profe)

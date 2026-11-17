@@ -9,7 +9,7 @@ import {
   KebabHorizontalIcon,
 } from '@primer/octicons-react'
 import Link from 'next/link'
-import { type ReactNode, type RefObject, useActionState, useRef } from 'react'
+import { type ReactNode, type RefObject, useActionState, useRef, useState } from 'react'
 
 import { setSubmissionExemptionAction } from '@/app/classrooms/[slug]/assignments/[assignmentSlug]/actions'
 import { EMPTY_STATE, type RosterActionState } from '@/app/classrooms/[slug]/roster/state'
@@ -219,13 +219,28 @@ function ExtensionDialog({
     EMPTY_STATE,
   )
 
+  // Closing without saving forgets the attempt: the date field goes back to
+  // the stored one (`reset` restores `defaultValue`) and the last error stops
+  // showing. Without this, a date typed and cancelled would be the one
+  // "Guardar fecha" sends next time
+  const form = useRef<HTMLFormElement>(null)
+  const [dismissed, setDismissed] = useState<RosterActionState | null>(null)
+
   const titleId = `submission-extension-${mode}-${checkpointId}-${githubRepoId}`
   const dateId = `${titleId}-until`
   const revoking = mode === 'revoke'
 
   return (
-    <dialog ref={dialog} className="modal" aria-labelledby={titleId}>
-      <form action={formAction} className="Box Box--overlay text-left">
+    <dialog
+      ref={dialog}
+      className="modal"
+      aria-labelledby={titleId}
+      onClose={() => {
+        form.current?.reset()
+        setDismissed(state)
+      }}
+    >
+      <form ref={form} action={formAction} className="Box Box--overlay text-left">
         <div className="Box-header d-flex flex-justify-between flex-items-center">
           <h2 className="Box-title" id={titleId}>
             {mode === 'revoke'
@@ -245,7 +260,9 @@ function ExtensionDialog({
         </div>
 
         <div className="Box-body">
-          {state.error && <div className="flash flash-error mb-3">{state.error}</div>}
+          {state.error && state !== dismissed && (
+            <div className="flash flash-error mb-3">{state.error}</div>
+          )}
 
           <div className="flash flash-warn">
             <strong>
@@ -264,7 +281,7 @@ function ExtensionDialog({
               </div>
               <div className="form-group-body">
                 {/* Required: an extension with no end is what got forgotten —
-                    see submissionExemptions in db/schema.ts. Hora argentina,
+                    see submissionExemptions in db/schema.ts. Argentine time,
                     like the deadline on the edit screen (lib/dates.ts) */}
                 <input
                   id={dateId}
@@ -306,6 +323,7 @@ function ExtensionDialog({
           <input type="hidden" name="checkpoint_id" value={checkpointId} />
           <input type="hidden" name="github_repo_id" value={githubRepoId} />
           <input type="hidden" name="exempt" value={revoking ? '0' : '1'} />
+          <input type="hidden" name="mode" value={mode} />
           <button type="button" className="btn mr-2" onClick={() => dialog.current?.close()}>
             Cancelar
           </button>

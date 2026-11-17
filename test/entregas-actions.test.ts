@@ -87,6 +87,7 @@ describe('the dashboard actions', () => {
       77,
       new Date('2026-12-02T02:59:00Z'),
       'group',
+      { changeOnly: false },
     )
     expect(revalidatePath).toHaveBeenCalledWith('/classrooms/tps/group-assignments/tp2')
   })
@@ -104,7 +105,27 @@ describe('the dashboard actions', () => {
   it('revoke with no end date', async () => {
     await setSubmissionExemptionAction(EMPTY, form({ ...target, checkpoint_id: '3', exempt: '0', kind: 'group' }))
 
-    expect(data.setSubmissionExemption).toHaveBeenCalledWith(session, 'tps', 'tp2', 3, 77, null, 'group')
+    expect(data.setSubmissionExemption).toHaveBeenCalledWith(session, 'tps', 'tp2', 3, 77, null, 'group', {
+      changeOnly: false,
+    })
+  })
+
+  it('only move the date of a running extension from "Cambiar fecha"', async () => {
+    await setSubmissionExemptionAction(
+      EMPTY,
+      form({ ...target, checkpoint_id: '3', exempt: '1', expires_at: '2026-12-01T23:59', mode: 'change' }),
+    )
+
+    expect(data.setSubmissionExemption).toHaveBeenCalledWith(
+      session,
+      'tps',
+      'tp2',
+      3,
+      77,
+      new Date('2026-12-02T02:59:00Z'),
+      'individual',
+      { changeOnly: true },
+    )
   })
 
   it('justify, and take back, a team\'s late entrega on the group path', async () => {

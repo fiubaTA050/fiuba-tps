@@ -125,9 +125,18 @@ del *cutoff* (el corte que le saca el permiso de push). Acá lo que corta es
   compara `expires_at` con el reloj (`activeExemption` en
   `lib/data/assignment-kind.ts`). La migración 0023 puso a las extensiones
   vigentes a vencer en el momento de aplicarse.
-- La fecha se elige en hora argentina, igual que la deadline, y tiene que ser
-  futura. Sobre una extensión vigente se puede mover; una vencida o revocada
-  se vuelve a extender desde cero, sobre la misma fila.
+- La fecha se elige en hora argentina, igual que la deadline, tiene que ser
+  futura y no puede pasar de **60 días** (`MAX_EXEMPTION_DAYS`): sin tope, un
+  año mal tipeado era otra vez la extensión sin fin.
+- "Cambiar fecha de la extensión" solo mueve `expires_at` y conserva quién la
+  otorgó y cuándo. Si mientras el docente tenía la pantalla abierta la
+  extensión venció o la revocaron, se rechaza en vez de otorgar una nueva,
+  que reabriría una entrega que el corrector quizás ya tomó. Una vencida o
+  revocada se vuelve a extender desde "Extender entrega", sobre la misma fila.
+- El lease vuelve a mirar el cierre y la extensión con la fila bloqueada,
+  justo antes de crear la corrida: las llamadas a GitHub del medio tardan
+  cientos de milisegundos, y extender o reabrir en ese intervalo tiene que
+  ganar.
 - El alumno ve hasta cuándo tiene: "El docente te extendió esta entrega hasta
   el …".
 - **Solo levanta el cierre de la entrega.** Si el assignment está Inactive o

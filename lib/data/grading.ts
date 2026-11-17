@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 
 import {
   checkpoints,
@@ -216,7 +216,33 @@ function isEligible(attempts: Attempt[]): boolean {
   return true
 }
 
+/**
+ * Everything `findOldestEligibleCandidate` checked, read again under the row
+ * lock: the GitHub calls in between take hundreds of milliseconds, and a
+ * teacher extending the entrega or reopening it in that window must win —
+ * a submission graded while the student can still replace it is never
+ * graded again, since `isEligible` skips one with a succeeded run.
+ */
 async function isStillEligible(tx: Transaction, submissionId: number): Promise<boolean> {
+  const [gate] = await tx
+    .select({ closedAt: checkpoints.closedAt, exemptionId: submissionExemptions.id })
+    .from(submissions)
+    .innerJoin(checkpoints, eq(checkpoints.id, submissions.checkpointId))
+    .leftJoin(
+      submissionExemptions,
+      and(
+        eq(submissionExemptions.checkpointId, submissions.checkpointId),
+        or(
+          eq(submissionExemptions.assignmentRepoId, submissions.assignmentRepoId),
+          eq(submissionExemptions.groupAssignmentRepoId, submissions.groupAssignmentRepoId),
+        ),
+        activeExemption(),
+      ),
+    )
+    .where(eq(submissions.id, submissionId))
+
+  if (!gate || gate.closedAt === null || gate.exemptionId !== null) return false
+
   const attempts = await tx
     .select({ status: gradingRuns.status, expiresAt: gradingRuns.expiresAt })
     .from(gradingRuns)
