@@ -50,9 +50,9 @@ vi.mock('@/lib/github/users', () => ({
   searchGitHubUsers: (...args: unknown[]) => searchGitHubUsers(...args),
 }))
 
-const { classroomCounters, findClassroomRole, findTeachingClassroom } = await import(
-  '@/lib/data/organizations'
-)
+const { classroomCounters, findClassroomRole, findTeachingClassroom, listClassrooms } =
+  await import('@/lib/data/organizations')
+const github = await import('@/lib/github/organizations')
 const {
   addTeachingAssistant,
   listAllocations,
@@ -175,6 +175,8 @@ beforeEach(async () => {
   nextUid = 1
   findGitHubUserByLogin.mockReset()
   searchGitHubUsers.mockReset().mockResolvedValue([])
+  vi.mocked(github.listUserOrganizations).mockReset()
+  vi.mocked(github.findOrganizationByInstallation).mockReset()
   profe = await user('profe')
   ta = await user('ayudante')
 })
@@ -600,6 +602,25 @@ describe('addTeachingAssistant', () => {
     })
   })
 
+  it('accepts a padrón linked in the roster of another classroom', async () => {
+    await classroom('sd-2026-1', profe)
+    const other = await classroom('sd-2025-2', profe)
+    const exAlumno = await user('ex-alumno')
+    const [roster] = await db
+      .insert(rosters)
+      .values({ identifierName: 'Padrón' })
+      .returning({ id: rosters.id })
+    await db.update(organizations).set({ rosterId: roster.id }).where(eq(organizations.id, other))
+    await db
+      .insert(rosterEntries)
+      .values({ rosterId: roster.id, identifier: '100000', userId: idOf(exAlumno) })
+    findGitHubUserByLogin.mockResolvedValue(githubAccount(exAlumno.user.uid, 'ex-alumno'))
+
+    expect(await addTeachingAssistant(profe, 'sd-2026-1', 'ex-alumno')).toMatchObject({
+      success: true,
+    })
+  })
+
   it('refuses on an archived classroom', async () => {
     const org = await classroom('sd-2026-1', profe)
     await db.update(organizations).set({ archivedAt: new Date() }).where(eq(organizations.id, org))
@@ -735,6 +756,31 @@ describe('the fixes of the review of the Docentes tab', () => {
     await acceptedWithoutRepo(await assignment(other, profe, 'tp0-viejo'), ta)
 
     expect(await findClassroomRole(ta, 'sd-2026-1')).toMatchObject({ role: 'assistant' })
+  })
+
+  // Found in production on 2026-11-25: every TA who had been a student of an
+  // earlier term got an empty index and a 404 on the classroom. The roster
+  // branch of isStudentOf joined `organizations` again inside its subquery,
+  // so a correlated `organizations.id` compared the inner row with itself and
+  // a padrón linked in *any* classroom counted as a student of this one.
+  it('keeps the TA role for a padrón of another classroom', async () => {
+    const org = await classroom('sd-2026-2', profe)
+    const other = await classroom('sd-2026-1', profe)
+    await assistant(org, ta, profe)
+    const [roster] = await db
+      .insert(rosters)
+      .values({ identifierName: 'Padrón' })
+      .returning({ id: rosters.id })
+    await db.update(organizations).set({ rosterId: roster.id }).where(eq(organizations.id, other))
+    await db
+      .insert(rosterEntries)
+      .values({ rosterId: roster.id, identifier: '100000', userId: idOf(ta) })
+
+    expect(await findClassroomRole(ta, 'sd-2026-2')).toMatchObject({ role: 'assistant' })
+
+    vi.mocked(github.listUserOrganizations).mockResolvedValue([])
+    vi.mocked(github.findOrganizationByInstallation).mockResolvedValue(null)
+    expect(await listClassrooms(ta)).toMatchObject([{ id: org, role: 'assistant' }])
   })
 
   it('answers a GitHub failure with a message instead of throwing', async () => {

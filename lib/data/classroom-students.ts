@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { type SQL, type SQLWrapper, and, eq, exists, isNull, or, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 
 import {
   assignmentInvitations,
@@ -38,13 +39,18 @@ export function isStudentOf(
   organizationId: number | SQLWrapper,
   userId: number | SQLWrapper,
 ): SQL<boolean> {
+  // Aliased: called with the column `organizations.id`, an unaliased join
+  // would shadow the outer row and turn the condition into `id = id`, so a
+  // padrón linked in any classroom counted as a student of every one
+  const rosterOwner = alias(organizations, 'roster_owner')
+
   return or(
     exists(
       db
         .select({ one: rosterEntries.id })
         .from(rosterEntries)
-        .innerJoin(organizations, eq(organizations.rosterId, rosterEntries.rosterId))
-        .where(and(eq(organizations.id, organizationId), eq(rosterEntries.userId, userId))),
+        .innerJoin(rosterOwner, eq(rosterOwner.rosterId, rosterEntries.rosterId))
+        .where(and(eq(rosterOwner.id, organizationId), eq(rosterEntries.userId, userId))),
     ),
     exists(
       db
